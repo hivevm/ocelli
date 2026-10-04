@@ -1,4 +1,4 @@
-# Conventions — <Project Name>
+# Conventions — Ocelli
 
 > How this project writes code and tests **where no check decides it**: the judgement calls. What
 > a module may know, what a test asserts and never does, the shape of an error, how a thing is

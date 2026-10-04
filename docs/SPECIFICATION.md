@@ -1,4 +1,4 @@
-# Specification — <Project Name>
+# Specification — Ocelli
 
 > The **specification** of this project: the problem it solves, where it is going, and what has to
 > be true for it to have succeeded, written in the vocabulary of [`GLOSSARY.md`](GLOSSARY.md). It
