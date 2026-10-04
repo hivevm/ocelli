@@ -9,6 +9,16 @@ use tauri::{AppHandle, Emitter, State, Window};
 /// Shared application state
 pub struct AppState {
     pub current_repo: Mutex<Option<PathBuf>>,
+    /// The repository named on the command line, handed to the web interface once.
+    pub startup_repo: Mutex<Option<String>>,
+}
+
+/// The repository named on the command line, if any, the first time it is asked for. The web
+/// interface asks once its listeners stand and opens it like any other path, so a load started
+/// at startup never emits into a window that is not listening yet.
+#[tauri::command]
+pub fn startup_repo(state: State<'_, AppState>) -> Option<String> {
+    state.startup_repo.lock().unwrap().take()
 }
 
 /// Loads a repository by path and emits graph data to the frontend.

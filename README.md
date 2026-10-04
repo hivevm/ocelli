@@ -93,7 +93,10 @@ Install the dependencies from the lockfile first, and again after a dependency c
 ## Usage
 
 Start the application (`bun run tauri dev`, or the binary produced by `bun run tauri build`) and
-open a repository — either via the folder picker in the toolbar or by passing a path.
+open a repository, either via the folder picker in the toolbar or by naming it on the command
+line: `ocelli /path/to/repository`, a relative path resolved against the current directory. In
+development, `bun run tauri dev -- -- /path/to/repository` passes it through; give an absolute path
+there, since the development build runs in `src-tauri/`.
 
 The graph loads in the background, with progress shown in the status bar — including a note when
 the commit limit truncated the history. Scroll through the history; branch and tag chips mark the
