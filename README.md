@@ -1,15 +1,15 @@
-# NUC — an Agentic, Specification-Oriented Starter Template
+# Ocelli — View and Edit Git Repositories
 
-[![Checks](https://github.com/hivevm/nuc/actions/workflows/checks.yml/badge.svg)](https://github.com/hivevm/nuc/actions/workflows/checks.yml)
-[![Release](https://img.shields.io/github/v/release/hivevm/nuc)](https://github.com/hivevm/nuc/releases/latest)
-[![License](https://img.shields.io/github/license/hivevm/nuc)](LICENSE)
+[![Checks](https://github.com/mbrigl/git-viewer/actions/workflows/checks.yml/badge.svg)](https://github.com/mbrigl/git-viewer/actions/workflows/checks.yml)
 
-**NUC** is named after the small *nucleus colony* a full hive grows from in beekeeping. It is a
-starting point for building software **with coding agents** inside a ready-to-use Dev Container.
-The work is driven by a written **specification**
-([`docs/SPECIFICATION.md`](docs/SPECIFICATION.md)) and **Architecture Decision Records**
-([`docs/adr/`](docs/adr/)), so intent and the reasoning behind every structural choice stay
-explicit and reviewable.
+**Ocelli** is named after the three simple eyes on top of a bee's head, with which it reads
+light and the horizon at a glance. Ocelli gives a Git repository the same: a commit graph that
+shows the whole history at a glance, from which the repository can be edited too. The name
+follows the beekeeping vocabulary of the HiveVM family.
+
+The work is driven by a written **specification** ([`docs/SPECIFICATION.md`](docs/SPECIFICATION.md))
+and **Architecture Decision Records** ([`docs/adr/`](docs/adr/)), so intent and the reasoning
+behind every structural choice stay explicit and reviewable.
 
 > For agent instructions, see [`AGENTS.md`](AGENTS.md), the single source of truth for all coding
 > agents.

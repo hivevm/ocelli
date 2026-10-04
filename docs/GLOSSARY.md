@@ -1,4 +1,4 @@
-# Glossary — <Project Name>
+# Glossary — Ocelli
 
 > The **vocabulary** of this project: the terms everyone, humans and agents alike, uses in code,
 > comments, documentation, and ADRs. It defines words and decides nothing. Whoever resolves a term
