@@ -1,0 +1,169 @@
+name: Checks
+
+# Enforces the repository's rules as CI. Pure bash + coreutils — nothing is installed
+# (ShellCheck, used by the shell job, ships preinstalled on the GitHub-hosted runner image).
+# scripts/check-all.sh is the local equivalent; check 9 of scripts/check-docs.sh holds its list,
+# the jobs of this workflow, and the required checks named in README.md together. Each job runs
+# a check after its own self-test, and each script's header says what it checks and which ADR it
+# holds.
+#
+# The sensors report for the reviewer and fail on nothing they count, except the action
+# references once a project runs that sensor with --require; their self-tests fail like any
+# check's. The sensors job checks out the full history because three sensors read it. The review
+# binding sensor runs in review-binding.yml, the repository settings sensor on a human's
+# instruction (ADR-0002); this workflow runs the self-test of each.
+#
+# A build, test, and lint job is absent until the project has a toolchain. The catalogue entry
+# Toolchain of the propose-adr skill says how the job is added; it is the one job of this workflow
+# that installs something, with a timeout that fits the real build and 'submodules: recursive' on
+# the checkout where the project uses submodules.
+#
+# Every job is bounded by a timeout — a hung step would otherwise occupy a runner until the
+# platform's own six-hour limit — and every checkout runs with 'persist-credentials: false': the
+# workflow token is needed to fetch the code, not afterwards, and leaving it in .git/config makes
+# it readable to every later step and to anything they invoke.
+
+on:
+  pull_request:
+    # ready_for_review runs check 16 of check-docs.sh again on a draft pull request marked ready.
+    types: [opened, synchronize, reopened, ready_for_review]
+  push:
+    branches: [main]
+  # Started by hand on a pushed branch that has no pull request yet, such as a feat/ branch
+  # under rework (AGENTS.md, section 6): gh workflow run checks.yml --ref <branch>. GitHub offers
+  # it only once this trigger is on the default branch.
+  workflow_dispatch:
+  # Once a week against main without a change: catches what moves without a commit, the runner
+  # image, a retagged action, a toolchain download. GitHub disables a schedule after 60 days
+  # without activity in a public repository.
+  schedule:
+    - cron: "17 5 * * 1"
+
+permissions:
+  contents: read
+
+# Cancel a pull request's superseded runs: a new push makes the previous run's verdict irrelevant,
+# while a queued run keeps a required check pending. Runs on 'main' are never cancelled — every
+# commit there keeps a result of its own, and the event name keeps a scheduled run out of the group
+# of the pushes.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  docs:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      # Submodules are checked out because the link check resolves relative targets against the
+      # working tree: a documentation link into a submodule would otherwise break in CI while
+      # working locally. Their *contents* are never read — check-docs.sh enumerates via
+      # `git ls-files`, which lists a submodule as one gitlink entry, not as its files.
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+          submodules: recursive
+      # The check's own tests run first: a check that is wrong passes nothing worth trusting.
+      - name: Self-test the documentation checks
+        run: bash scripts/test-check-docs.sh
+      # Check 16 reads the branch the change lands on from GitHub's own variables: a draft ADR
+      # fails on a pull request into main once it is ready for review, and on a push to main
+      # (ADR-0002). A draft pull request tests a feat/ branch still under rework, and passes.
+      - name: Check documentation consistency
+        run: bash scripts/check-docs.sh
+        env:
+          PULL_REQUEST_DRAFT: ${{ github.event.pull_request.draft }}
+      # The setup promises a green project once every step is done, and that check-docs.sh names
+      # every placeholder left behind; this holds only on the real scaffold, not on a fixture.
+      - name: Self-test the template setup against the scaffold
+        run: bash scripts/test-template-setup.sh
+      - name: Self-test the map script of the normalize skill
+        run: bash scripts/test-normalize-remap.sh
+      - name: Self-test the numbering script of the drafts
+        run: bash scripts/test-number-adrs.sh
+      - name: Self-test the readiness script of the pull request into main
+        run: bash scripts/test-ready-for-main.sh
+      - name: Self-test the drop script of a merged branch
+        run: bash scripts/test-drop-merged-branch.sh
+
+  traceability:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      # The check's own tests run first: a check that is wrong passes nothing worth trusting.
+      - name: Self-test the traceability check
+        run: bash scripts/test-check-traceability.sh
+      - name: Check that accepted decisions and criteria are verified by tests
+        run: bash scripts/check-traceability.sh
+
+  devcontainer:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      # The check's own tests run first: a check that is wrong passes nothing worth trusting.
+      - name: Self-test the Dev Container check
+        run: bash scripts/test-check-devcontainer.sh
+      - name: Check that the Dev Container keeps the host engine out of reach
+        run: bash scripts/check-devcontainer.sh
+
+  sensors:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      # The sensor's own tests run first: a sensor that is wrong reports nothing worth reading.
+      - name: Self-test the tests-kept sensor
+        run: bash scripts/test-sensor-tests-kept.sh
+      # The base is the pull request's base branch, or the previous tip on a push to main.
+      - name: Report test files deleted and skip markers added since the base
+        run: bash scripts/sensor-tests-kept.sh "$BASE"
+        env:
+          BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
+      - name: Self-test the binding ADRs sensor
+        run: bash scripts/test-sensor-binding-adrs.sh
+      - name: Report the ADRs in force whose Applies to names a path the change touches
+        run: bash scripts/sensor-binding-adrs.sh "$BASE"
+        env:
+          BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
+      - name: Self-test the revision-due sensor
+        run: bash scripts/test-sensor-revision-due.sh
+      - name: Report the changes since the last design revision
+        run: bash scripts/sensor-revision-due.sh
+      - name: Self-test the plan frontier sensor
+        run: bash scripts/test-sensor-plan-frontier.sh
+      - name: Report the tickets that may be claimed, the claimed, and the blocked
+        run: bash scripts/sensor-plan-frontier.sh
+      - name: Self-test the action references sensor
+        run: bash scripts/test-sensor-action-refs.sh
+      - name: Report the forms of the action references the workflows use
+        run: bash scripts/sensor-action-refs.sh
+      - name: Self-test the review binding sensor
+        run: bash scripts/test-sensor-review-binding.sh
+      # The repository settings sensor itself runs on a human's instruction (ADR-0002).
+      - name: Self-test the repository settings sensor
+        run: bash scripts/test-sensor-repo-settings.sh
+
+  shell:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - name: Self-test the check runner
+        run: bash scripts/test-check-all.sh
+      - name: Self-test the git hooks
+        run: bash scripts/test-git-hooks.sh
+      - name: Self-test the shell lint
+        run: bash scripts/test-check-shell.sh
+      - name: Lint shell scripts with ShellCheck
+        run: bash scripts/check-shell.sh
