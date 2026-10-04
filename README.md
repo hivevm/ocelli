@@ -181,6 +181,8 @@ docs/plan/            # open work: feature specs and their tickets, deleted as t
 crates/core/          # the core: commit graph, layout, and the repository port (ADR-0009)
 crates/git/           # the repository port implemented with git2 (ADR-0019)
 crates/tui/           # the terminal application, ocelli-cli (ADR-0028)
+crates/measure/       # ocelli-measure: measures the quality goals on real repositories (Q-1),
+                      # run weekly on a corpus by .github/workflows/measure.yml
 src-tauri/            # the desktop host (ADR-0018)
 src-web/              # the web interface the desktop host shows (ADR-0022)
 flatpak/              # the Flatpak manifest of the release pipeline (ADR-0025)
@@ -194,7 +196,7 @@ scripts/*.sh          # run by hand, steps 7 and 8 of the integration branches: 
                       # ready-for-main.sh, drop-merged-branch.sh
 .githooks/            # git hooks: nothing lands on main locally; checks before a merge and a push
 .github/workflows/    # checks.yml runs the checks; review-binding.yml reads each pull request's
-                      # hand-off; release.yml releases on a tag
+                      # hand-off; measure.yml measures weekly; release.yml releases on a tag
 .github/              # Dependabot, issue & pull request templates, code owners
 .devcontainer/        # Dev Container definition (Dockerfile + Features)
 .vscode/              # shared editor settings

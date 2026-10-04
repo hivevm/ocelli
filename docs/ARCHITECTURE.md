@@ -51,6 +51,11 @@ golden path and the test pattern an agent copies from are named here.
   characters on ratatui, reads through `GitReader` on worker threads, and keeps its view state in
   a file ([ADR-0028](adr/0028-terminal-application-ratatui.md),
   [ADR-0029](adr/0029-cli-state-file.md)).
+- **Measurement** (`crates/measure`, `ocelli-measure`) — a command that lays out a repository as
+  the front ends do and measures a quality goal on it: the number of edge crossings for Q-1, next
+  to those of `git log --graph` over the same commits. It drives the core through the git adapter
+  and runs the git binary, with the repository's configuration kept from choosing a program; it is
+  not shipped to developers, and Ocelli itself never runs git (Q-4).
 - **Desktop host** (`src-tauri`, `ocelli`) — the Tauri shell: commands that read through
   `GitReader` on the blocking pool and hand the graph to the web interface as JSON
   ([ADR-0018](adr/0018-tauri-desktop-host.md)).

@@ -1,0 +1,129 @@
+//! `ocelli-measure`: measures Ocelli's quality goals on a real repository (#11).
+//!
+//! `ocelli-measure crossings PATH` lays out the repository at `PATH` as every front end does, up to
+//! the commit limit (ADR-0016), hands git exactly the commits laid out, and prints the number of
+//! commits and the edge crossings in Ocelli's layout and in `git log --graph` over them (Q-1).
+//! The stash and working-directory nodes are left out, since git draws neither (ADR-0024).
+
+mod crossings;
+mod git_graph;
+
+use anyhow::{Context, Result, bail};
+use ocelli_core::graph::build_graph;
+use ocelli_core::model::{CommitData, CommitKind};
+use ocelli_core::port::RepositoryReader;
+use ocelli_git::GitReader;
+use std::collections::HashSet;
+use std::io::Write;
+use std::path::{Path, PathBuf};
+use std::process::{Command, Stdio};
+
+const USAGE: &str = "Usage: ocelli-measure crossings PATH";
+
+/// The measured numbers of one repository.
+struct Crossings {
+    commits: usize,
+    ocelli: usize,
+    git: usize,
+}
+
+fn main() -> Result<()> {
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    match args.as_slice() {
+        [command, path] if command == "crossings" => {
+            let measured = measure_crossings(&PathBuf::from(path))?;
+            println!("commits: {}", measured.commits);
+            println!("ocelli crossings: {}", measured.ocelli);
+            println!("git crossings: {}", measured.git);
+            Ok(())
+        }
+        _ => bail!("{USAGE}"),
+    }
+}
+
+fn measure_crossings(path: &Path) -> Result<Crossings> {
+    let commits: Vec<CommitData> = GitReader
+        .load_commits(path, &mut |_| {})
+        .with_context(|| format!("cannot read the repository at {}", path.display()))?
+        .into_iter()
+        .filter(|c| c.kind == CommitKind::Commit)
+        .collect();
+    let graph = build_graph(commits.clone());
+    let ascii = git_log_graph(path, &commits)?;
+    let rows: Vec<&str> = ascii.iter().map(|(graph, _)| graph.as_str()).collect();
+    let shown: HashSet<&str> = ascii.iter().filter_map(|(_, sha)| sha.as_deref()).collect();
+    let laid_out: HashSet<&str> = commits.iter().map(|c| c.sha.as_str()).collect();
+    if shown != laid_out {
+        bail!(
+            "git shows {} commits and Ocelli lays out {}; the comparison needs the same commits",
+            shown.len(),
+            laid_out.len()
+        );
+    }
+    Ok(Crossings {
+        commits: commits.len(),
+        ocelli: crossings::count(&graph),
+        git: git_graph::count(&rows)?,
+    })
+}
+
+/// The rows of `git log --graph` over exactly `commits`: each row's graph, and the SHA on the rows
+/// that carry a commit.
+///
+/// The commits Ocelli lays out are the newest of a topological walk, so every child of a commit in
+/// the set is in the set too: the set is what its heads reach, short of the ancestors of the
+/// parents left outside. git is given exactly those heads and that boundary.
+fn git_log_graph(path: &Path, commits: &[CommitData]) -> Result<Vec<(String, Option<String>)>> {
+    let inside: HashSet<&str> = commits.iter().map(|c| c.sha.as_str()).collect();
+    let parents: HashSet<&str> = commits
+        .iter()
+        .flat_map(|c| c.parent_shas.iter().map(String::as_str))
+        .collect();
+    let mut input = String::new();
+    for head in commits.iter().filter(|c| !parents.contains(c.sha.as_str())) {
+        input.push_str(&head.sha);
+        input.push('\n');
+    }
+    input.push_str("--not\n");
+    for outside in parents.iter().filter(|p| !inside.contains(*p)) {
+        input.push_str(outside);
+        input.push('\n');
+    }
+
+    // The repository's own configuration must not choose what git runs: no signature check, which
+    // would start the configured signing program, no colour, and no system or global config.
+    let mut git = Command::new("git")
+        .env("GIT_CONFIG_NOSYSTEM", "1")
+        .env(
+            "GIT_CONFIG_GLOBAL",
+            if cfg!(windows) { "NUL" } else { "/dev/null" },
+        )
+        .arg("-C")
+        .arg(path)
+        .args(["-c", "log.showSignature=false", "-c", "color.ui=never"])
+        .args(["log", "--graph", "--no-show-signature", "--no-color"])
+        .args(["--format=%x00%H", "--stdin"])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .context("cannot start git")?;
+    git.stdin
+        .take()
+        .context("git's input is not open")?
+        .write_all(input.as_bytes())?;
+    let output = git.wait_with_output()?;
+    if !output.status.success() {
+        bail!(
+            "git log failed: {}",
+            String::from_utf8_lossy(&output.stderr).trim()
+        );
+    }
+    Ok(String::from_utf8(output.stdout)?
+        .lines()
+        .map(|line| match line.split_once('\0') {
+            Some((graph, sha)) => (graph.trim_end().to_string(), Some(sha.to_string())),
+            None => (line.trim_end().to_string(), None),
+        })
+        .collect())
+}

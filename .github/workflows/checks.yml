@@ -15,9 +15,10 @@ name: Checks
 #
 # The build, test, and lint job runs scripts/check-devcontainer-toolchain.sh (ADR-0011), the Dev
 # Container's share of the toolchain, then scripts/check-build.sh (ADR-0008), on Linux, macOS, and
-# Windows, so that code gated to one platform is compiled where it runs. It is the one job of this
-# workflow that installs something: the desktop host's Linux libraries, the pinned Rust toolchain,
-# and Bun.
+# Windows, so that code gated to one platform is compiled where it runs; then, on Linux, the
+# self-test of scripts/measure-crossings.sh, which the Measure workflow runs weekly. It is the one
+# job of this workflow that installs something: the desktop host's Linux libraries, the pinned Rust
+# toolchain, and Bun.
 #
 # Every action is pinned to a full commit SHA with its version as a comment, and Dependabot keeps
 # the pins current (ADR-0013).
@@ -205,3 +206,7 @@ jobs:
         run: bash scripts/check-devcontainer-toolchain.sh
       - name: Build, test, and lint
         run: bash scripts/check-build.sh
+      # The weekly measurement's script, tried on two small repositories (feature spec #11).
+      - name: Self-test the measurement of edge crossings
+        if: runner.os == 'Linux'
+        run: bash scripts/test-measure-crossings.sh

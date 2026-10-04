@@ -18,6 +18,11 @@ to invent.
 - **Edge** — the line joining a commit to one of its children in the commit graph; a branch edge
   or a merge edge.
   _Avoid:_ link, connector.
+- **Edge crossing** — a point where the horizontal segment of one edge and the vertical segment of
+  another meet strictly inside both. Edges that leave a commit together or meet at one do not
+  cross; a point counts once however many edges pass it, and two edges that cross at two points
+  count twice. The count Q-1 compares.
+  _Avoid:_ intersection, overlap.
 - **Front end** — one of the three ways a developer uses Ocelli: the desktop application, the web
   interface, and the terminal application.
   _Avoid:_ client, UI, frontend.

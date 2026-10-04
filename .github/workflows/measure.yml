@@ -1,0 +1,33 @@
+name: Measure
+
+# Measures the quality goals the checks cannot hold on every push, because they download and
+# measure for minutes (ADR-0008): Q-1, the edge crossings in Ocelli's layout against
+# `git log --graph` on the corpus of feature spec #11, by scripts/measure-crossings.sh. While Q-1 is
+# missed the run only reports, as decided in #14, and fails only when a repository cannot be
+# fetched or measured. Weekly, and on demand from the Actions tab.
+
+on:
+  schedule:
+    - cron: "41 4 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}
+  cancel-in-progress: false
+
+jobs:
+  crossings:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      # rust-toolchain.toml pins the version and the components; rustup materialises it.
+      - name: Set up the pinned Rust toolchain
+        run: rustup show active-toolchain
+      - name: Measure edge crossings on the corpus
+        run: bash scripts/measure-crossings.sh
