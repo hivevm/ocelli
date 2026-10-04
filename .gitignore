@@ -1,0 +1,18 @@
+# Dev Container: .devcontainer/devcontainer-lock.json is deliberately NOT ignored — the resolved
+# Feature versions and digests are tracked, so the same commit yields the same environment until
+# the lock is refreshed on purpose (ADR-0004).
+
+# Environment files — never tracked, in any directory (they may hold secrets);
+# a secrets-free .env.example stays tracked
+.env*
+!.env.example
+
+# OS / editor
+.DS_Store
+Thumbs.db
+
+# Per-user agent settings
+.claude/settings.local.json
+
+# Session artifacts — plans, handoff notes, scratch files (AGENTS.md, section 4)
+.scratch/
