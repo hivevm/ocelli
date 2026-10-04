@@ -1,0 +1,13 @@
+{
+  // Language-agnostic recommendations. Add stack-specific extensions
+  // (linters, formatters, language servers) per project as needed.
+  "recommendations": [
+    "vadimcn.vscode-lldb",
+    "rust-lang.rust-analyzer",
+    "tauri-apps.tauri-vscode",
+    "svelte.svelte-vscode",
+    "oven.bun-vscode"
+  ],
+  "unwantedRecommendations": [
+  ]
+}

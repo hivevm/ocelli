@@ -1,0 +1,21 @@
+[package]
+name = "ocelli-cli"
+description = "The terminal front end of Ocelli (ADR-0028)"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+
+[[bin]]
+name = "ocelli-cli"
+path = "src/main.rs"
+
+[dependencies]
+ocelli-core = { workspace = true }
+ocelli-git = { workspace = true }
+anyhow = "1"
+# ratatui re-exports the crossterm 0.29 backend as `ratatui::crossterm`; using the
+# re-export keeps the two versions from drifting apart.
+ratatui = "0.30"
+# The view state file (ADR-0029); both are already locked for the workspace.
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"

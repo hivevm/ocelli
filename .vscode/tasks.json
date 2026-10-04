@@ -1,0 +1,58 @@
+{
+  // See https://go.microsoft.com/fwlink/?LinkId=733558
+  // for the documentation about the tasks.json format
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "ui:dev",
+      "type": "shell",
+      "isBackground": true,
+      "problemMatcher": {
+        "owner": "custom",
+        "pattern": {
+          "regexp": "(?!)"
+        },
+        "background": {
+          "activeOnStart": true,
+          "beginsPattern": "^.*",
+          "endsPattern": "^.*(compiled successfully|ready|started).*$"
+        }
+      },
+      "command": "bun",
+      "args": [
+        "run",
+        "--cwd",
+        "src-web",
+        "dev"
+      ]
+    },
+    {
+      "label": "ui:build",
+      "type": "shell",
+      "command": "bun",
+      "args": [
+        "run",
+        "build"
+      ]
+    },
+    {
+      "label": "cli:run",
+      "detail": "Start ocelli-cli on this repository in a terminal panel",
+      "type": "process",
+      "command": "cargo",
+      "args": [
+        "run",
+        "--package",
+        "ocelli-cli",
+        "--",
+        "${workspaceFolder}"
+      ],
+      "problemMatcher": ["$rustc"],
+      "presentation": {
+        "reveal": "always",
+        "focus": true,
+        "panel": "dedicated"
+      }
+    }
+  ]
+}

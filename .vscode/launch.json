@@ -1,0 +1,75 @@
+{
+    // Use IntelliSense to learn about possible attributes.
+    // Hover to view descriptions of existing attributes.
+    // For more information, visit: https://go.microsoft.com/fwlink/?linkid=830387
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "type": "lldb",
+            "request": "launch",
+            "name": "Tauri Development Debug",
+            "cargo": {
+                "args": [
+                    "build",
+                    "--manifest-path=./src-tauri/Cargo.toml",
+                    "--no-default-features"
+                ]
+            },
+            // task for the `beforeDevCommand` if used, must be configured in `.vscode/tasks.json`
+            "preLaunchTask": "ui:dev"
+        },
+        {
+            "type": "lldb",
+            "request": "launch",
+            "name": "Tauri Production Debug",
+            "cargo": {
+                "args": [
+                    "build",
+                    "--release",
+                    "--manifest-path=./src-tauri/Cargo.toml"
+                ]
+            },
+            // task for the `beforeBuildCommand` if used, must be configured in `.vscode/tasks.json`
+            "preLaunchTask": "ui:build"
+        },
+        {
+            "type": "lldb",
+            "request": "launch",
+            "name": "CLI Debug (this repository)",
+            "cargo": {
+                "args": [
+                    "build",
+                    "--package=ocelli-cli",
+                    "--bin=ocelli-cli"
+                ],
+                "filter": { "name": "ocelli-cli", "kind": "bin" }
+            },
+            "args": ["${workspaceFolder}"],
+            // A TUI needs a real terminal; the debug console cannot take key presses.
+            "terminal": "integrated"
+        },
+        {
+            "type": "lldb",
+            "request": "launch",
+            "name": "CLI Debug (choose repository)",
+            "cargo": {
+                "args": [
+                    "build",
+                    "--package=ocelli-cli",
+                    "--bin=ocelli-cli"
+                ],
+                "filter": { "name": "ocelli-cli", "kind": "bin" }
+            },
+            "args": ["${input:repoPath}"],
+            "terminal": "integrated"
+        }
+    ],
+    "inputs": [
+        {
+            "id": "repoPath",
+            "type": "promptString",
+            "description": "Path of the git repository to open",
+            "default": "${workspaceFolder}"
+        }
+    ]
+}

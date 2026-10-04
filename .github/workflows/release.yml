@@ -1,0 +1,217 @@
+# Release pipeline (ADR-0025): pushing a v* tag builds every installer and
+# attaches them to a DRAFT GitHub release — publishing stays a human act.
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  # Manual runs rebuild the draft for the version currently in Cargo.toml,
+  # without a tag — useful to re-run a leg that failed.
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  # ── The version and the single draft everything else uploads into ─────────
+  # The workspace Cargo.toml is the single source of truth (src-tauri inherits
+  # it via version.workspace, tauri.conf.json carries no version of its own).
+  # On a tag push the tag must agree with it — CONTRIBUTING step 1 bumps the
+  # version, step 4 tags — otherwise a stale Cargo.toml would quietly produce a
+  # draft under the previous version's tag.
+  version:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.resolve.outputs.version }}
+      tag: ${{ steps.resolve.outputs.tag }}
+      release-id: ${{ steps.draft.outputs.release-id }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Resolve the version and check it against the tag
+        id: resolve
+        run: |
+          version="$(sed -n 's/^version = "\([^"]*\)".*/\1/p' Cargo.toml | head -n1)"
+          if [ -z "$version" ]; then
+            echo "::error::no version found in the workspace Cargo.toml"
+            exit 1
+          fi
+          if [ "$GITHUB_REF_TYPE" = tag ] && [ "$GITHUB_REF_NAME" != "v$version" ]; then
+            echo "::error::tag $GITHUB_REF_NAME does not match Cargo.toml version $version — bump the version before tagging (CONTRIBUTING → Releases, step 1)"
+            exit 1
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "tag=v$version" >> "$GITHUB_OUTPUT"
+
+      # The four installer legs run in parallel. If each of them created the
+      # release itself, all four would look for the draft at the same moment,
+      # none would find it, and all four would create one — GitHub does not
+      # enforce tag uniqueness for drafts, so the result is duplicate drafts
+      # each holding a subset of the installers. Creating it once here and
+      # handing the id down makes the legs pure uploaders.
+      - name: Create or reuse the draft release
+        id: draft
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ steps.resolve.outputs.tag }}
+        run: |
+          # A draft has no Git tag yet, so it is not addressable via the
+          # by-tag endpoint — it can only be found by listing releases.
+          id="$(gh api --paginate "repos/$GITHUB_REPOSITORY/releases?per_page=100" \
+                  --jq '.[] | select(.draft) | "\(.tag_name)\t\(.id)"' \
+                | awk -F'\t' -v t="$TAG" '$1 == t { print $2; exit }')"
+          if [ -n "$id" ]; then
+            echo "Reusing draft release $id for $TAG."
+          else
+            # target_commitish only matters while the tag does not exist yet
+            # (workflow_dispatch); on a tag push GitHub keeps the pushed tag.
+            id="$(gh api --method POST "repos/$GITHUB_REPOSITORY/releases" \
+                    -f tag_name="$TAG" \
+                    -f name="Ocelli $TAG" \
+                    -f body='See CHANGELOG.md for what changed.' \
+                    -f target_commitish="$GITHUB_SHA" \
+                    -F draft=true -F prerelease=false \
+                    --jq '.id')"
+            echo "Created draft release $id for $TAG."
+          fi
+          if [ -z "$id" ]; then
+            echo "::error::could not create or find a draft release for $TAG"
+            exit 1
+          fi
+          echo "release-id=$id" >> "$GITHUB_OUTPUT"
+
+  # ── Platform installers: dmg (arm64 + x86_64), msi + NSIS exe, deb/rpm/AppImage ──
+  installers:
+    needs: version
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: macos-latest
+            target: aarch64-apple-darwin
+            args: --target aarch64-apple-darwin
+          - platform: macos-latest
+            target: x86_64-apple-darwin
+            args: --target x86_64-apple-darwin
+          - platform: ubuntu-22.04
+            target: ''
+            args: ''
+          - platform: windows-latest
+            target: ''
+            args: ''
+    runs-on: ${{ matrix.platform }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+
+      - name: Install Linux system dependencies
+        if: matrix.platform == 'ubuntu-22.04'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev build-essential curl wget file \
+            libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev
+
+      # rust-toolchain.toml pins the toolchain; macOS legs additionally need
+      # the cross-compilation target for the architecture they build.
+      - name: Add macOS target
+        if: matrix.target != ''
+        run: rustup target add ${{ matrix.target }}
+
+      - name: Install frontend dependencies
+        run: bun install --frozen-lockfile
+
+      # releaseId — not tagName — so this leg only uploads into the draft the
+      # version job already created, and never races the other three into
+      # creating one of its own.
+      - name: Build installers and upload them to the draft release
+        uses: tauri-apps/tauri-action@1deb371b0cd8bd54025b384f1cd735e725c4060f # v1.0.0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          releaseId: ${{ needs.version.outputs.release-id }}
+          args: ${{ matrix.args }}
+
+      # The Flatpak job repacks this .deb (see flatpak/org.hivevm.ocelli.yml).
+      - name: Hand the .deb to the Flatpak job
+        if: matrix.platform == 'ubuntu-22.04'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: deb
+          path: target/release/bundle/deb/*.deb
+          if-no-files-found: error
+
+  # ── One distro-agnostic Flatpak bundle from the .deb ──────────────────────
+  flatpak:
+    needs: installers
+    runs-on: ubuntu-latest
+    container:
+      image: ghcr.io/flathub-infra/flatpak-github-actions:gnome-46
+      options: --privileged
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: deb
+          path: flatpak
+
+      - name: Stage the .deb under the manifest's fixed name
+        run: mv flatpak/*.deb flatpak/ocelli.deb
+
+      - name: Build the Flatpak bundle
+        uses: flatpak/flatpak-github-actions/flatpak-builder@79327416609af08178ad73b352877e51450790b3 # v6.8
+        with:
+          bundle: Ocelli.flatpak
+          manifest-path: flatpak/org.hivevm.ocelli.yml
+          upload-artifact: false
+
+      - name: Hand the bundle to the publish job
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: flatpak-bundle
+          path: Ocelli.flatpak
+          if-no-files-found: error
+
+  # gh is preinstalled on the plain runner but not in the Flatpak container,
+  # so attaching the bundle to the draft release is its own small job.
+  attach-flatpak:
+    needs: [version, flatpak]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: flatpak-bundle
+
+      # Addressed by release id, like the installer legs: a tag is ambiguous
+      # while more than one draft carries it, and on workflow_dispatch the tag
+      # does not exist at all until the draft is published.
+      - name: Upload the versioned bundle to the draft release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_ID: ${{ needs.version.outputs.release-id }}
+          VERSION: ${{ needs.version.outputs.version }}
+        run: |
+          name="Ocelli_${VERSION}_x86_64.flatpak"
+          mv Ocelli.flatpak "$name"
+
+          # The asset API has no equivalent of `gh release upload --clobber`
+          # and rejects a duplicate name, so a re-run drops the old asset first.
+          old="$(gh api "repos/$GITHUB_REPOSITORY/releases/$RELEASE_ID/assets?per_page=100" \
+                   --jq '.[] | "\(.name)\t\(.id)"' \
+                 | awk -F'\t' -v n="$name" '$1 == n { print $2; exit }')"
+          if [ -n "$old" ]; then
+            gh api --method DELETE "repos/$GITHUB_REPOSITORY/releases/assets/$old"
+          fi
+
+          gh api --method POST \
+            -H 'Content-Type: application/octet-stream' \
+            "https://uploads.github.com/repos/$GITHUB_REPOSITORY/releases/$RELEASE_ID/assets?name=$name" \
+            --input "$name" >/dev/null
