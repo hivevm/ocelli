@@ -7,20 +7,44 @@
 
 ## Problem
 
-What is painful or missing today, for whom, and what evidence says it is worth solving now: the
-discovery everything below rests on.
+Developers who work with Git need to see the shape of a repository's history: how branches
+diverge, where they merge, and which commits a branch carries. Of the tools available today, only
+GitKraken draws the commit graph well enough to read that shape at a glance. GitKraken is not an
+option for a broad audience: it is paid software, and it is built on Electron, which costs a
+desktop application far more memory and CPU than the task needs. Every other tool, the `git log
+--graph` of the shell included, draws a graph that becomes unreadable once a history has more than
+a few parallel branches. And no tool offers the same view in the three places developers work: on
+the desktop, in a browser against a remote machine, and in a terminal.
+
+It is worth solving now because there is a concrete idea for a layout that draws the whole commit
+graph, every branch included, as readably as GitKraken does: each branch in a lane of its own, the
+main branch as a straight line on the left, and few crossing edges.
 
 ## Mission
 
-The core purpose of this project, in one sentence.
+Give every developer a free, lightweight way to view and edit a Git repository through a
+readable commit graph, on the desktop, in the browser, and in the terminal.
 
 ## Vision
 
-The desired future state, in a paragraph or two.
+A developer opens any repository, from a small project to one with a million commits, and reads
+its whole history at a glance: every branch in its own lane, the main branch on the left, and the
+places where work diverged and merged plain to see. From that commit graph they do their daily
+Git work, and rework history where they need to, without switching to the shell.
+
+The same Ocelli runs where the developer is: as a desktop application, as a web interface to a
+repository on a remote machine, and as a terminal application in a shell. It is free to use, and
+it starts and runs on a fraction of the resources an Electron application takes.
 
 ## Strategy
 
-The high-level approach to get there.
+Lead with the commit graph. Ocelli starts from GitGraph, the read-only viewer this repository
+built before: its layout, its look, and its behaviour carry over unchanged onto Ocelli's
+architecture first, because the layout is what no free tool offers and GitGraph has proven it.
+Editing, the remote server, and histories beyond GitGraph's commit limit follow once the viewer
+stands on the new architecture.
+Every front end offers the same commit graph and the same operations, so that a developer who
+learns Ocelli in one place knows it in the others.
 
 ## Goals / Success Criteria
 
@@ -30,8 +54,42 @@ that test exists the criterion is pending work, and the traceability check lists
 ([ADR-0002](adr/0002-decisions-verified-by-tests.md)). Identifiers are never reused.
 Only a normalization renumbers them ([`AGENTS.md` §3](../AGENTS.md#3-adr-rules), rule 5).
 
-1. **G-1** — …
-2. **G-2** — …
+1. **G-1** — When a repository is opened, the system shall show its commit graph with every
+   branch and tag.
+2. **G-2** — When the commit graph is drawn, the system shall keep each branch in one lane over the
+   whole length it is shown.
+3. **G-3** — When the commit graph is drawn, the system shall draw the main branch as a straight
+   line in the leftmost lane.
+4. **G-4** — The system shall let the developer stage changes, commit, create and switch branches,
+   and fetch, pull, and push.
+5. **G-5** — The system shall let the developer merge, rebase, cherry-pick, revert, and reset from
+   the commit graph.
+6. **G-6** — When a merge, rebase, or cherry-pick stops on a conflict, the system shall let the
+   developer resolve it.
+7. **G-7** — The system shall let the developer create, apply, and drop stashes, and create and
+   delete tags.
+8. **G-8** — The system shall offer G-1 to G-7 and G-9 to G-17 in each front end: the desktop
+   application, the web interface, and the terminal application.
+9. **G-9** — When the commit graph is drawn, the system shall draw an edge between lanes as an
+   orthogonal L-shape whose bend follows its type, a branch edge bending at its parent's row and a
+   merge edge at its child's row, and shall route no edge through a commit it does not join.
+10. **G-10** — When the commit graph is drawn, the system shall place every commit above its
+    parents and order commits by committer date where the topology leaves the order open, newest
+    at the top.
+11. **G-11** — When the commit graph is drawn, the system shall show each local branch, remote
+    branch, and tag as a ref chip on the commit it points at.
+12. **G-12** — When the developer selects a commit, the system shall show its SHA, message,
+    author, date, parents, children, and changed files, and the diff of a changed file on request.
+13. **G-13** — While a repository loads, the system shall keep responding to input and report the
+    progress of the load.
+14. **G-14** — When the commit graph is drawn, the system shall draw only the rows in view and the
+    edges that cross them.
+15. **G-15** — When the same repository state is opened twice, the system shall assign the same
+    rows, lanes, and edges both times, the working-directory node's row excepted.
+16. **G-16** — When the developer searches, the system shall find every commit whose message,
+    author, committer, SHA, or refs contain the search text, ignoring case, in row order.
+17. **G-17** — When the developer selects a commit, the system shall set apart its lineage, the
+    commits it descends from and those that descend from it, from every other commit.
 
 ## Quality Goals
 
@@ -40,15 +98,34 @@ against them. Each has a measure concrete enough to settle a disagreement and st
 `Q-n`, cited like a goal. Security goals, what the system must never do, belong here, derived
 from the threats below.
 
-- **Q-1** — <Quality, e.g. Performance>: why it matters, and how it is measured (e.g. "p95 response
-  under 200 ms at 100 requests per second").
-- **Q-2** — <Quality, e.g. Security, Availability, Portability, Accessibility>: …
+- **Q-1** — Readability: the commit graph is what Ocelli exists for. Measured on a fixed corpus
+  of public repositories: the layout draws fewer edge crossings than `git log --graph --all`
+  on each of them.
+- **Q-2** — Performance: a repository of one million commits stays usable. Measured on such a
+  repository: the first screen of the commit graph appears within 2 s of opening it, and
+  scrolling never waits more than 100 ms for the next screen.
+- **Q-3** — Resource footprint: being lighter than an Electron application is half of the
+  problem. Measured on a repository of 100 000 commits: the desktop application uses less than
+  200 MB of memory once the commit graph is shown.
+- **Q-4** — Security: opening a repository must not run code the repository brings. Measured on
+  a repository whose configuration names programs (such as `core.fsmonitor`) and whose hooks are
+  set: showing its commit graph starts none of them.
+- **Q-5** — Security: the remote server hands control of a machine to whoever reaches it.
+  Measured against a running remote server: every request without valid authentication is
+  refused, and the server accepts none from a web page of another origin.
+- **Q-6** — Safety: an operation that discards work cannot happen by accident. Measured for each
+  such operation (a hard reset, a force push, dropping a stash, deleting a branch that is not
+  merged): it runs only after the developer confirms it.
 
 ## Non-Goals
 
 What this project explicitly does not try to do.
 
-- …
+- Hosting: no pull requests, issues, or code review. Ocelli works on the repository only.
+- An editor or IDE: Ocelli shows diffs and does not edit files, except to resolve a conflict.
+- Its own Git: no storage format and no extension of its own. Every repository Ocelli touches
+  stays fully usable with the standard `git`.
+- A shared server: the remote server serves one developer, not a team.
 
 ## Constraints
 
@@ -56,7 +133,13 @@ What the solution has to live with regardless of the better choice: platforms, s
 systems to interoperate with, limits of time, budget, and team. A constraint not written here is
 rediscovered as a rejected alternative in an ADR.
 
-- …
+- Every front end runs on Linux, macOS, and Windows.
+- Ocelli is free and released under the MIT License.
+- The web interface works like VS Code's remote development: a remote server that is part of
+  the environment runs next to the repository, and the browser talks to it.
+- Ocelli authenticates against remote repositories through the developer's existing Git setup,
+  the SSH agent and Git's credential helpers, and keeps no credentials of its own.
+- One maintainer.
 
 ## Threats & Forbidden Actions
 
@@ -64,9 +147,21 @@ The assets, the actors who threaten them, and the trust boundaries between the p
 the system must never do, regardless of what a task asks. A prohibition not written here does not
 exist for an agent. One a test can decide is restated as a `Q-n`, so that it is verified.
 
-- **Assets:** …
-- **Actors and trust boundaries:** …
-- The system shall never …
+- **Assets:** the repositories and their unpublished work, the developer's credentials for remote
+  repositories (SSH keys, credential helpers), and the machine the remote server runs on.
+- **Actors and trust boundaries:**
+  - the developer, the one trusted actor;
+  - a repository's content, untrusted: a cloned repository may carry configuration and hooks
+    written by anyone;
+  - remote repositories and the network to them, untrusted;
+  - anyone who can reach the remote server over the network, and any web page open in the
+    developer's browser, untrusted: the boundary runs between the browser and the remote server;
+  - other users of the machine the remote server runs on, untrusted.
+- The system shall never run a program a repository names while only showing it (Q-4).
+- The system shall never act on a request to the remote server that is not authenticated (Q-5).
+- The system shall never discard work without the developer's confirmation (Q-6).
+- The system shall never store, log, or send a credential anywhere but to the remote repository
+  it belongs to.
 
 ## Assumptions
 
@@ -74,4 +169,10 @@ What is believed true today and would invalidate the decisions above if it turne
 expected scale, the shape of the data, who operates the result, which dependency stays
 maintained.
 
-- …
+- Repositories reach up to one million commits and a few thousand branches and tags.
+- The developer has Git installed and configured, credentials included, on every machine
+  Ocelli works on.
+- The developer may start a long-running process under their own account on a remote machine,
+  as VS Code's remote development does.
+- Terminals Ocelli runs in show Unicode line drawing and 256 colours.
+- Browsers are current versions of Chrome, Firefox, Safari, and Edge.
