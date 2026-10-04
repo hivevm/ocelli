@@ -175,6 +175,8 @@ docs/adr/             # Architecture Decision Records (+ template)
 crates/core/          # the core: commit graph, layout, and the repository port (ADR-0009)
 crates/git/           # the repository port implemented with git2 (ADR-0019)
 crates/tui/           # the terminal application, ocelli-cli (ADR-0028)
+crates/measure/       # ocelli-measure: measures the quality goals on real repositories (Q-1),
+                      # run weekly on a corpus by .github/workflows/measure.yml
 src-tauri/            # the desktop host (ADR-0018)
 src-web/              # the web interface the desktop host shows (ADR-0022)
 flatpak/              # the Flatpak manifest of the release pipeline (ADR-0025)

@@ -1,0 +1,15 @@
+[package]
+name = "ocelli-measure"
+description = "Measures Ocelli's quality goals on real repositories (Q-1)"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+
+[[bin]]
+name = "ocelli-measure"
+path = "src/main.rs"
+
+[dependencies]
+ocelli-core = { workspace = true }
+ocelli-git = { workspace = true }
+anyhow = "1"
