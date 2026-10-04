@@ -8,13 +8,13 @@
 ## Problem
 
 Developers who work with Git need to see the shape of a repository's history: how branches
-diverge, where they merge, and which commits a branch carries. Of the tools available today, only
-GitKraken draws the commit graph well enough to read that shape at a glance. GitKraken is not an
-option for a broad audience: it is paid software, and it is built on Electron, which costs a
-desktop application far more memory and CPU than the task needs. Every other tool, the `git log
---graph` of the shell included, draws a graph that becomes unreadable once a history has more than
-a few parallel branches. And no tool offers the same view in the three places developers work: on
-the desktop, in a browser against a remote machine, and in a terminal.
+diverge, where they merge, and which commits a branch carries. Of the tools in wide use, GitKraken
+draws the commit graph well enough to read that shape at a glance. GitKraken is not an option for
+a broad audience: it is paid software, and it is built on Electron, which costs a desktop
+application far more memory and CPU than the task needs. The free tools in wide use, the `git log
+--graph` of the shell included, draw a graph that becomes hard to read once a history has more
+than a few parallel branches. And no tool in wide use offers the same view in the three places
+developers work: on the desktop, in a browser against a remote machine, and in a terminal.
 
 It is worth solving now because there is a concrete idea for a layout that draws the whole commit
 graph, every branch included, as readably as GitKraken does: each branch in a lane of its own, the

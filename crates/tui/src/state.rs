@@ -95,6 +95,9 @@ mod tests {
     }
 
     #[test]
+    // The expected paths are absolute only by Unix rules, which `Path::is_absolute` applies on
+    // the machine running the test; the Windows layout has its own test below.
+    #[cfg(unix)]
     fn xdg_state_home_wins_and_falls_back_to_local_state() {
         assert_eq!(
             path_from("linux", env(&[("XDG_STATE_HOME", "/s"), ("HOME", "/h")])),
@@ -114,6 +117,9 @@ mod tests {
     }
 
     #[test]
+    // The expected paths are absolute only by Unix rules, which `Path::is_absolute` applies on
+    // the machine running the test; the Windows layout has its own test below.
+    #[cfg(unix)]
     fn macos_uses_application_support() {
         assert_eq!(
             path_from(

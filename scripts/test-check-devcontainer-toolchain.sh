@@ -48,6 +48,11 @@ DOCKER
   echo "$dir"
 }
 
+# edit <file> <sed script> — edit a fixture file in place, the same way on GNU and BSD sed.
+edit() {
+  sed "$2" "$1" > "$1.tmp" && mv "$1.tmp" "$1"
+}
+
 expect() {
   local want="$1" name="$2" dir="$3" needle="${4:-}"
   local out rc
@@ -66,29 +71,36 @@ d="$(fixture baseline)"
 expect pass "the Dockerfile, WebKitGTK, both Features, and a pinned channel pass" "$d"
 
 d="$(fixture image)"
-sed -i 's|"build": {|"image": "mcr.microsoft.com/devcontainers/base:debian",\n  "x": {|' \
-  "$d/.devcontainer/devcontainer.json"
-sed -i 's|"dockerfile": "Dockerfile"|"y": "z"|' "$d/.devcontainer/devcontainer.json"
+cat > "$d/.devcontainer/devcontainer.json" <<'JSON'
+{
+  "name": "fixture",
+  "image": "mcr.microsoft.com/devcontainers/base:debian",
+  "features": {
+    "ghcr.io/devcontainers/features/rust:1": {},
+    "ghcr.io/devcontainers-extra/features/bun:1": { "version": "1.4.1" }
+  }
+}
+JSON
 expect fail "an image instead of the Dockerfile" "$d" "does not build from the Dockerfile"
 
 d="$(fixture commented-dockerfile)"
-sed -i 's|    "dockerfile": "Dockerfile"|    // "dockerfile": "Dockerfile"|' "$d/.devcontainer/devcontainer.json"
+edit "$d/.devcontainer/devcontainer.json" 's|    "dockerfile": "Dockerfile"|    // "dockerfile": "Dockerfile"|'
 expect fail "a Dockerfile named only in a comment" "$d" "does not build from the Dockerfile"
 
 d="$(fixture no-rust)"
-sed -i '/features\/rust:1/d' "$d/.devcontainer/devcontainer.json"
+edit "$d/.devcontainer/devcontainer.json" '/features\/rust:1/d'
 expect fail "the Rust Feature missing" "$d" "lacks the Rust Feature"
 
 d="$(fixture no-bun)"
-sed -i '/features\/bun:1/d' "$d/.devcontainer/devcontainer.json"
+edit "$d/.devcontainer/devcontainer.json" '/features\/bun:1/d'
 expect fail "the Bun Feature missing" "$d" "lacks the Bun Feature"
 
 d="$(fixture other-base)"
-sed -i 's|^FROM .*|FROM ubuntu:24.04|' "$d/.devcontainer/Dockerfile"
+edit "$d/.devcontainer/Dockerfile" 's|^FROM .*|FROM ubuntu:24.04|'
 expect fail "another base image" "$d" "does not start from"
 
 d="$(fixture no-webkit)"
-sed -i 's| libwebkit2gtk-4.1-dev| curl|' "$d/.devcontainer/Dockerfile"
+edit "$d/.devcontainer/Dockerfile" 's| libwebkit2gtk-4.1-dev| curl|'
 expect fail "WebKitGTK not installed" "$d" "does not install libwebkit2gtk-4.1-dev"
 
 d="$(fixture no-toolchain)"
