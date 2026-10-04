@@ -13,10 +13,13 @@ name: Checks
 #   the action references once a project runs that sensor with --require. The job checks out the
 #   full history because two sensors read it.
 # - Shell lint: scripts/check-shell.sh, after the self-test of the git hooks.
-# - Build, test, lint: absent until the project has a toolchain. The catalogue entry Toolchain of
-#   the propose-adr skill says how the job is added; it is the one job of this workflow that
-#   installs something, with a timeout that fits the real build and 'submodules: recursive' on
-#   the checkout where the project uses submodules.
+# - Build, test, lint: scripts/check-devcontainer-toolchain.sh (ADR-0011), the Dev Container's
+#   share of the toolchain, then scripts/check-build.sh (ADR-0008), on Linux, macOS, and Windows,
+#   so that code gated to one platform is compiled where it runs. It is the one job of this workflow that
+#   installs something: the desktop host's Linux libraries, the pinned Rust toolchain, and Bun.
+#
+# Every action is pinned to a full commit SHA with its version as a comment, and Dependabot keeps
+# the pins current (ADR-0013).
 #
 # Every job is bounded by a timeout — a hung step would otherwise occupy a runner until the
 # platform's own six-hour limit — and every checkout runs with 'persist-credentials: false': the
@@ -53,7 +56,7 @@ jobs:
       # working tree: a documentation link into a submodule would otherwise break in CI while
       # working locally. Their *contents* are never read — check-docs.sh enumerates via
       # `git ls-files`, which lists a submodule as one gitlink entry, not as its files.
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
           submodules: recursive
@@ -71,7 +74,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
       # The check's own tests run first: a check that is wrong passes nothing worth trusting.
@@ -84,7 +87,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
       # The check's own tests run first: a check that is wrong passes nothing worth trusting.
@@ -97,7 +100,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
           fetch-depth: 0
@@ -115,14 +118,15 @@ jobs:
         run: bash scripts/sensor-revision-due.sh
       - name: Self-test the action references sensor
         run: bash scripts/test-sensor-action-refs.sh
-      - name: Report the forms of the action references the workflows use
-        run: bash scripts/sensor-action-refs.sh
+      # Verifies: ADR-0013 — the sensor fails on any action not pinned to a full commit SHA.
+      - name: Require every action to be pinned to a full commit SHA
+        run: bash scripts/sensor-action-refs.sh --require sha
 
   shell:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
       - name: Self-test the git hooks
@@ -131,3 +135,40 @@ jobs:
         run: bash scripts/test-check-shell.sh
       - name: Lint shell scripts with ShellCheck
         run: bash scripts/check-shell.sh
+
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      # The desktop host links against WebKitGTK on Linux; the workspace does not compile
+      # without these libraries (ADR-0018).
+      - name: Install the desktop host's Linux libraries
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev \
+            librsvg2-dev libssl-dev libxdo-dev pkg-config
+      # rust-toolchain.toml pins the version and the components; rustup materialises it.
+      - name: Set up the pinned Rust toolchain
+        run: rustup show active-toolchain
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+      - name: Install the web interface's dependencies from the lockfile
+        run: bun install --frozen-lockfile
+      # The Dev Container carries the same toolchain this job sets up (ADR-0011).
+      - name: Self-test the Dev Container toolchain check
+        run: bash scripts/test-check-devcontainer-toolchain.sh
+      - name: Check the Dev Container's toolchain
+        run: bash scripts/check-devcontainer-toolchain.sh
+      - name: Build, test, and lint
+        run: bash scripts/check-build.sh

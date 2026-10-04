@@ -143,7 +143,7 @@ configured once by a maintainer and worth re-checking after a repository move or
 
 - a **ruleset on `main`** that requires pull requests, requires the
   <!-- required-checks begin — compared with the workflow's jobs by scripts/check-docs.sh -->
-  `docs`, `traceability`, `devcontainer`, `sensors`, and `shell`
+  `docs`, `traceability`, `devcontainer`, `sensors`, `shell`, and `build`
   <!-- required-checks end -->
   jobs of the **Checks** workflow as required status checks (rulesets list checks by their job
   name), and blocks force pushes and branch deletion;

@@ -45,10 +45,13 @@ run "Tests-kept sensor" scripts/sensor-tests-kept.sh
 run "Revision-due sensor self-test" scripts/test-sensor-revision-due.sh
 run "Revision-due sensor" scripts/sensor-revision-due.sh
 run "Action references sensor self-test" scripts/test-sensor-action-refs.sh
-run "Action references sensor" scripts/sensor-action-refs.sh
+run "Action references (ADR-0013)" scripts/sensor-action-refs.sh --require sha
 run "Git hooks self-test" scripts/test-git-hooks.sh
 run "Shell lint self-test" scripts/test-check-shell.sh
 run "Shell lint" scripts/check-shell.sh
+run "Dev Container toolchain self-test" scripts/test-check-devcontainer-toolchain.sh
+run "Dev Container toolchain" scripts/check-devcontainer-toolchain.sh
+run "Build, test, lint" scripts/check-build.sh
 
 printf '\n'
 if ((${#failed[@]})); then

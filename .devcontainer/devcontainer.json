@@ -1,7 +1,10 @@
 {
   "name": "Ocelli DevContainer",
 
-  "image": "mcr.microsoft.com/devcontainers/base:debian",
+  // The base image plus the desktop host's Linux build libraries (ADR-0011).
+  "build": {
+    "dockerfile": "Dockerfile"
+  },
   "workspaceFolder": "/workspace",
   "workspaceMount": "source=${localWorkspaceFolder},target=/workspace,type=bind",
 
@@ -44,7 +47,13 @@
     // GitHub CLI (`gh`) — used by the coding agent for GitHub operations and as the git
     // credential helper. A push and every gh action wait for a human instruction
     // (AGENTS.md, section 6).
-    "ghcr.io/devcontainers/features/github-cli:1": {}
+    "ghcr.io/devcontainers/features/github-cli:1": {},
+    // Rust through rustup; rust-toolchain.toml pins the version and the components (ADR-0008).
+    "ghcr.io/devcontainers/features/rust:1": {},
+    // Bun, the web interface's package manager and task runner (ADR-0008).
+    "ghcr.io/devcontainers-extra/features/bun:1": {
+      "version": "1.4.1"
+    }
   },
 
   "customizations": {
@@ -57,7 +66,8 @@
     }
   },
 
-  "forwardPorts": [],
+  // 1420: the Vite dev server of the web interface (`bun run tauri dev`).
+  "forwardPorts": [1420],
 
   "hostRequirements": {
     "cpus": 2,
