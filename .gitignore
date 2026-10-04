@@ -16,3 +16,10 @@ Thumbs.db
 
 # Session artifacts — plans, handoff notes, scratch files (AGENTS.md, section 4)
 .scratch/
+
+# Build artifacts
+/dist/
+/build/
+/target/
+node_modules/
+src-tauri/gen/

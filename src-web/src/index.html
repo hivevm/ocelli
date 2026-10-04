@@ -1,0 +1,18 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Ocelli</title>
+    <script>
+      // Apply persisted theme before first paint to avoid a flash.
+      try {
+        document.documentElement.dataset.theme =
+          localStorage.getItem('theme') === 'light' ? 'light' : 'dark';
+      } catch (e) { /* ignore */ }
+    </script>
+  </head>
+  <body>
+    <script type="module" src="main.ts"></script>
+  </body>
+</html>

@@ -1,0 +1,15 @@
+[package]
+name = "ocelli-core"
+description = "Ocelli's core: the commit graph, its layout, and the repository port (ADR-0009)"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+anyhow = "1"
+chrono = "0.4"
+serde = { version = "1", features = ["derive"] }
+sha2 = "0.10"
+
+[dev-dependencies]
+serde_json = "1"

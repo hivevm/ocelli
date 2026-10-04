@@ -1,0 +1,16 @@
+[
+  {
+    "path": "a.txt",
+    "oldPath": null,
+    "status": "modified",
+    "additions": 1,
+    "deletions": 3
+  },
+  {
+    "path": "new.txt",
+    "oldPath": null,
+    "status": "unknown",
+    "additions": 0,
+    "deletions": 0
+  }
+]

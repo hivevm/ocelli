@@ -1,0 +1,68 @@
+{
+  "locals": [
+    {
+      "name": "feature",
+      "sha": "fda41bd8ec7a5da337e29e878a4485e92ad97b91",
+      "shortSha": "fda41bd",
+      "isHead": false,
+      "upstream": null,
+      "ahead": 0,
+      "behind": 0
+    },
+    {
+      "name": "hotfix",
+      "sha": "d0bc92dedc145fc084f41151bbb3678e7f51300a",
+      "shortSha": "d0bc92d",
+      "isHead": false,
+      "upstream": null,
+      "ahead": 0,
+      "behind": 0
+    },
+    {
+      "name": "main",
+      "sha": "39283412c712a174d514ba4b835feb5a36d143f7",
+      "shortSha": "3928341",
+      "isHead": true,
+      "upstream": null,
+      "ahead": 0,
+      "behind": 0
+    }
+  ],
+  "remotes": [
+    {
+      "name": "origin",
+      "branches": [
+        {
+          "name": "main",
+          "sha": "51a6e660f5b4bb0748782e6a0a4cf80318a26a52",
+          "shortSha": "51a6e66"
+        }
+      ]
+    }
+  ],
+  "worktrees": [
+    {
+      "name": "repo",
+      "path": "<repo>/",
+      "branch": "main",
+      "sha": "39283412c712a174d514ba4b835feb5a36d143f7",
+      "shortSha": "3928341",
+      "isMain": true,
+      "isCurrent": true
+    }
+  ],
+  "tags": [
+    {
+      "name": "light",
+      "sha": "38419c9d64ca0822482e51408f493841ca97f3c8",
+      "shortSha": "38419c9"
+    },
+    {
+      "name": "v1.0",
+      "sha": "51a6e660f5b4bb0748782e6a0a4cf80318a26a52",
+      "shortSha": "51a6e66"
+    }
+  ],
+  "submodules": [],
+  "parent": null
+}

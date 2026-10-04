@@ -1,0 +1,17 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/core",
+    "crates/git",
+    "crates/tui",
+    "src-tauri",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.96"
+
+[workspace.dependencies]
+ocelli-core = { path = "crates/core" }
+ocelli-git = { path = "crates/git" }
