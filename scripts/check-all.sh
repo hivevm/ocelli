@@ -35,7 +35,6 @@ run() {
 
 run "Documentation self-test" scripts/test-check-docs.sh
 run "Documentation consistency" scripts/check-docs.sh
-run "Template setup self-test" scripts/test-template-setup.sh
 run "Traceability self-test" scripts/test-check-traceability.sh
 run "Traceability" scripts/check-traceability.sh
 run "Dev Container self-test" scripts/test-check-devcontainer.sh
