@@ -1,0 +1,32 @@
+[
+  {
+    "kind": "hunk",
+    "content": "@@ -1,3 +1 @@",
+    "oldLineno": null,
+    "newLineno": null
+  },
+  {
+    "kind": "delete",
+    "content": "one",
+    "oldLineno": 1,
+    "newLineno": null
+  },
+  {
+    "kind": "delete",
+    "content": "two",
+    "oldLineno": 2,
+    "newLineno": null
+  },
+  {
+    "kind": "delete",
+    "content": "three",
+    "oldLineno": 3,
+    "newLineno": null
+  },
+  {
+    "kind": "add",
+    "content": "changed",
+    "oldLineno": null,
+    "newLineno": 1
+  }
+]

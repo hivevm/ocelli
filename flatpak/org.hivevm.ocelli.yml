@@ -1,0 +1,39 @@
+# Flatpak manifest for Ocelli (ADR-0025), following the Tauri Flatpak guide:
+# the module repacks the .deb produced by `tauri build` instead of rebuilding
+# from source. The release workflow stages that .deb next to this manifest as
+# `ocelli.deb` before invoking flatpak-builder.
+id: org.hivevm.ocelli
+runtime: org.gnome.Platform
+runtime-version: '46'
+sdk: org.gnome.Sdk
+command: ocelli
+
+finish-args:
+  # Window display (Wayland first, X11 fallback) and GPU-accelerated rendering.
+  - --socket=wayland
+  - --socket=fallback-x11
+  - --device=dri
+  - --share=ipc
+  # Ocelli opens arbitrary local repositories and — by specification
+  # Non-Goal — never writes to them: read-only host access instead of
+  # per-folder portals, which git2 cannot use for whole-tree reads.
+  - --filesystem=host:ro
+  # Sole network use is the opt-in, default-off Gravatar avatar fetch
+  # (ADR-0023); the WebView CSP allows no other origin.
+  - --share=network
+
+modules:
+  - name: ocelli
+    buildsystem: simple
+    build-commands:
+      - ar -x ocelli.deb
+      - tar -xf data.tar.gz
+      - install -Dm755 usr/bin/ocelli /app/bin/ocelli
+      - install -Dm644 usr/share/applications/Ocelli.desktop /app/share/applications/org.hivevm.ocelli.desktop
+      - sed -i 's/^Icon=ocelli$/Icon=org.hivevm.ocelli/' /app/share/applications/org.hivevm.ocelli.desktop
+      - install -Dm644 usr/share/icons/hicolor/32x32/apps/ocelli.png /app/share/icons/hicolor/32x32/apps/org.hivevm.ocelli.png
+      - install -Dm644 usr/share/icons/hicolor/128x128/apps/ocelli.png /app/share/icons/hicolor/128x128/apps/org.hivevm.ocelli.png
+      - install -Dm644 usr/share/icons/hicolor/256x256@2/apps/ocelli.png /app/share/icons/hicolor/256x256@2/apps/org.hivevm.ocelli.png
+    sources:
+      - type: file
+        path: ocelli.deb

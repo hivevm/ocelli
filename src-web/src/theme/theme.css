@@ -1,0 +1,145 @@
+/*
+ * Portable design tokens — dark by default, light under `[data-theme='light']`.
+ *
+ * This file is self-contained and framework-agnostic: drop it into any project,
+ * import it once, and reference the tokens as `var(--token)` from component
+ * styles. Canvas or other imperative renderers read the same values from
+ * `palette.ts`, which mirrors this file (ADR-0021).
+ *
+ * Sections
+ *   1. Reset          — box model and margin/padding zeroing
+ *   2. Core tokens    — surfaces, borders, text, accent, status colors, metrics
+ *   3. Diff tokens    — optional; only needed by a diff/patch view
+ *   4. Base elements  — body typography and background
+ *
+ * See README.md in this directory for the token vocabulary and setup.
+ */
+
+/* ── 1. Reset ─────────────────────────────────────────────────────────────── */
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+/* ── 2. Core tokens (dark, the default) ───────────────────────────────────── */
+:root {
+  /* Surfaces — app canvas, window chrome, panels, and the hover/selected states */
+  --bg-app: #1a1d23;
+  --bg-chrome: #13151a;
+  --bg-panel: #0f1117;
+  --bg-hover: #1e2128;
+  --bg-elev: #2a2d35;
+  --bg-sel: #1a2535;
+
+  /* Lines and elevation */
+  --border: #2a2d35;
+  --border-strong: #383b45;
+  --border-hover: #4a4d58;
+  --btn-hover-bg: #33363f;
+  --shadow: #00000070;
+
+  /* Text, brightest to faintest */
+  --text-brightest: #e8eaf0;
+  --text-bright: #e0e3e9;
+  --text: #d0d3d9;
+  --text-2: #c0c3ca;
+  --text-muted: #8b8fa8;
+  --text-dim: #5a5e6e;
+  --text-dimmer: #4a4e5e;
+  --text-faint: #3a3e4e;
+
+  /* Accent — the one brand color, with its tinted surfaces */
+  --accent: #4caf7d;
+  --accent-bright: #5cc48d;
+  --accent-bg: #1a3a22;
+  --accent-border: #2a5a34;
+  --accent-bg-strong: #1e4d32;
+  --accent-border-strong: #2d6e47;
+  --accent-bg-strong-hover: #235a3a;
+  --accent-border-strong-hover: #3a8057;
+
+  /* Status / categorical colors, each with a tinted background */
+  --blue: #6b9fff;       --blue-bg: #162338;  --blue-border: #1f3a5a;
+  --amber: #e8a94a;      --amber-bg: #2e2412; --amber-border: #4a3a1a;
+  --red: #e06b75;        --red-bg: #3a1a1a;
+  --teal: #4ec9c9;       --teal-bg: #1a2a3a;
+  --error: #e05a5a;
+
+  /* Metrics — identical in both themes */
+  --font-ui: 'Segoe UI', -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
+  --font-mono: 'Cascadia Code', 'Fira Code', 'JetBrains Mono', monospace;
+  --font-size: 13px;
+
+  --radius-xs: 3px;
+  --radius-sm: 4px;
+  --radius-md: 5px;
+  --radius-lg: 8px;
+
+  --transition: 0.12s;
+}
+
+/* ── 3. Diff tokens (optional — drop when there is no diff view) ──────────── */
+:root {
+  --diff-gutter-bg: #0d0f14;
+  --diff-add-bg: #0d2318;   --diff-add-gutter: #2a5a34; --diff-add-border: #1a3a22; --diff-add-text: #b8f0c8;
+  --diff-del-bg: #2a0d0d;   --diff-del-gutter: #5a2a2a; --diff-del-border: #3a1a1a; --diff-del-text: #f0b8bc;
+  --diff-hunk-bg: #111827;  --diff-hunk-text: #4a6080;  --diff-hunk-gutter-bg: #0a0d14;
+}
+
+/* ── Light theme overrides ────────────────────────────────────────────────── */
+:root[data-theme='light'] {
+  --bg-app: #ffffff;
+  --bg-chrome: #f3f4f6;
+  --bg-panel: #ffffff;
+  --bg-hover: #eceef2;
+  --bg-elev: #e6e8ec;
+  --bg-sel: #e3edff;
+
+  --border: #d8dbe0;
+  --border-strong: #cbd0d8;
+  --border-hover: #b5bcc7;
+  --btn-hover-bg: #e6e8ec;
+  --shadow: #00000026;
+
+  --text-brightest: #14171c;
+  --text-bright: #24272e;
+  --text: #2e333d;
+  --text-2: #3a3f4a;
+  --text-muted: #5d6470;
+  --text-dim: #767c8a;
+  --text-dimmer: #969cab;
+  --text-faint: #b3b9c4;
+
+  --accent: #2e9e63;
+  --accent-bright: #258a55;
+  --accent-bg: #e3f6ea;
+  --accent-border: #b7e4c8;
+  --accent-bg-strong: #d8f0e0;
+  --accent-border-strong: #aadcbf;
+  --accent-bg-strong-hover: #cdead6;
+  --accent-border-strong-hover: #93cfa9;
+
+  --blue: #2d6fdb;       --blue-bg: #e4edfb;  --blue-border: #bcd4f5;
+  --amber: #b5791f;      --amber-bg: #fbf0d8; --amber-border: #ecd6a6;
+  --red: #d23f4a;        --red-bg: #fbe4e6;
+  --teal: #1f9b9b;       --teal-bg: #def2f2;
+  --error: #d23f4a;
+
+  /* diff view */
+  --diff-gutter-bg: #f4f5f8;
+  --diff-add-bg: #e6f6ec;   --diff-add-gutter: #6aa67f; --diff-add-border: #c0e4ce; --diff-add-text: #14692f;
+  --diff-del-bg: #fbe9eb;   --diff-del-gutter: #c98a90; --diff-del-border: #f1cdd1; --diff-del-text: #9a2530;
+  --diff-hunk-bg: #eef2fb;  --diff-hunk-text: #4a6890;  --diff-hunk-gutter-bg: #e9ebf1;
+}
+
+/* ── 4. Base elements ─────────────────────────────────────────────────────── */
+body {
+  background: var(--bg-app);
+  color: var(--text);
+  font-family: var(--font-ui);
+  font-size: var(--font-size);
+  -webkit-font-smoothing: antialiased;
+}

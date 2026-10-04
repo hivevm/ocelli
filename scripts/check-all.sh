@@ -153,7 +153,6 @@ run() {
 
 run "Documentation self-test" scripts/test-check-docs.sh
 run "Documentation consistency" scripts/check-docs.sh
-run "Template setup self-test" scripts/test-template-setup.sh
 run "Normalize map self-test" scripts/test-normalize-remap.sh
 # The numbering script commits and runs on a human's instruction, before the pull request that
 # brings drafts to main (ADR-0002); its self-test runs here.
@@ -180,7 +179,7 @@ run "Revision-due sensor" scripts/sensor-revision-due.sh
 run "Plan frontier sensor self-test" scripts/test-sensor-plan-frontier.sh
 run "Plan frontier sensor" scripts/sensor-plan-frontier.sh
 run "Action references sensor self-test" scripts/test-sensor-action-refs.sh
-run "Action references sensor" scripts/sensor-action-refs.sh
+run "Action references (ADR-0013)" scripts/sensor-action-refs.sh --require sha
 run "Review binding sensor self-test" scripts/test-sensor-review-binding.sh
 run "Review binding sensor" scripts/sensor-review-binding.sh
 # The repository settings sensor reads GitHub and runs on a human's instruction (ADR-0002); its
@@ -191,6 +190,9 @@ run "Check runner self-test" scripts/test-check-all.sh
 run "Git hooks self-test" scripts/test-git-hooks.sh
 run "Shell lint self-test" scripts/test-check-shell.sh
 run "Shell lint" scripts/check-shell.sh
+run "Dev Container toolchain self-test" scripts/test-check-devcontainer-toolchain.sh
+run "Dev Container toolchain" scripts/check-devcontainer-toolchain.sh
+run "Build, test, lint" scripts/check-build.sh
 
 wait
 

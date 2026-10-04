@@ -1,0 +1,315 @@
+{
+  "edges": [
+    {
+      "isBranch": true,
+      "maxRow": 2,
+      "minRow": 1,
+      "sourceCol": 0,
+      "sourceRow": 2,
+      "targetCol": 1,
+      "targetRow": 1
+    },
+    {
+      "isBranch": true,
+      "maxRow": 2,
+      "minRow": 0,
+      "sourceCol": 0,
+      "sourceRow": 2,
+      "targetCol": 0,
+      "targetRow": 0
+    },
+    {
+      "isBranch": true,
+      "maxRow": 4,
+      "minRow": 2,
+      "sourceCol": 0,
+      "sourceRow": 4,
+      "targetCol": 0,
+      "targetRow": 2
+    },
+    {
+      "isBranch": true,
+      "maxRow": 4,
+      "minRow": 3,
+      "sourceCol": 0,
+      "sourceRow": 4,
+      "targetCol": 1,
+      "targetRow": 3
+    },
+    {
+      "isBranch": false,
+      "maxRow": 5,
+      "minRow": 4,
+      "sourceCol": 1,
+      "sourceRow": 5,
+      "targetCol": 0,
+      "targetRow": 4
+    },
+    {
+      "isBranch": true,
+      "maxRow": 6,
+      "minRow": 4,
+      "sourceCol": 0,
+      "sourceRow": 6,
+      "targetCol": 0,
+      "targetRow": 4
+    },
+    {
+      "isBranch": true,
+      "maxRow": 7,
+      "minRow": 5,
+      "sourceCol": 1,
+      "sourceRow": 7,
+      "targetCol": 1,
+      "targetRow": 5
+    },
+    {
+      "isBranch": true,
+      "maxRow": 8,
+      "minRow": 6,
+      "sourceCol": 0,
+      "sourceRow": 8,
+      "targetCol": 0,
+      "targetRow": 6
+    },
+    {
+      "isBranch": true,
+      "maxRow": 8,
+      "minRow": 7,
+      "sourceCol": 0,
+      "sourceRow": 8,
+      "targetCol": 1,
+      "targetRow": 7
+    },
+    {
+      "isBranch": true,
+      "maxRow": 9,
+      "minRow": 8,
+      "sourceCol": 0,
+      "sourceRow": 9,
+      "targetCol": 0,
+      "targetRow": 8
+    }
+  ],
+  "nodes": [
+    {
+      "author": "Ada",
+      "authorAvatar": "https://www.gravatar.com/avatar/cfe00dde46ef942601ffafb9e2825e802858b460e586b8305b344c1eb826357d?d=404&s=80",
+      "authorDate": "2023-11-14 22:20",
+      "children": [
+        "WORKING_DIRECTORY",
+        "0fb8b5fdc3841c849bed44e9fb2655bdeb9922fe"
+      ],
+      "col": 0,
+      "committer": "Ada",
+      "committerAvatar": "https://www.gravatar.com/avatar/cfe00dde46ef942601ffafb9e2825e802858b460e586b8305b344c1eb826357d?d=404&s=80",
+      "date": "2023-11-14 22:20",
+      "kind": "commit",
+      "message": "fourth",
+      "parents": [
+        "51a6e660f5b4bb0748782e6a0a4cf80318a26a52"
+      ],
+      "refs": [
+        "main"
+      ],
+      "row": 2,
+      "sha": "39283412c712a174d514ba4b835feb5a36d143f7",
+      "shortSha": "3928341"
+    },
+    {
+      "author": "Ada",
+      "authorAvatar": "https://www.gravatar.com/avatar/cfe00dde46ef942601ffafb9e2825e802858b460e586b8305b344c1eb826357d?d=404&s=80",
+      "authorDate": "2023-11-14 22:18",
+      "children": [],
+      "col": 1,
+      "committer": "Ada",
+      "committerAvatar": "https://www.gravatar.com/avatar/cfe00dde46ef942601ffafb9e2825e802858b460e586b8305b344c1eb826357d?d=404&s=80",
+      "date": "2023-11-14 22:18",
+      "kind": "commit",
+      "message": "hotfix",
+      "parents": [
+        "51a6e660f5b4bb0748782e6a0a4cf80318a26a52"
+      ],
+      "refs": [
+        "hotfix"
+      ],
+      "row": 3,
+      "sha": "d0bc92dedc145fc084f41151bbb3678e7f51300a",
+      "shortSha": "d0bc92d"
+    },
+    {
+      "author": "Ada",
+      "authorAvatar": "https://www.gravatar.com/avatar/cfe00dde46ef942601ffafb9e2825e802858b460e586b8305b344c1eb826357d?d=404&s=80",
+      "authorDate": "2023-11-14 22:18",
+      "children": [
+        "39283412c712a174d514ba4b835feb5a36d143f7",
+        "d0bc92dedc145fc084f41151bbb3678e7f51300a"
+      ],
+      "col": 0,
+      "committer": "Ada",
+      "committerAvatar": "https://www.gravatar.com/avatar/cfe00dde46ef942601ffafb9e2825e802858b460e586b8305b344c1eb826357d?d=404&s=80",
+      "date": "2023-11-14 22:18",
+      "kind": "commit",
+      "message": "Merge feature",
+      "parents": [
+        "64857b1518ef22067c1ccde11f05cb9a077daba0",
+        "fda41bd8ec7a5da337e29e878a4485e92ad97b91"
+      ],
+      "refs": [
+        "origin/main",
+        "🏷 v1.0"
+      ],
+      "row": 4,
+      "sha": "51a6e660f5b4bb0748782e6a0a4cf80318a26a52",
+      "shortSha": "51a6e66"
+    },
+    {
+      "author": "Ada",
+      "authorAvatar": "https://www.gravatar.com/avatar/cfe00dde46ef942601ffafb9e2825e802858b460e586b8305b344c1eb826357d?d=404&s=80",
+      "authorDate": "2023-11-14 22:17",
+      "children": [
+        "51a6e660f5b4bb0748782e6a0a4cf80318a26a52"
+      ],
+      "col": 1,
+      "committer": "Ada",
+      "committerAvatar": "https://www.gravatar.com/avatar/cfe00dde46ef942601ffafb9e2825e802858b460e586b8305b344c1eb826357d?d=404&s=80",
+      "date": "2023-11-14 22:17",
+      "kind": "commit",
+      "message": "more feature",
+      "parents": [
+        "d308f05f62efdd9a409de773f38f540559473865"
+      ],
+      "refs": [
+        "feature"
+      ],
+      "row": 5,
+      "sha": "fda41bd8ec7a5da337e29e878a4485e92ad97b91",
+      "shortSha": "fda41bd"
+    },
+    {
+      "author": "Ada",
+      "authorAvatar": "https://www.gravatar.com/avatar/cfe00dde46ef942601ffafb9e2825e802858b460e586b8305b344c1eb826357d?d=404&s=80",
+      "authorDate": "2023-11-14 22:16",
+      "children": [
+        "51a6e660f5b4bb0748782e6a0a4cf80318a26a52"
+      ],
+      "col": 0,
+      "committer": "Ada",
+      "committerAvatar": "https://www.gravatar.com/avatar/cfe00dde46ef942601ffafb9e2825e802858b460e586b8305b344c1eb826357d?d=404&s=80",
+      "date": "2023-11-14 22:16",
+      "kind": "commit",
+      "message": "third",
+      "parents": [
+        "38419c9d64ca0822482e51408f493841ca97f3c8"
+      ],
+      "refs": [],
+      "row": 6,
+      "sha": "64857b1518ef22067c1ccde11f05cb9a077daba0",
+      "shortSha": "64857b1"
+    },
+    {
+      "author": "Ada",
+      "authorAvatar": "https://www.gravatar.com/avatar/cfe00dde46ef942601ffafb9e2825e802858b460e586b8305b344c1eb826357d?d=404&s=80",
+      "authorDate": "2023-11-14 22:15",
+      "children": [
+        "fda41bd8ec7a5da337e29e878a4485e92ad97b91"
+      ],
+      "col": 1,
+      "committer": "Ada",
+      "committerAvatar": "https://www.gravatar.com/avatar/cfe00dde46ef942601ffafb9e2825e802858b460e586b8305b344c1eb826357d?d=404&s=80",
+      "date": "2023-11-14 22:15",
+      "kind": "commit",
+      "message": "feature work",
+      "parents": [
+        "38419c9d64ca0822482e51408f493841ca97f3c8"
+      ],
+      "refs": [],
+      "row": 7,
+      "sha": "d308f05f62efdd9a409de773f38f540559473865",
+      "shortSha": "d308f05"
+    },
+    {
+      "author": "Ada",
+      "authorAvatar": "https://www.gravatar.com/avatar/cfe00dde46ef942601ffafb9e2825e802858b460e586b8305b344c1eb826357d?d=404&s=80",
+      "authorDate": "2023-11-14 22:15",
+      "children": [
+        "64857b1518ef22067c1ccde11f05cb9a077daba0",
+        "d308f05f62efdd9a409de773f38f540559473865"
+      ],
+      "col": 0,
+      "committer": "Ada",
+      "committerAvatar": "https://www.gravatar.com/avatar/cfe00dde46ef942601ffafb9e2825e802858b460e586b8305b344c1eb826357d?d=404&s=80",
+      "date": "2023-11-14 22:15",
+      "kind": "commit",
+      "message": "second",
+      "parents": [
+        "ef37e80a6e392952a38b81710b5f8c760a319014"
+      ],
+      "refs": [
+        "🏷 light"
+      ],
+      "row": 8,
+      "sha": "38419c9d64ca0822482e51408f493841ca97f3c8",
+      "shortSha": "38419c9"
+    },
+    {
+      "author": "Ada",
+      "authorAvatar": "https://www.gravatar.com/avatar/cfe00dde46ef942601ffafb9e2825e802858b460e586b8305b344c1eb826357d?d=404&s=80",
+      "authorDate": "2023-11-14 22:13",
+      "children": [
+        "38419c9d64ca0822482e51408f493841ca97f3c8"
+      ],
+      "col": 0,
+      "committer": "Ada",
+      "committerAvatar": "https://www.gravatar.com/avatar/cfe00dde46ef942601ffafb9e2825e802858b460e586b8305b344c1eb826357d?d=404&s=80",
+      "date": "2023-11-14 22:13",
+      "kind": "commit",
+      "message": "first",
+      "parents": [],
+      "refs": [],
+      "row": 9,
+      "sha": "ef37e80a6e392952a38b81710b5f8c760a319014",
+      "shortSha": "ef37e80"
+    },
+    {
+      "author": "Ada",
+      "authorAvatar": "https://www.gravatar.com/avatar/cfe00dde46ef942601ffafb9e2825e802858b460e586b8305b344c1eb826357d?d=404&s=80",
+      "authorDate": "2023-11-14 22:21",
+      "children": [],
+      "col": 1,
+      "committer": "Ada",
+      "committerAvatar": "https://www.gravatar.com/avatar/cfe00dde46ef942601ffafb9e2825e802858b460e586b8305b344c1eb826357d?d=404&s=80",
+      "date": "2023-11-14 22:21",
+      "kind": "stash",
+      "message": "On main: WIP stash",
+      "parents": [
+        "39283412c712a174d514ba4b835feb5a36d143f7"
+      ],
+      "refs": [
+        "📦 stash@{0}"
+      ],
+      "row": 1,
+      "sha": "0fb8b5fdc3841c849bed44e9fb2655bdeb9922fe",
+      "shortSha": "0fb8b5f"
+    },
+    {
+      "author": "Ada",
+      "authorAvatar": "https://www.gravatar.com/avatar/cfe00dde46ef942601ffafb9e2825e802858b460e586b8305b344c1eb826357d?d=404&s=80",
+      "authorDate": "<now>",
+      "children": [],
+      "col": 0,
+      "committer": "",
+      "committerAvatar": "",
+      "date": "<now>",
+      "kind": "working",
+      "message": "Uncommitted changes",
+      "parents": [
+        "39283412c712a174d514ba4b835feb5a36d143f7"
+      ],
+      "refs": [],
+      "row": 0,
+      "sha": "WORKING_DIRECTORY",
+      "shortSha": ""
+    }
+  ]
+}
