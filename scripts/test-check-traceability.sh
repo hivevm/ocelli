@@ -198,8 +198,9 @@ expect fail "markers in gitignored files do not count" "$d" "ADR-0001 is accepte
 #
 # TEMPLATE-SETUP.md tells the maintainer of a derived project to accept the inherited ADRs. That
 # must not turn CI red, so while this repository is still the template (the setup file exists)
-# its own tree with every ADR accepted, one the template still proposes included, has to pass:
-# each inherited ADR ships with a citing test or an exemption. A derived project deletes the setup file, and
+# its own tree with every inherited ADR accepted, one the template still proposes included, has
+# to pass: each inherited ADR ships with a citing test or an exemption. The project's own ADRs of
+# setup step 4 are left as they are; they await the tests of the golden path. A derived project deletes the setup file, and
 # with it this case: its proposed ADRs may await their tests.
 
 if [[ -f "$ROOT/TEMPLATE-SETUP.md" ]]; then
@@ -212,6 +213,7 @@ if [[ -f "$ROOT/TEMPLATE-SETUP.md" ]]; then
   done < <(git -C "$ROOT" ls-files --cached --others --exclude-standard -z)
   git -C "${d:?}" init -q
   for f in "$d"/docs/adr/[0-9]*.md; do
+    grep -q '^- \*\*Deciders:\*\*.*NUC maintainer' "$f" || continue
     sed -i 's/🟡 proposed/🟢 accepted/' "$f"
   done
   expect pass "the inherited ADRs, once accepted, pass — TEMPLATE-SETUP step 2 keeps CI green" "$d"

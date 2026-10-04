@@ -2,7 +2,7 @@
 
 - **Status:** 🟢 accepted
 - **Date:** 2026-09-05
-- **Deciders:** NUC maintainer
+- **Deciders:** NUC maintainer, Markus Brigl
 - **Applies to:** every document that carries rules for humans or agents, the architecture overview, the glossary, the conventions, and `scripts/check-docs.sh`
 
 ## Context
