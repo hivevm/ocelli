@@ -1,13 +1,11 @@
-//! Counting edge crossings in a layout (Q-1, #12).
+//! Counting the *edge crossings* (glossary) in Ocelli's layout (Q-1).
 //!
 //! An edge is drawn as an orthogonal L-shape whose bend follows its type (ADR-0030): a branch edge
 //! runs along the parent's row and then up the child's lane, a merge edge up the parent's lane and
-//! then along the child's row, and an edge within one lane is a single vertical line. An *edge
-//! crossing* is a point where a horizontal segment of one edge and a vertical segment of another
-//! meet strictly inside both segments. No commit can sit there: every row holds one commit, at an
-//! end of each horizontal run on it (ADR-0030). Lines that leave a commit together or meet at one
-//! are not crossings. Each point counts once, however many edges pass it, since edges to one
-//! parent overlap where git draws a single line; two edges that cross at two points count twice.
+//! then along the child's row, and an edge within one lane is a single vertical line. No commit can
+//! sit where two segments meet strictly inside both: every row holds one commit, at an end of each
+//! horizontal run on it. Edges to one parent overlap where git draws a single line, which is why a
+//! point counts once.
 
 use ocelli_core::model::{Edge, Graph};
 use std::collections::HashSet;

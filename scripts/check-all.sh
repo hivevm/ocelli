@@ -194,6 +194,7 @@ run "Dev Container toolchain self-test" scripts/test-check-devcontainer-toolchai
 run "Dev Container toolchain" scripts/check-devcontainer-toolchain.sh
 run "Build, test, lint" scripts/check-build.sh
 run "Measurement self-test" scripts/test-measure-crossings.sh
+run "Memory measurement self-test" scripts/test-measure-memory.sh
 
 wait
 

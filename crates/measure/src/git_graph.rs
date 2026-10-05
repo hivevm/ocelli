@@ -1,14 +1,10 @@
-//! Counting edge crossings in the ASCII graph of `git log --graph` (Q-1, #13).
+//! Counting the *edge crossings* (glossary) in the ASCII graph of `git log --graph` (Q-1).
 //!
-//! git draws a line in an even text column; `|` and `*` are vertical pieces in that column, and
-//! `/`, `\`, and `_` are the pieces with which a line moves from one even column to another. A
-//! piece spans the two even columns beside it: `/` from the upper right to the lower left, `\`
-//! from the upper left to the lower right, and `_` along the lower boundary of its row. A moving
-//! line can therefore meet a line in another column only at a point on a row boundary in an even
-//! column. An *edge crossing* is such a point where the vertical line runs on above and below and
-//! a moving line arrives from one side and leaves to the other; a line that only joins the column
-//! from one side, at a merge or a fork, does not cross it. As in Ocelli's rule, each point counts
-//! once.
+//! `|` and `*` are vertical pieces in an even text column. The pieces with which a line moves span
+//! the two even columns beside them: `/` from the upper right to the lower left, `\` from the
+//! upper left to the lower right, and `_` along the lower boundary of its row. A moving line can
+//! therefore meet another only at a point on a row boundary in an even column, the points the
+//! glossary's reading of git's graph names.
 
 use anyhow::{Result, bail};
 use std::collections::HashMap;
