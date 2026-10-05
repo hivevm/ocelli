@@ -32,6 +32,18 @@ trap 'rm -rf "$work"' EXIT
 failed=0
 passed=0
 
+# sed_in <file> <sed script> — edit a fixture file in place, the same way on GNU and BSD sed.
+sed_in() {
+  sed "$2" "$1" > "$1.tmp" && mv "$1.tmp" "$1"
+}
+
+# insert_before <file> <line prefix> <text> — insert text, where "\n" starts a new line, before
+# the first line that starts with the prefix; awk reads "\n" the same way on every platform.
+insert_before() {
+  awk -v prefix="$2" -v text="$3" 'index($0, prefix) == 1 && !done { print text; done = 1 } { print }' \
+    "$1" > "$1.tmp" && mv "$1.tmp" "$1"
+}
+
 # sect <n> — the section sign followed by n, assembled so that this file carries no literal one.
 sect() { printf '\302\247%s' "$1"; }
 
@@ -199,7 +211,7 @@ expect pass "a repository without skills has nothing to check" "$d"
 inherited() {
   local dir="$1" status="$2" deciders="$3"
   adr "$dir" 1 "$status"
-  sed -i "s|^- \*\*Applies to:\*\*|- **Deciders:** $deciders\n- **Applies to:**|" "$dir/docs/adr/0001-decision.md"
+  insert_before "$dir/docs/adr/0001-decision.md" "- **Applies to:**" "- **Deciders:** $deciders"
   {
     echo "# Architecture Decision Records"
     echo
@@ -254,12 +266,12 @@ expect fail "an inherited ADR whose Deciders field wraps, the template's name on
 # --- cases: template identity after setup (check 13) ------------------------------------
 
 d="$(repo identity-pending)"
-sed -i 's/^# Fixture$/# NUC — an Agentic Fixture/' "$d/README.md"
+sed_in "$d/README.md" 's/^# Fixture$/# NUC — an Agentic Fixture/'
 echo "# Template setup" > "$d/TEMPLATE-SETUP.md"
 expect pass "the template's title in the README while the setup file exists" "$d"
 
 d="$(repo identity-title)"
-sed -i 's/^# Fixture$/# NUC — an Agentic Fixture/' "$d/README.md"
+sed_in "$d/README.md" 's/^# Fixture$/# NUC — an Agentic Fixture/'
 expect fail "the template's title in the README after setup" "$d" "README.md: the title is still the template's"
 
 d="$(repo identity-intro)"
@@ -405,7 +417,7 @@ expect fail "a bold label outside an ADR header is prose" "$d" "columns — wrap
 # --- cases: the template release named (check 14) ---------------------------------------
 
 # release_line <dir> <text> — replace the baseline's Template release line with the given text.
-release_line() { sed -i "s/^- \*\*Template release:\*\* unreleased$/$2/" "$1/README.md"; }
+release_line() { sed_in "$1/README.md" "s/^- \*\*Template release:\*\* unreleased$/$2/"; }
 
 d="$(repo release-tag)"
 release_line "$d" '- **Template release:** v1.4.0 of the template ([tags](https:\/\/example.invalid\/tags)).'
@@ -469,8 +481,8 @@ consolidation() {
   adr "$dir" 1 "⚪ superseded by $n3"
   if [[ "$flip" == "yes" ]]; then adr "$dir" 2 "⚪ superseded by $n3"; else adr "$dir" 2 "🟡 proposed"; fi
   adr "$dir" 3 "🟢 accepted"
-  sed -i "s|^- \*\*Applies to:\*\*|- **Supersedes:** [$(adr_id 1)](0001-decision.md)${sep}[$(adr_id 2)](0002-decision.md)\n- **Applies to:**|" \
-    "$dir/docs/adr/0003-decision.md"
+  insert_before "$dir/docs/adr/0003-decision.md" "- **Applies to:**" \
+    "- **Supersedes:** [$(adr_id 1)](0001-decision.md)${sep}[$(adr_id 2)](0002-decision.md)"
   {
     echo "# Architecture Decision Records"
     echo
@@ -581,7 +593,7 @@ build_job() {
   [[ "$local_gate" == "local" ]] \
     && echo 'run "Build, test, lint" scripts/check-build.sh' >> "$dir/scripts/check-all.sh"
   # shellcheck disable=SC2016  # the backticks are literal Markdown, not a command substitution
-  sed -i 's|^`docs`$|`docs`, `build`|' "$dir/README.md"
+  sed_in "$dir/README.md" 's|^`docs`$|`docs`, `build`|'
 }
 
 d="$(repo build-job)"
@@ -595,7 +607,7 @@ build_job "$d" "make test"
 expect fail "a toolchain job with its commands inline and nothing in the local runner" "$d" "job 'build' runs no script under scripts/"
 
 d="$(repo layout-stale)"
-sed -i 's|^docs/adr/ |docs/gone/ |' "$d/README.md"
+sed_in "$d/README.md" 's|^docs/adr/ |docs/gone/ |'
 expect fail "a Project Layout entry that no longer exists" "$d" "is not a directory of this repository"
 
 # --- summary -------------------------------------------------------------------------------

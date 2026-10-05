@@ -25,6 +25,16 @@ export OCELLI_MEASURE="$ROOT/target/debug/ocelli-measure"
 failed=0
 passed=0
 
+# url <dir> — a file URL git understands for a local directory; on Windows git reads a path like
+# /tmp/... against the current drive, so the URL carries the Windows path there.
+url() {
+  if command -v cygpath >/dev/null 2>&1; then
+    echo "file:///$(cygpath -m "$1")"
+  else
+    echo "file://$1"
+  fi
+}
+
 # commit <repo> <message> — commit an empty change at a fixed time.
 commit() {
   GIT_AUTHOR_DATE="2026-01-01T00:00:0${3:-0}Z" GIT_COMMITTER_DATE="2026-01-01T00:00:0${3:-0}Z" \
@@ -60,13 +70,13 @@ expect() {
   while IFS= read -r l; do printf '    %s\n' "$l"; done <<< "$out" >&2
 }
 
-printf 'straight file://%s %s\nmerged file://%s %s\n' \
-  "$work/straight" "$straight" "$work/merged" "$merged" > "$work/corpus"
+printf 'straight %s %s\nmerged %s %s\n' \
+  "$(url "$work/straight")" "$straight" "$(url "$work/merged")" "$merged" > "$work/corpus"
 expect "a straight history is measured" 0 "| straight | ${straight:0:7} | 2 | 0 | 0 | missed |" "$work/corpus"
 expect "a merged branch is measured" 0 "| merged | ${merged:0:7} | 4 |" "$work/corpus"
 expect "the run ends with every repository measured" 0 "Measured every repository" "$work/corpus"
 
-printf 'gone file://%s %s\n' "$work/straight" 0000000000000000000000000000000000000001 \
+printf 'gone %s %s\n' "$(url "$work/straight")" 0000000000000000000000000000000000000001 \
   > "$work/missing"
 expect "a commit that does not exist fails the run" 1 "Measurement FAILED for: gone" "$work/missing"
 
@@ -76,7 +86,7 @@ stub() {
   chmod +x "$work/stub"
   echo "$work/stub"
 }
-printf 'straight file://%s %s\n' "$work/straight" "$straight" > "$work/one"
+printf 'straight %s %s\n' "$(url "$work/straight")" "$straight" > "$work/one"
 OCELLI_MEASURE="$(stub 'commits: 9\\nocelli crossings: 3\\ngit crossings: 5\\n')" \
   expect "fewer crossings than git hold Q-1" 0 "| 9 | 3 | 5 | holds |" "$work/one"
 OCELLI_MEASURE="$(stub 'commits: 9\\nocelli crossings: 5\\ngit crossings: 3\\n')" \

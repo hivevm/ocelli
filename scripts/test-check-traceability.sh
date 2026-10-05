@@ -214,7 +214,7 @@ if [[ -f "$ROOT/TEMPLATE-SETUP.md" ]]; then
   git -C "${d:?}" init -q
   for f in "$d"/docs/adr/[0-9]*.md; do
     grep -q '^- \*\*Deciders:\*\*.*NUC maintainer' "$f" || continue
-    sed -i 's/🟡 proposed/🟢 accepted/' "$f"
+    sed 's/🟡 proposed/🟢 accepted/' "$f" > "$f.tmp" && mv "$f.tmp" "$f"
   done
   expect pass "the inherited ADRs, once accepted, pass — TEMPLATE-SETUP step 2 keeps CI green" "$d"
 fi

@@ -14,25 +14,31 @@
 # check skips itself with a notice instead of failing (CI remains the enforcing gate); in a CI
 # run (CI=true) a missing shellcheck is an error, never a silent skip.
 #
+# Beyond ShellCheck it refuses GNU sed's in-place flag, `sed -i`, which BSD sed on macOS reads as
+# taking a suffix: the scripts run in the build job on macOS and Windows and in check-all.sh on any
+# host. A script that starts with the line '# portability: linux-only' after its shebang is left
+# out of that rule. Comment lines are not read. The rule reads the options right after `sed`, so
+# it misses a flag after a script (`sed -e S -i f`), and it reads text, so it flags the words
+# inside a quoted string or after a trailing comment; spell those differently.
+#
 # Usage:
 #     scripts/check-shell.sh [repository root]        (or: bash scripts/check-shell.sh)
 # The root defaults to this repository; scripts/test-check-shell.sh passes fixtures.
-# Exit code 0 when all scripts pass (or shellcheck is unavailable outside CI), 1 otherwise, 2 on a
-# root that is no directory.
+# Exit code 0 when all scripts pass (ShellCheck skipped when unavailable outside CI), 1 otherwise,
+# 2 on a root that is no directory.
 
 set -uo pipefail
 
 ROOT="$(cd "${1:-$(dirname "${BASH_SOURCE[0]}")/..}" 2>/dev/null && pwd)" \
   || { echo "Shell lint: '${1:-}' is not a directory." >&2; exit 2; }
 
+have_shellcheck=1
 if ! command -v shellcheck >/dev/null 2>&1; then
   if [[ "${CI:-}" == "true" ]]; then
     echo "ERROR: shellcheck not found in a CI run — the runner image is expected to ship it." >&2
     exit 1
   fi
-  echo "shellcheck is not installed — skipped (CI enforces this check)."
-  echo "Install it to run locally: https://www.shellcheck.net"
-  exit 0
+  have_shellcheck=0
 fi
 
 # A list git cannot give is an error, not an empty gate.
@@ -50,7 +56,28 @@ if ((${#scripts[@]} == 0)); then
   exit 0
 fi
 
-if ! shellcheck "${scripts[@]}"; then
+# GNU-only: sed -i, with or without a suffix argument after it, and sed --in-place.
+IN_PLACE='(^|[;&|(`[:space:]])sed([[:space:]]+-[a-zA-Z]+)*[[:space:]]+(-[a-zA-Z]*i([[:space:]]|$)|--in-place)'
+
+failed=0
+if ((have_shellcheck)); then
+  shellcheck "${scripts[@]}" || failed=1
+else
+  echo "shellcheck is not installed — ShellCheck skipped (CI enforces it); the sed rule runs."
+  echo "Install it to run locally: https://www.shellcheck.net"
+fi
+
+for f in "${scripts[@]}"; do
+  sed -n 2p "$f" | grep -qx '# portability: linux-only' && continue
+  while IFS=: read -r line text; do
+    echo "${f#"$ROOT"/}:$line: GNU sed's in-place flag does not run on macOS;" \
+      "write through a temporary file instead: sed 'SCRIPT' FILE > FILE.tmp && mv FILE.tmp FILE"
+    echo "    $text"
+    failed=1
+  done < <(grep -nE "$IN_PLACE" "$f" | grep -vE '^[0-9]+:[[:space:]]*#')
+done
+
+if ((failed)); then
   echo
   echo "Shell lint FAILED (see findings above)."
   exit 1

@@ -9,7 +9,8 @@ use std::fs;
 /// The libraries the core may depend on: none of them performs I/O or names a technology.
 const ALLOWED: &[&str] = &["anyhow", "chrono", "serde", "sha2"];
 
-/// The front ends' technologies, which an adapter on the repository side does not reach.
+/// The front ends, their technologies, and the other driving adapters, which an adapter on the
+/// repository side does not reach (ADR-0009).
 const FRONT_ENDS: &[&str] = &[
     "tauri",
     "tauri-build",
@@ -17,6 +18,8 @@ const FRONT_ENDS: &[&str] = &[
     "crossterm",
     "wry",
     "ocelli-cli",
+    "ocelli",
+    "ocelli-measure",
 ];
 
 /// What the layout module must not use (ADR-0010).
@@ -97,11 +100,28 @@ fn the_git_adapter_depends_on_no_front_end() {
         deps.contains(&"ocelli-core".to_string()),
         "the adapter depends on the core"
     );
-    let front: Vec<_> = deps
-        .iter()
-        .filter(|d| FRONT_ENDS.contains(&d.as_str()))
-        .collect();
+    let front = front_ends(&deps);
     assert!(front.is_empty(), "ocelli-git depends on {front:?}");
+}
+
+/// The dependencies among `deps` that are a front end or another driving adapter.
+fn front_ends(deps: &[String]) -> Vec<&String> {
+    deps.iter()
+        .filter(|d| FRONT_ENDS.contains(&d.as_str()))
+        .collect()
+}
+
+#[test]
+// Verifies: ADR-0009
+fn the_front_end_check_names_the_desktop_host_and_the_measurement() {
+    let manifest = concat!(
+        "[dependencies]\nocelli-core = { workspace = true }\n",
+        "ocelli = { path = \"../../src-tauri\" }\nocelli-measure = { path = \"../measure\" }\n",
+    );
+    assert_eq!(
+        front_ends(&dependencies(manifest)),
+        ["ocelli", "ocelli-measure"]
+    );
 }
 
 #[test]
