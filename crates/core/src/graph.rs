@@ -358,16 +358,19 @@ impl Layout {
         // out on (ADR-0015). A child with no parent laid out takes the first to arrive in commit
         // order as the branch it continues.
         for (child, parents) in arrived {
-            if let Some(shas) = self.orphans.remove(&child) {
-                let first_parent = shas.iter().find_map(|sha| {
+            // A main-line commit waits for its first parent alone, so another parent arriving
+            // first leaves it waiting (ADR-0032).
+            let first_parent = self.orphans.get(&child).and_then(|shas| {
+                shas.iter().find_map(|sha| {
                     parents
                         .iter()
                         .copied()
                         .find(|&p| chunk.commits[p - first].sha == *sha)
-                });
-                if let Some(p) = first_parent {
-                    self.nodes[child].first_parent = p as u32;
-                }
+                })
+            });
+            if let Some(p) = first_parent {
+                self.orphans.remove(&child);
+                self.nodes[child].first_parent = p as u32;
             }
         }
         for k in 0..chunk.commits.len() {
@@ -416,6 +419,16 @@ impl Layout {
         {
             on_main[k] = true;
             self.main_next = chunk.commits[k].parent_shas.first().cloned();
+            // The main line continues through its first parent alone: until that parent is laid
+            // out, no other parent is the branch the commit continues, so its edge stays a merge
+            // and the main line's edge, once it arrives, a branch edge down lane 0 (ADR-0032).
+            let i = chunk.first + k;
+            if let Some(parent) = &self.main_next
+                && self.find(parent).is_none()
+            {
+                self.nodes[i].first_parent = NO_NODE;
+                self.orphans.insert(i, vec![parent.clone()]);
+            }
             let laid_out_before = |sha: &String| self.find(sha).is_some_and(|i| i < chunk.first);
             if self.main_next.as_ref().is_some_and(laid_out_before) {
                 self.main_next = None;
@@ -1334,43 +1347,6 @@ pub(crate) mod tests {
     }
 
     #[test]
-    // Verifies: ADR-0015, G-9, G-10
-    fn chunked_histories_keep_parents_below_children_and_edges_clear_of_commits() {
-        for seed in 1..60u64 {
-            let mut layout = Chunked::new();
-            for chunk in generated_history(seed, 150).chunks(20) {
-                layout.add_chunk(chunk.to_vec());
-            }
-            let g = layout.graph();
-            let at: HashMap<(i32, i32), &str> = g
-                .nodes
-                .iter()
-                .map(|n| ((n.row, n.col), n.sha.as_str()))
-                .collect();
-            let mut rows: Vec<i32> = g.nodes.iter().map(|n| n.row).collect();
-            rows.sort_unstable();
-            assert_eq!(
-                rows,
-                (0..g.nodes.len() as i32).collect::<Vec<_>>(),
-                "seed {seed}: rows"
-            );
-            for e in &g.edges {
-                assert!(
-                    e.source_row > e.target_row,
-                    "seed {seed}: parent above child {e:?}"
-                );
-                for cell in vertical_cells(e) {
-                    assert!(
-                        !at.contains_key(&cell),
-                        "seed {seed}: {e:?} runs through {}",
-                        at[&cell]
-                    );
-                }
-            }
-        }
-    }
-
-    #[test]
     // Verifies: ADR-0015
     fn a_first_parent_arriving_later_joins_as_a_further_parent() {
         // `m` merges `topic` into a main line whose parent `main` lies in the next chunk.
@@ -1440,52 +1416,6 @@ pub(crate) mod tests {
             .expect("an edge from the parent down to its late child");
         assert!(edge.is_branch, "p is its first parent");
         assert_eq!((edge.min_row, edge.max_row), (1, late.row));
-    }
-
-    #[test]
-    // Verifies: ADR-0015, G-10
-    fn histories_with_late_children_lay_out_every_commit_and_move_nothing() {
-        let mut late_children = 0;
-        for seed in 1..60u64 {
-            let history = skewed_history(seed, 150);
-            let mut layout = Chunked::new();
-            let mut places: HashMap<String, (i32, i32)> = HashMap::new();
-            let mut late: HashSet<String> = HashSet::new();
-            for chunk in history.chunks(25) {
-                let laid = layout.add_chunk(chunk.to_vec());
-                for c in &laid.commits {
-                    places.insert(c.commit.sha.clone(), (c.row, c.col));
-                }
-                for &(_, child) in &laid.late_children {
-                    let c = laid.commits.iter().find(|c| c.row == child).unwrap();
-                    late.insert(c.commit.sha.clone());
-                }
-            }
-            late_children += late.len();
-            let g = layout.graph();
-            for n in &g.nodes {
-                assert_eq!(
-                    places[&n.sha],
-                    (n.row, n.col),
-                    "seed {seed}: {} moved",
-                    n.sha
-                );
-            }
-            let mut rows: Vec<i32> = g.nodes.iter().map(|n| n.row).collect();
-            rows.sort_unstable();
-            assert_eq!(rows, (0..150).collect::<Vec<_>>(), "seed {seed}: rows");
-            let sha_at: HashMap<i32, &str> =
-                g.nodes.iter().map(|n| (n.row, n.sha.as_str())).collect();
-            for e in &g.edges {
-                if e.source_row < e.target_row {
-                    assert!(
-                        late.contains(sha_at[&e.target_row]),
-                        "seed {seed}: only a late child stands below its parent: {e:?}"
-                    );
-                }
-            }
-        }
-        assert!(late_children > 0, "the histories hold late children");
     }
 
     #[test]
@@ -1615,55 +1545,6 @@ pub(crate) mod tests {
     }
 
     #[test]
-    // Verifies: ADR-0032, G-3
-    fn the_main_line_holds_the_leftmost_lane_alone() {
-        for seed in 1..60u64 {
-            for (history, size) in [
-                (generated_history(seed, 150), 150),
-                (generated_history(seed, 150), 25),
-                (skewed_history(seed, 150), 25),
-            ] {
-                let (chunked, main) = with_main_line(&history, size);
-                let g = chunked.graph();
-                for n in &g.nodes {
-                    assert_eq!(
-                        n.col == 0,
-                        main.contains(&n.sha),
-                        "seed {seed}, chunks of {size}: {} in lane {}",
-                        n.sha,
-                        n.col
-                    );
-                }
-            }
-        }
-    }
-
-    #[test]
-    // Verifies: ADR-0032, ADR-0015, G-2, G-9
-    fn a_layout_with_a_main_line_keeps_branches_straight_and_edges_clear_of_commits() {
-        for seed in 1..60u64 {
-            let history = generated_history(seed, 150);
-            let (chunked, _) = with_main_line(&history, 25);
-            let g = chunked.graph();
-            let at: HashMap<(i32, i32), &str> = g
-                .nodes
-                .iter()
-                .map(|n| ((n.row, n.col), n.sha.as_str()))
-                .collect();
-            for e in &g.edges {
-                assert!(e.source_row > e.target_row, "seed {seed}: {e:?}");
-                for cell in vertical_cells(e) {
-                    assert!(
-                        !at.contains_key(&cell),
-                        "seed {seed}: {e:?} runs through {}",
-                        at[&cell]
-                    );
-                }
-            }
-        }
-    }
-
-    #[test]
     // Verifies: ADR-0032, ADR-0015
     fn a_main_line_whose_tip_arrives_later_keeps_the_lane_free_above_it() {
         // Newer work on a side branch comes first; the main line's tip only in the next chunk.
@@ -1680,5 +1561,124 @@ pub(crate) mod tests {
             col("f2") > 0 && col("f1") > 0,
             "the lane is free above the tip"
         );
+    }
+
+    #[test]
+    // Verifies: ADR-0015, ADR-0032, ADR-0030, G-3, G-9, G-10
+    fn every_layout_keeps_its_rows_parents_edges_and_main_line() {
+        // Over both generators, in one chunk and in several, with and without a main line: rows
+        // run 0..n; a parent stands below its children and no edge runs through a commit, but
+        // for the edge down to a late child, which G-9 and G-10 except; with a main line, lane 0
+        // holds its commits alone and each of its edges runs straight down lane 0.
+        let (mut late_children, mut main_edges) = (0, 0);
+        for seed in 1..60u64 {
+            for (history, size) in [
+                (generated_history(seed, 150), 150),
+                (generated_history(seed, 150), 20),
+                (skewed_history(seed, 150), 25),
+            ] {
+                for main_line in [false, true] {
+                    let (chunked, main) = if main_line {
+                        let (chunked, main) = with_main_line(&history, size);
+                        (chunked, Some(main))
+                    } else {
+                        let mut chunked = Chunked::new();
+                        for chunk in history.chunks(size) {
+                            chunked.add_chunk(chunk.to_vec());
+                        }
+                        (chunked, None)
+                    };
+                    let case = format!("seed {seed}, chunks of {size}, main line {main_line}");
+                    let late: HashSet<i32> = chunked
+                        .chunks
+                        .iter()
+                        .flat_map(|c| c.late_children.iter().map(|&(_, child)| child))
+                        .collect();
+                    late_children += late.len();
+                    let g = chunked.graph();
+                    let mut rows: Vec<i32> = g.nodes.iter().map(|n| n.row).collect();
+                    rows.sort_unstable();
+                    assert_eq!(rows, (0..150).collect::<Vec<_>>(), "{case}: rows");
+                    let at: HashMap<(i32, i32), &str> = g
+                        .nodes
+                        .iter()
+                        .map(|n| ((n.row, n.col), n.sha.as_str()))
+                        .collect();
+                    for e in &g.edges {
+                        if e.source_row < e.target_row {
+                            assert!(late.contains(&e.target_row), "{case}: {e:?}");
+                            continue;
+                        }
+                        for cell in vertical_cells(e) {
+                            assert!(
+                                !at.contains_key(&cell),
+                                "{case}: {e:?} runs through {}",
+                                at[&cell]
+                            );
+                        }
+                    }
+                    let Some(main) = main else { continue };
+                    let node = |sha: &str| g.nodes.iter().find(|n| n.sha == sha).unwrap();
+                    for n in &g.nodes {
+                        assert_eq!(
+                            n.col == 0,
+                            main.contains(&n.sha),
+                            "{case}: {} in lane {}",
+                            n.sha,
+                            n.col
+                        );
+                    }
+                    for n in g.nodes.iter().filter(|n| main.contains(&n.sha)) {
+                        let Some(parent) = n.parents.first().filter(|p| main.contains(*p)) else {
+                            continue;
+                        };
+                        let p = node(parent);
+                        let edge = g
+                            .edges
+                            .iter()
+                            .find(|e| e.source_row == p.row && e.target_row == n.row)
+                            .unwrap();
+                        assert!(
+                            edge.is_branch && edge.track.is_none(),
+                            "{case}: the main line's edge {} -> {} is {edge:?}",
+                            p.sha,
+                            n.sha
+                        );
+                        main_edges += 1;
+                    }
+                }
+            }
+        }
+        assert!(late_children > 0, "the histories hold late children");
+        assert!(main_edges > 0, "the histories hold main lines");
+    }
+
+    #[test]
+    // Verifies: ADR-0032, ADR-0015
+    fn a_main_line_parent_arriving_after_another_keeps_the_main_line_straight() {
+        // `m` on the main line merges `topic`, laid out with it, and its first parent `main`
+        // arrives in the next chunk: the main line's edge runs down lane 0, and topic's edge
+        // stays a merge into it.
+        let mut chunked = Chunked {
+            layout: Layout::with_main_line("m".into()),
+            chunks: Vec::new(),
+        };
+        chunked.add_chunk(vec![
+            commit("m", 4, &["main", "topic"]),
+            commit("topic", 3, &[]),
+        ]);
+        chunked.add_chunk(vec![commit("main", 1, &[])]);
+        let g = chunked.graph();
+        let row = |sha: &str| g.nodes.iter().find(|n| n.sha == sha).unwrap().row;
+        let edge = |from: &str| {
+            g.edges
+                .iter()
+                .find(|e| e.source_row == row(from) && e.target_row == row("m"))
+                .unwrap()
+        };
+        let main_edge = edge("main");
+        assert!(main_edge.is_branch && main_edge.track.is_none());
+        assert_eq!((main_edge.source_col, main_edge.target_col), (0, 0));
+        assert!(!edge("topic").is_branch, "topic's edge stays a merge");
     }
 }

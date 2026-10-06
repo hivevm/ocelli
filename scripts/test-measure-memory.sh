@@ -74,9 +74,10 @@ expect "less than the stand-in adds is missed and fails the run" 1 \
   "| 10 MB | missed |" OCELLI_DESKTOP="$work/runs" OCELLI_MEMORY_LIMIT_MB=10
 expect "an application that exits fails the run" 1 "the application exited" \
   OCELLI_DESKTOP="$work/exits"
+# The time limit holds the empty runs too, which must settle within it on a busy machine first.
 expect "an application that never reports a loaded graph fails the run" 1 \
   "never reported a loaded graph" OCELLI_DESKTOP="$work/silent" OCELLI_MEMORY_COMMITS=10 \
-  OCELLI_MEMORY_TIMEOUT=4
+  OCELLI_MEMORY_TIMEOUT=12
 expect "two runs far apart give no verdict and fail the run" 1 "no verdict" \
   OCELLI_DESKTOP="$work/grows" OCELLI_MEMORY_LIMIT_MB=1000
 
