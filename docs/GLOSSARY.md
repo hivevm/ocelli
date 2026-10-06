@@ -35,7 +35,7 @@ to invent.
   interface, and the terminal application.
   _Avoid:_ client, UI, frontend.
 - **Lane** — the column of the commit graph in which a branch is drawn.
-  _Avoid:_ track, column, rail.
+  _Avoid:_ column, rail.
 - **Lane colour** — the colour a lane is drawn in, taken from one theme-independent list so a
   commit keeps its colour across a theme switch; deliberately not a theme token
   ([ADR-0021](adr/0021-themes-tokens-and-palettes.md)).
@@ -51,6 +51,8 @@ to invent.
 - **Main branch** — the branch a repository treats as its line of record, usually `main` or
   `master`.
   _Avoid:_ trunk, default branch, master branch.
+- **Main line** — the main branch's tip and every first parent down from it, drawn straight in the
+  leftmost lane; where no main branch exists, the checked-out commit's.
 - **Merge edge** — an edge that joins a parent in another lane to a merge commit, where a branch
   is merged.
   _Avoid:_ merge line.
@@ -70,6 +72,8 @@ to invent.
 - **Submodule state** — what the sidebar says about a configured submodule: on the pinned commit,
   modified when its working copy has drifted from it, or not initialized when it was never checked
   out; determined without cloning or fetching.
+- **Track** — the lane a merge out of the main line runs up between its parent's row and its
+  child's, which the layout keeps free over those rows.
 - **View state** — what a front end remembers between sessions: the theme, the sidebar's width or
   minimised rail, and the diff layout; never anything read from a repository.
 - **Window** — the range of rows a front end is drawing, the same term in both front ends since

@@ -42,15 +42,18 @@ golden path and the test pattern an agent copies from are named here.
   repository port `RepositoryReader`. It depends on no technology and no adapter
   ([ADR-0009](adr/0009-ports-and-adapters.md)); the layout in `graph.rs` is pure functions over
   values ([ADR-0010](adr/0010-functional-core-layout.md)), laid out after Pvigier
-  ([ADR-0015](adr/0015-layout-after-pvigier-by-chunk.md)) with edges shaped by type
-  ([ADR-0030](adr/0030-edge-shapes-and-tracks-out-of-the-main-line.md)). `History` in `history.rs` keeps the graph laid
-  out so far and answers the front ends' reads of it: a window of rows with the edges crossing it,
-  search, and lineage ([ADR-0031](adr/0031-front-ends-read-row-windows.md)). `load.rs` runs a
-  load session through the port, and a `LoadSession` is what a front end keeps of it, its
-  `History` and its status line, for both front ends and the measurement alike.
+  ([ADR-0015](adr/0015-layout-after-pvigier-by-chunk.md)) with the main line alone in the leftmost
+  lane ([ADR-0032](adr/0032-main-line-in-the-leftmost-lane.md)) and edges shaped by type, a merge
+  out of the main line up a track of its own
+  ([ADR-0030](adr/0030-edge-shapes-and-tracks-out-of-the-main-line.md)). `History` in `history.rs`
+  keeps the graph laid out so far and answers the front ends' reads of it: a window of rows with
+  the edges crossing it, search, and lineage
+  ([ADR-0031](adr/0031-front-ends-read-row-windows.md)). `load.rs` runs a load session through
+  the port, and a `LoadSession` is what a front end keeps of it, its `History` and its status
+  line, for both front ends and the measurement alike.
 - **Git adapter** (`crates/git`, `ocelli-git`) — `GitReader`, the repository port implemented
-  with git2: the history in chunks of 3 000 commits, the first with the stash and
-  working-directory nodes, the refs the sidebar lists, changed files, and diffs
+  with git2: the main line's tip, the history in chunks of 3 000 commits, the first with the stash
+  and working-directory nodes, the refs the sidebar lists, changed files, and diffs
   ([ADR-0019](adr/0019-git2-repository-reader.md),
   [ADR-0016](adr/0016-history-loads-in-chunks.md),
   [ADR-0024](adr/0024-synthetic-nodes-in-the-first-chunk.md)); the walk runs in commit-date order

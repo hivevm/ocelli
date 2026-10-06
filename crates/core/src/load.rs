@@ -33,11 +33,20 @@ pub enum Event {
 pub fn load(reader: &impl RepositoryReader, path: &Path, on: &mut dyn FnMut(Event) -> bool) {
     // The walk calls the chunk and the progress callbacks one at a time, never one inside the
     // other, so they share `on` and what they know of the load through cells.
+    // The main line's tip is named before the walk, so the first chunk is laid out with it
+    // (ADR-0032).
+    let tip = match reader.load_main_tip(path) {
+        Ok(tip) => tip,
+        Err(e) => {
+            on(Event::Ended(Err(e.to_string())));
+            return;
+        }
+    };
     let on = RefCell::new(on);
     let first = Cell::new(true);
     let stopped = RefCell::new(None::<String>);
     let result = {
-        let mut layout = Layout::new();
+        let mut layout = tip.map_or_else(Layout::new, Layout::with_main_line);
         let mut on_chunk = |commits: Vec<CommitData>| {
             let go_on = on.borrow_mut()(Event::Chunk(layout.lay_out(commits)));
             if !first.replace(false) || !go_on {
@@ -163,6 +172,10 @@ mod tests {
                 bail!("walk failed");
             }
             Ok(())
+        }
+
+        fn load_main_tip(&self, _: &Path) -> anyhow::Result<Option<String>> {
+            Ok(None)
         }
 
         fn load_refs(&self, _: &Path) -> Result<RepoRefs> {

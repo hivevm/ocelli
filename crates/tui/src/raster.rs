@@ -127,7 +127,14 @@ impl Canvas {
         let (left, right) = (xs.min(xt), xs.max(xt));
         // A late child stands below its parent (ADR-0015); its edge runs down instead of up.
         let (upper, lower) = (sr.min(tr), sr.max(tr));
-        if sc == tc {
+        if let Some(track) = e.track {
+            // A MERGE out of the main line: along the parent's row to its track, up the track,
+            // then along the child's row (ADR-0030).
+            let xv = 2 * track as usize;
+            self.horizontal(sr, xs.min(xv), xs.max(xv), lane, dim);
+            self.vertical(xv, upper, lower, lane, dim);
+            self.horizontal(tr, xv.min(xt), xv.max(xt), lane, dim);
+        } else if sc == tc {
             self.vertical(xs, upper, lower, lane, dim);
         } else if e.is_branch {
             // BRANCH: along the parent's row, then into the child's lane.
@@ -343,13 +350,8 @@ mod tests {
     }
 
     fn render_whole(g: &Graph) -> Vec<String> {
-        let lanes = g
-            .nodes
-            .iter()
-            .map(|n| n.col as usize + 1)
-            .max()
-            .unwrap_or(0);
-        chars(rasterize(&whole(g), width(lanes), Glyphs::Unicode, None))
+        let w = whole(g);
+        chars(rasterize(&w, width(w.lanes()), Glyphs::Unicode, None))
     }
 
     /// A hand-built graph, for shapes the layout itself avoids producing. Its nodes are given
@@ -388,6 +390,7 @@ mod tests {
                         is_branch,
                         min_row: target_row,
                         max_row: source_row,
+                        track: None,
                     },
                 )
                 .collect(),
@@ -472,6 +475,25 @@ mod tests {
         // between them.
         let g = graph(&[(0, 0), (1, 1), (2, 0)], &[(0, 0, 2, 0, true)]);
         assert_eq!(render_whole(&g), ["●  ", "│ ●", "●  "]);
+    }
+
+    #[test]
+    // Verifies: ADR-0030, G-9
+    fn a_merge_out_of_the_main_line_runs_up_its_track() {
+        // `m` (lane 0, row 2) is merged into `f` (lane 1, row 0) past the main line's `n` (lane 0,
+        // row 1); the edge leaves lane 0 at m's row, runs up track 2, and turns to f.
+        let mut g = graph(&[(0, 1), (1, 0), (2, 0)], &[(2, 0, 1, 0, true)]);
+        g.edges.push(Edge {
+            source_row: 2,
+            source_col: 0,
+            target_row: 0,
+            target_col: 1,
+            is_branch: false,
+            min_row: 0,
+            max_row: 2,
+            track: Some(2),
+        });
+        assert_eq!(render_whole(&g), ["  ●─╮", "●   │", "●───╯"]);
     }
 
     #[test]

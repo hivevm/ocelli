@@ -27,7 +27,10 @@ impl Window {
     /// it only when the developer scrolls to wider rows.
     pub fn lanes(&self) -> usize {
         let nodes = self.nodes.iter().map(|n| n.col);
-        let edges = self.edges.iter().flat_map(|e| [e.source_col, e.target_col]);
+        let edges = self
+            .edges
+            .iter()
+            .flat_map(|e| [e.source_col, e.target_col].into_iter().chain(e.track));
         nodes.chain(edges).max().map_or(0, |col| col as usize + 1)
     }
 }
@@ -268,6 +271,9 @@ impl History {
         }
         self.parent_head.resize(self.rows.len(), NO_LINK);
         for e in chunk.edges {
+            if let Some(track) = e.track {
+                self.lanes = self.lanes.max(track as usize + 1);
+            }
             let (parent, child) = (e.source_row as usize, e.target_row as usize);
             self.parent_links
                 .push((parent as u32, self.parent_head[child]));

@@ -1,10 +1,12 @@
 #!/usr/bin/env bash
 #
 # Measures Q-1 on the corpus of feature spec #11: for each repository, the edge crossings in
-# Ocelli's layout, by ocelli-measure, against the count recorded for its fixed commit. Verifies: Q-1
+# Ocelli's layout, by ocelli-measure, against the count recorded for its fixed commit.
+# Verifies: Q-1, ADR-0032
 #
 # Each repository is fetched at a fixed commit as a single ref, history only and no file contents,
-# so the measurement sees the same commits every week. Q-1 holds when Ocelli's layout draws no more
+# so the measurement sees the same commits every week; the ref is checked out, as in a clone, so
+# the layout measured carries its main line in the leftmost lane, as the front ends draw it. Q-1 holds when Ocelli's layout draws no more
 # edge crossings than recorded; git's count over the same commits, which the straight-branch layout
 # trades crossings against, is reported beside it and decides nothing. The script reports a table,
 # and appends it to the job summary when GITHUB_STEP_SUMMARY is set. It fails when Q-1 is missed on
@@ -21,7 +23,7 @@ set -uo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
-DEFAULT_CORPUS="git https://github.com/git/git.git 8103b446517e0c44e67561b9d0ccce56efa60a71 44559
+DEFAULT_CORPUS="git https://github.com/git/git.git 8103b446517e0c44e67561b9d0ccce56efa60a71 45086
 cargo https://github.com/rust-lang/cargo.git bb2126cffae48394a37db8728dc50a17bbfe54d4 1627
 svelte https://github.com/sveltejs/svelte.git 7c2fcdae6a29fb3b36855dc8e86eb7ce4c56b93a 0
 nuc https://github.com/hivevm/nuc.git 8322f679e7b9b61579aaf1a8d99774b6d8a79e51 0"
@@ -51,7 +53,8 @@ while read -r name url commit recorded; do
   [[ -z "${name:-}" || "$name" == \#* ]] && continue
   repo="$work/$name.git"
   if ! git init --quiet --bare "$repo" \
-    || ! git -C "$repo" fetch --quiet --no-tags --filter=tree:0 "$url" "$commit:refs/heads/measured" 2>"$work/$name.err"; then
+    || ! git -C "$repo" fetch --quiet --no-tags --filter=tree:0 "$url" "$commit:refs/heads/measured" 2>"$work/$name.err" \
+    || ! git -C "$repo" symbolic-ref HEAD refs/heads/measured 2>>"$work/$name.err"; then
     echo "measure: cannot fetch $name at $commit:" >&2
     sed 's/^/    /' "$work/$name.err" >&2
     failed+=("$name")

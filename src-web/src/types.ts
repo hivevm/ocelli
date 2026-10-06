@@ -28,6 +28,8 @@ export interface Edge {
   isBranch: boolean;
   minRow: number;
   maxRow: number;
+  /** The lane a merge out of the main line runs up between its ends (ADR-0030); absent otherwise. */
+  track?: number;
 }
 
 /** Rows `top..top + nodes.length` of the history the host keeps, with every edge crossing them

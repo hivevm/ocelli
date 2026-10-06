@@ -37,6 +37,10 @@ pub struct Layout {
     /// The next row free below the chunks laid out.
     next_row: i32,
     lanes: Lanes,
+    /// Whether lane 0 is the main line's alone (ADR-0032).
+    main_line: bool,
+    /// The SHA of the next commit on the main line, the first parent of the last one laid out.
+    main_next: Option<String>,
 }
 
 /// No node: a commit without a parent laid out.
@@ -61,6 +65,8 @@ struct Chunk {
     commits: Vec<CommitData>,
     parents: Vec<Vec<usize>>,
     children: Vec<Vec<usize>>,
+    /// The track of each merge out of the main line, by its parent and child (ADR-0030).
+    tracks: HashMap<(usize, usize), i32>,
 }
 
 impl Chunk {
@@ -93,7 +99,11 @@ impl Chunk {
             .collect();
         let edges = self
             .indices()
-            .flat_map(|i| self.children_of(i).iter().map(move |&c| layout.edge(i, c)))
+            .flat_map(|i| {
+                self.children_of(i)
+                    .iter()
+                    .map(move |&c| layout.edge(i, c, self.tracks.get(&(i, c)).copied()))
+            })
             .collect();
         Graph { nodes, edges }
     }
@@ -221,6 +231,15 @@ impl Layout {
         Self::default()
     }
 
+    /// A layout that keeps lane 0 for the main line from `tip` down (ADR-0032).
+    pub fn with_main_line(tip: String) -> Self {
+        Self {
+            main_line: true,
+            main_next: Some(tip),
+            ..Self::default()
+        }
+    }
+
     /// The node of the commit `sha`, when it is laid out.
     fn find(&self, sha: &str) -> Option<usize> {
         let bytes = sha_bytes(sha);
@@ -258,10 +277,13 @@ impl Layout {
             commits,
             parents: vec![Vec::new(); n],
             children: vec![Vec::new(); n],
+            tracks: HashMap::new(),
         };
         self.wire(&mut chunk);
+        let on_main = self.follow_main_line(&chunk);
         temporal_topological_sort(&mut self.nodes, &chunk, &mut self.next_row);
-        straight_branches(&mut self.nodes, &chunk, &mut self.lanes);
+        let main = self.main_line.then_some(on_main.as_slice());
+        chunk.tracks = straight_branches(&mut self.nodes, &chunk, &mut self.lanes, main);
         chunk
     }
 
@@ -275,13 +297,13 @@ impl Layout {
         let mut edges: Vec<Edge> = chunk
             .indices()
             .flat_map(|i| chunk.children_of(i).iter().map(move |&c| (i, c)))
-            .map(|(i, c)| self.edge(i, c))
+            .map(|(i, c)| self.edge(i, c, chunk.tracks.get(&(i, c)).copied()))
             .collect();
         let mut late_children: Vec<(i32, i32)> = Vec::new();
         for i in chunk.indices() {
             for &p in chunk.parents[i - first].iter().filter(|&&p| p < first) {
                 late_children.push((self.nodes[p].row, self.nodes[i].row));
-                edges.push(self.edge(p, i));
+                edges.push(self.edge(p, i, None));
             }
         }
         // Newest child first, as a parent lists its children.
@@ -373,6 +395,35 @@ impl Layout {
         }
     }
 
+    /// Which commits of the chunk are on the main line: the next one expected, and from it each
+    /// first parent in commit order found in the chunk. A first parent laid out before its child,
+    /// a late child's, ends the main line there (ADR-0032).
+    fn follow_main_line(&mut self, chunk: &Chunk) -> Vec<bool> {
+        let mut on_main = vec![false; chunk.commits.len()];
+        if self.main_next.is_none() {
+            return on_main;
+        }
+        let in_chunk: HashMap<&str, usize> = chunk
+            .commits
+            .iter()
+            .enumerate()
+            .map(|(k, c)| (c.sha.as_str(), k))
+            .collect();
+        while let Some(k) = self
+            .main_next
+            .as_deref()
+            .and_then(|sha| in_chunk.get(sha).copied())
+        {
+            on_main[k] = true;
+            self.main_next = chunk.commits[k].parent_shas.first().cloned();
+            let laid_out_before = |sha: &String| self.find(sha).is_some_and(|i| i < chunk.first);
+            if self.main_next.as_ref().is_some_and(laid_out_before) {
+                self.main_next = None;
+            }
+        }
+        on_main
+    }
+
     /// The given nodes, newest first.
     fn newest_first(&self, nodes: &[usize]) -> Vec<usize> {
         let mut sorted = nodes.to_vec();
@@ -381,8 +432,8 @@ impl Layout {
     }
 
     /// The edge from the commit at index `p` to its child at index `c`: a branch edge where `p`
-    /// is the child's first parent as laid out, a merge edge otherwise.
-    fn edge(&self, p: usize, c: usize) -> Edge {
+    /// is the child's first parent as laid out, a merge edge otherwise, up `track` where it has one.
+    fn edge(&self, p: usize, c: usize, track: Option<i32>) -> Edge {
         let nodes = &self.nodes;
         let (src_row, tgt_row) = (nodes[p].row, nodes[c].row);
         Edge {
@@ -393,6 +444,7 @@ impl Layout {
             is_branch: nodes[c].first_parent == p as u32,
             min_row: src_row.min(tgt_row),
             max_row: src_row.max(tgt_row),
+            track,
         }
     }
 }
@@ -523,11 +575,27 @@ fn assign_counter(
 /// Assigns a column to every commit of the chunk, so all commits on one branch line share a
 /// column and the branch renders as a straight vertical line. The lane state carries on from
 /// the chunks before.
-fn straight_branches(nodes: &mut [Node], chunk: &Chunk, lanes: &mut Lanes) {
+///
+/// With `main`, which commits of the chunk are on the main line, lane 0 is the main line's alone:
+/// its commits take it, and it is forbidden to every other commit (ADR-0032).
+///
+/// Returns the track each merge out of the main line runs up (ADR-0030).
+fn straight_branches(
+    nodes: &mut [Node],
+    chunk: &Chunk,
+    lanes: &mut Lanes,
+    main: Option<&[bool]>,
+) -> HashMap<(usize, usize), i32> {
+    let mut tracks = HashMap::new();
     // Process in row order (row 0 = newest first)
     let mut sorted_indices: Vec<usize> = chunk.indices().collect();
     sorted_indices.sort_by_key(|&i| nodes[i].row);
 
+    if main.is_some() && lanes.active.is_empty() {
+        lanes.active.push(None);
+        lanes.start_row.push(0);
+        lanes.last_used_row.push(-1);
+    }
     let Lanes {
         active: active_branches,
         start_row: col_start_row,
@@ -541,7 +609,7 @@ fn straight_branches(nodes: &mut [Node], chunk: &Chunk, lanes: &mut Lanes) {
             .partition(|&&t| nodes[t].first_parent == c_idx as u32);
 
         // Compute forbidden columns J(c)
-        let forbidden = compute_forbidden(
+        let mut forbidden = compute_forbidden(
             nodes,
             &merge_children,
             nodes[c_idx].row,
@@ -549,15 +617,50 @@ fn straight_branches(nodes: &mut [Node], chunk: &Chunk, lanes: &mut Lanes) {
             col_start_row,
             last_used_row,
         );
+        let on_main = main.map(|m| m[c_idx - chunk.first]);
+        if on_main == Some(false) {
+            forbidden.insert(0);
+        }
 
         // Find valid branch target to replace (leftmost non-forbidden)
-        let replaced = branch_children
-            .iter()
-            .filter(|&&d| nodes[d].col >= 0 && !forbidden.contains(&(nodes[d].col as usize)))
-            .min_by_key(|&&d| nodes[d].col)
-            .copied();
+        let replaced = if on_main == Some(true) {
+            branch_children.iter().copied().find(|&d| nodes[d].col == 0)
+        } else {
+            branch_children
+                .iter()
+                .filter(|&&d| nodes[d].col >= 0 && !forbidden.contains(&(nodes[d].col as usize)))
+                .min_by_key(|&&d| nodes[d].col)
+                .copied()
+        };
 
-        if let Some(r_idx) = replaced {
+        if on_main == Some(true) {
+            active_branches[0] = Some(c_idx);
+            col_start_row[0] = nodes[c_idx].row;
+            nodes[c_idx].col = 0;
+            // Each merge out of the main line runs up a track of its own: the first lane from 1
+            // on that J(c) leaves free over its rows, used over them from now on (ADR-0030).
+            for &t in &merge_children {
+                let mut taken = compute_forbidden(
+                    nodes,
+                    &[t],
+                    nodes[c_idx].row,
+                    active_branches,
+                    col_start_row,
+                    last_used_row,
+                );
+                taken.insert(0);
+                let track = (1..active_branches.len())
+                    .find(|&j| active_branches[j].is_none() && !taken.contains(&j))
+                    .unwrap_or_else(|| {
+                        active_branches.push(None);
+                        col_start_row.push(0);
+                        last_used_row.push(-1);
+                        active_branches.len() - 1
+                    });
+                last_used_row[track] = nodes[c_idx].row;
+                tracks.insert((c_idx, t), track as i32);
+            }
+        } else if let Some(r_idx) = replaced {
             let col = nodes[r_idx].col as usize;
             active_branches[col] = Some(c_idx);
             col_start_row[col] = nodes[c_idx].row;
@@ -598,6 +701,7 @@ fn straight_branches(nodes: &mut [Node], chunk: &Chunk, lanes: &mut Lanes) {
             }
         }
     }
+    tracks
 }
 
 /// Computes the forbidden column set J(c) for node c — every column in which
@@ -947,7 +1051,9 @@ pub(crate) mod tests {
     /// following the specification's edge shapes (ADR-0030): a BRANCH edge
     /// runs vertically in the child's column, a MERGE edge in the parent's.
     fn vertical_cells(e: &Edge) -> Vec<(i32, i32)> {
-        let col = if e.is_branch {
+        let col = if let Some(track) = e.track {
+            track
+        } else if e.is_branch {
             e.target_col
         } else {
             e.source_col
@@ -1470,5 +1576,109 @@ pub(crate) mod tests {
         assert_eq!(layout.find(lower), Some(0));
         assert_eq!(layout.find(&upper), None, "git writes SHAs in lowercase");
         assert_eq!(layout.find("WORKING_DIRECTORY"), None);
+    }
+
+    /// Lays `history` out in chunks of `size` with the main line from its first commit, the
+    /// newest, and returns each commit's place and the main line as followed by hand: from the
+    /// tip, each first parent, until one is laid out in a chunk before its child's.
+    fn with_main_line(history: &[CommitData], size: usize) -> (Chunked, HashSet<String>) {
+        let tip = history[0].sha.clone();
+        let mut chunked = Chunked {
+            layout: Layout::with_main_line(tip.clone()),
+            chunks: Vec::new(),
+        };
+        for chunk in history.chunks(size) {
+            chunked.add_chunk(chunk.to_vec());
+        }
+        let chunk_of: HashMap<&str, usize> = history
+            .iter()
+            .enumerate()
+            .map(|(i, c)| (c.sha.as_str(), i / size))
+            .collect();
+        let by_sha: HashMap<&str, &CommitData> =
+            history.iter().map(|c| (c.sha.as_str(), c)).collect();
+        let mut main = HashSet::new();
+        let mut at = Some(tip);
+        while let Some(sha) = at {
+            main.insert(sha.clone());
+            at = by_sha[sha.as_str()]
+                .parent_shas
+                .first()
+                .filter(|p| {
+                    chunk_of
+                        .get(p.as_str())
+                        .is_some_and(|&c| c >= chunk_of[sha.as_str()])
+                })
+                .cloned();
+        }
+        (chunked, main)
+    }
+
+    #[test]
+    // Verifies: ADR-0032, G-3
+    fn the_main_line_holds_the_leftmost_lane_alone() {
+        for seed in 1..60u64 {
+            for (history, size) in [
+                (generated_history(seed, 150), 150),
+                (generated_history(seed, 150), 25),
+                (skewed_history(seed, 150), 25),
+            ] {
+                let (chunked, main) = with_main_line(&history, size);
+                let g = chunked.graph();
+                for n in &g.nodes {
+                    assert_eq!(
+                        n.col == 0,
+                        main.contains(&n.sha),
+                        "seed {seed}, chunks of {size}: {} in lane {}",
+                        n.sha,
+                        n.col
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    // Verifies: ADR-0032, ADR-0015, G-2, G-9
+    fn a_layout_with_a_main_line_keeps_branches_straight_and_edges_clear_of_commits() {
+        for seed in 1..60u64 {
+            let history = generated_history(seed, 150);
+            let (chunked, _) = with_main_line(&history, 25);
+            let g = chunked.graph();
+            let at: HashMap<(i32, i32), &str> = g
+                .nodes
+                .iter()
+                .map(|n| ((n.row, n.col), n.sha.as_str()))
+                .collect();
+            for e in &g.edges {
+                assert!(e.source_row > e.target_row, "seed {seed}: {e:?}");
+                for cell in vertical_cells(e) {
+                    assert!(
+                        !at.contains_key(&cell),
+                        "seed {seed}: {e:?} runs through {}",
+                        at[&cell]
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    // Verifies: ADR-0032, ADR-0015
+    fn a_main_line_whose_tip_arrives_later_keeps_the_lane_free_above_it() {
+        // Newer work on a side branch comes first; the main line's tip only in the next chunk.
+        let mut chunked = Chunked {
+            layout: Layout::with_main_line("m2".into()),
+            chunks: Vec::new(),
+        };
+        chunked.add_chunk(vec![commit("f2", 5, &["f1"]), commit("f1", 4, &["m1"])]);
+        chunked.add_chunk(vec![commit("m2", 3, &["m1"]), commit("m1", 2, &[])]);
+        let g = chunked.graph();
+        let col = |sha: &str| g.nodes.iter().find(|n| n.sha == sha).unwrap().col;
+        assert_eq!((col("m2"), col("m1")), (0, 0));
+        assert!(
+            col("f2") > 0 && col("f1") > 0,
+            "the lane is free above the tip"
+        );
     }
 }

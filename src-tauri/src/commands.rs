@@ -318,6 +318,10 @@ mod tests {
             Ok(())
         }
 
+        fn load_main_tip(&self, _: &Path) -> anyhow::Result<Option<String>> {
+            Ok(None)
+        }
+
         fn load_refs(&self, _: &Path) -> anyhow::Result<RepoRefs> {
             if self.refs_fail {
                 anyhow::bail!("refs failed");

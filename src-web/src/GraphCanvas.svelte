@@ -277,7 +277,25 @@
     ctx!.beginPath();
     ctx!.moveTo(x1, y1);
 
-    if (x1 === x2) {
+    if (edge.track !== undefined && edge.track !== null) {
+      // A MERGE out of the main line: along the parent's row to its track, up the track, then
+      // along the child's row, a short curve at each bend (ADR-0030).
+      const xv = nodeX(edge.track);
+      const r = COL_WIDTH / 2;
+      const out = xv > x1 ? 1 : -1;
+      const dy = y2 > y1 ? 1 : -1;
+      const into = x2 > xv ? 1 : -1;
+      ctx!.lineTo(xv - out * r, y1);
+      ctx!.quadraticCurveTo(xv, y1, xv, y1 + dy * r);
+      if (x2 === xv) {
+        // The child stands in the track's lane itself: up the track to it, no second bend.
+        ctx!.lineTo(x2, y2);
+      } else {
+        ctx!.lineTo(xv, y2 - dy * r);
+        ctx!.quadraticCurveTo(xv, y2, xv + into * r, y2);
+        ctx!.lineTo(x2, y2);
+      }
+    } else if (x1 === x2) {
       // Straight vertical
       ctx!.lineTo(x2, y2);
     } else {
