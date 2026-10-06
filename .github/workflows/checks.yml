@@ -176,3 +176,6 @@ jobs:
       # Off Linux it skips with a notice: the measurement reads /proc (#11).
       - name: Self-test the measurement of the desktop application's memory
         run: bash scripts/test-measure-memory.sh
+      # The weekly measurement of Q-2, tried on a small generated repository (feature spec #27).
+      - name: Self-test the measurement of the waits on a large history
+        run: bash scripts/test-measure-windows.sh

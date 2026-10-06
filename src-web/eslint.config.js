@@ -21,6 +21,16 @@ export default ts.config(
     rules: {
       complexity: ['error', 25],
       'max-lines-per-function': ['error', { max: 120, skipBlankLines: true, skipComments: true }],
+      // A failure is reported, never dropped or read as a value (docs/CONVENTIONS.md): a
+      // `.catch` whose handler takes no error cannot report it.
+      'no-restricted-syntax': [
+        'error',
+        {
+          selector:
+            "CallExpression[callee.property.name='catch'] > :matches(ArrowFunctionExpression, FunctionExpression)[params.length=0]",
+          message: 'A failure is reported, never dropped: take the error and report it.',
+        },
+      ],
     },
   },
   {

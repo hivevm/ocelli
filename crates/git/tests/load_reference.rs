@@ -48,7 +48,7 @@ fn a_fixed_repository_loads_as_the_reference_did() {
     let reader = GitReader;
     let mut quiet = |_: String| {};
 
-    let commits = reader.load_commits(&dir, &mut quiet).unwrap();
+    let commits = reader.load_first_chunk(&dir, &mut quiet).unwrap();
     assert_eq!(
         json(&build_graph(commits)),
         expected("repo-graph-clean.json")
@@ -85,7 +85,9 @@ fn a_fixed_repository_loads_as_the_reference_did() {
 
     std::fs::write(dir.join("a.txt"), "changed\n").unwrap();
     std::fs::write(dir.join("new.txt"), "new\n").unwrap();
-    let mut graph = json(&build_graph(reader.load_commits(&dir, &mut quiet).unwrap()));
+    let mut graph = json(&build_graph(
+        reader.load_first_chunk(&dir, &mut quiet).unwrap(),
+    ));
     for node in graph["nodes"].as_array_mut().unwrap() {
         if node["sha"] == WORKDIR_SHA {
             node["date"] = "<now>".into();

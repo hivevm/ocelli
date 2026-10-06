@@ -92,3 +92,20 @@ export function anyLeaf<T extends Named>(
     folder.leaves.some(leaf => pred(leaf.item)) || folder.folders.some(f => anyLeaf(f, pred))
   );
 }
+
+/** Every commit the sidebar's refs point at in this repository: branches, remote branches,
+ *  working trees, and tags. A submodule's commit belongs to another history and is left out. */
+export function refShas(refs: {
+  locals: { sha: string }[];
+  remotes: { branches: { sha: string }[] }[];
+  worktrees: { sha: string }[];
+  tags: { sha: string }[];
+}): string[] {
+  const shas = [
+    ...refs.locals.map(b => b.sha),
+    ...refs.remotes.flatMap(r => r.branches.map(b => b.sha)),
+    ...refs.worktrees.map(w => w.sha),
+    ...refs.tags.map(t => t.sha),
+  ];
+  return [...new Set(shas.filter(sha => sha !== ''))];
+}

@@ -8,8 +8,12 @@
   import CommitDetail from './CommitDetail.svelte';
   import RepoSidebar from './RepoSidebar.svelte';
   import StatusBar, { READY_STATUS } from './StatusBar.svelte';
-  import { lineageRows } from './ancestry.ts';
-  import type { GraphData, NodeJson, FileChange, DiffLine, RepoRefs } from './types.ts';
+  import { refShas } from './refTree.ts';
+  import type { RowRange } from './rowWindow.ts';
+  import { Newest } from './hostAnswers.ts';
+  import type {
+    NodeJson, FileChange, DiffLine, RepoRefs, Growth, RowWindow, Relative, Selected, Found,
+  } from './types.ts';
   import { applyTheme, storedTheme, type Theme } from './theme/palette.ts';
 
   // ── Theme ────────────────────────────────────────────────────────────────
@@ -36,31 +40,120 @@
   }
 
   // ── State ──────────────────────────────────────────────────────────────────
-  let graphData       = $state<GraphData | null>(null);
+  // The host keeps the history (ADR-0031); the web interface holds how far it has loaded, the
+  // window of rows on screen, and the selected commit.
+  let growth          = $state<Growth | null>(null);
+  let view            = $state<RowWindow | null>(null);
   let repoRefs        = $state<RepoRefs | null>(null);
   let status          = $state(READY_STATUS);
   let repoLabel       = $state('(no repository)');
   let currentRepoPath = $state<string | null>(null);
   let selectedNode    = $state<NodeJson | null>(null);
+  let relatives       = $state(new Map<string, Relative>());
+  // The commits of the sidebar's refs that are laid out, so a ref to history still loading stays inert.
+  let loadedRefShas   = $state(new Set<string>());
   let graphCanvas     = $state<{ revealRow: (row: number) => void; clearSelection: () => void } | null>(null);
   let searchBox       = $state<{ focusSearch: () => void } | null>(null);
-  const nodeBySha     = $derived(new Map((graphData?.nodes ?? []).map(n => [n.sha, n])));
-  const nodeByRow     = $derived(new Map((graphData?.nodes ?? []).map(n => [n.row, n])));
-  // Lineage highlight: rows of the selected commit, its loaded ancestors, and
-  // its descendants; null (no selection) means nothing is dimmed.
-  const highlightRows = $derived(selectedNode ? lineageRows(selectedNode, nodeBySha) : null);
+  const rowCount      = $derived(growth?.rows ?? 0);
+  // The most lanes the graph has shown in this load: the graph column grows to them, so older
+  // history arriving with more lanes moves nothing until it is scrolled to.
+  let shownLanes      = $state(0);
   // The checked-out branch, taken from the refs payload so the graph can mark
   // its chip. Detached HEAD leaves it null and nothing is marked.
   const headRef = $derived(repoRefs?.locals.find(b => b.isHead)?.name ?? null);
 
   // Width of the graph lane area — the column header mirrors the canvas layout.
-  const graphColWidth = $derived.by(() => {
-    const nodes = graphData?.nodes ?? [];
-    if (nodes.length === 0) return EMPTY_GRAPH_WIDTH;
-    let maxCol = 0;
-    for (const n of nodes) if (n.col > maxCol) maxCol = n.col;
-    return graphAreaWidth(maxCol);
-  });
+  const graphColWidth = $derived(rowCount === 0 ? EMPTY_GRAPH_WIDTH : graphAreaWidth(Math.max(shownLanes, 1) - 1));
+
+  // ── Rows from the host ─────────────────────────────────────────────────────
+  /** The rows last asked for, asked again whenever the history or the selection changes. */
+  let wanted: RowRange | null = null;
+  // The newest answer of each kind for the current load; older ones are dropped (ADR-0031).
+  const reads = new Newest();
+  const selects = new Newest();
+  const refreshes = new Newest();
+  const currentLoad = (): number | undefined => growth?.generation;
+
+  /** A command that failed: the status bar says so. */
+  function report(e: unknown): void {
+    status = 'Error: ' + e;
+  }
+
+  async function readWindow(range: RowRange): Promise<void> {
+    wanted = range;
+    try {
+      const window = await reads.ask(() => invoke<RowWindow>('read_window', { ...range }), currentLoad);
+      if (window) {
+        view = window;
+        shownLanes = Math.max(shownLanes, window.lanes);
+      }
+    } catch (e) {
+      report(e);
+    }
+  }
+
+  function rereadWindow(): void {
+    if (wanted) void readWindow(wanted);
+  }
+
+  async function updateLoadedRefs(): Promise<void> {
+    const shas = repoRefs ? refShas(repoRefs) : [];
+    try {
+      const rows = await invoke<(number | null)[]>('rows_of', { shas });
+      loadedRefShas = new Set(shas.filter((_, i) => rows[i] !== null && rows[i] !== undefined));
+    } catch (e) {
+      report(e);
+    }
+  }
+
+  function onGrowth(next: Growth): void {
+    if (next.generation !== growth?.generation) {
+      // A new load: rows are reassigned, so a selection or a window from the history before
+      // would point at the wrong commits.
+      view = null;
+      wanted = null;
+      shownLanes = 0;
+      reads.drop();
+      selects.drop();
+      refreshes.drop();
+      selectedNode = null;
+      relatives = new Map();
+      changedFiles = [];
+      diffFile = null;
+      diffLines = [];
+    }
+    growth = next;
+    rereadWindow();
+    void updateLoadedRefs();
+    // The selection's parents and lineage may reach into the rows just added.
+    if (selectedNode) void refreshRelatives(selectedNode.sha);
+  }
+
+  async function refreshRelatives(sha: string): Promise<void> {
+    try {
+      const selected = await refreshes.ask(() => invoke<Selected | null>('selection'), currentLoad);
+      if (selected && selected.node.sha === sha && selectedNode?.sha === sha) {
+        relatives = relativesOf(selected);
+      }
+    } catch (e) {
+      report(e);
+    }
+  }
+
+  function relativesOf(selected: Selected): Map<string, Relative> {
+    return new Map(selected.relatives.map(r => [r.sha, r]));
+  }
+
+  async function searchHistory(query: string): Promise<Found> {
+    const empty: Found = { generation: growth?.generation ?? 0, rows: [], hits: [] };
+    try {
+      const found = await invoke<Found>('search_history', { query });
+      return found.generation === growth?.generation ? found : empty;
+    } catch (e) {
+      report(e);
+      return empty;
+    }
+  }
   let changedFiles    = $state<FileChange[]>([]);
 
   let diffLines       = $state<DiffLine[]>([]);
@@ -78,7 +171,11 @@
 
   /** Escape: deselect the commit, which also lifts the ancestry dim. */
   function clearSelection(): void {
+    selects.drop();
+    refreshes.drop();
     selectedNode = null;
+    relatives = new Map();
+    invoke('deselect').then(rereadWindow, report);
     changedFiles = [];
     diffFile = null;
     diffLines = [];
@@ -87,11 +184,9 @@
 
   /** ↑/↓: step the selection one row; ↓ with nothing selected starts at row 0. */
   function moveSelection(delta: 1 | -1): void {
-    if (!graphData || graphData.nodes.length === 0) return;
-    const node = nodeByRow.get(selectedNode ? selectedNode.row + delta : 0);
-    if (!node) return;
-    graphCanvas?.revealRow(node.row);
-    onSelectCommit(node.sha);
+    const row = selectedNode ? selectedNode.row + delta : 0;
+    if (row < 0 || row >= rowCount) return;
+    jumpToRow(row);
   }
 
   /** Global shortcuts: Ctrl/Cmd+F focuses the search field; Escape closes the
@@ -118,17 +213,7 @@
   // ── Tauri event listeners ──────────────────────────────────────────────────
   onMount(() => {
     const unlisten = Promise.all([
-      listen<string>('load-graph', (e) => {
-        try {
-          graphData = typeof e.payload === 'string' ? JSON.parse(e.payload) : e.payload;
-          // Rows are reassigned on every load, so a selection from the previous
-          // graph would point at the wrong node (and dim the wrong ancestry).
-          selectedNode = null;
-          changedFiles = [];
-        } catch {
-          status = 'Error parsing graph data';
-        }
-      }),
+      listen<Growth>('history-grew', (e) => onGrowth(e.payload)),
       // Refs come from the same repository read as the graph (ADR-0026), so the
       // sidebar never describes a different state than the commits on screen.
       listen<string>('load-refs', (e) => {
@@ -137,6 +222,7 @@
         } catch {
           repoRefs = null;
         }
+        void updateLoadedRefs();
       }),
       listen<string>('set-status',     (e) => { status = e.payload; }),
       listen<string>('commit-files', (e) => {
@@ -182,21 +268,41 @@
     await invoke('open_repo', { path }).catch((e: unknown) => { status = 'Error: ' + e; });
   }
 
-  function onSelectCommit(sha: string): void {
-    const node = nodeBySha.get(sha) ?? null;
-    selectedNode = node;
+  /** Selects the commit in `row`: the host computes its lineage, which the window read after
+      lights up, and its changed files follow. */
+  async function onSelectRow(row: number): Promise<void> {
+    let selected: Selected | null;
+    try {
+      selected = await selects.ask(() => invoke<Selected | null>('select_row', { row }), currentLoad);
+    } catch (e) {
+      report(e);
+      return;
+    }
+    if (!selected) return;
+    refreshes.drop();
+    selectedNode = selected.node;
+    relatives = relativesOf(selected);
     changedFiles = [];
     diffFile = null;
     diffLines = [];
-    invoke('select_commit', { sha }).catch(() => {});
+    rereadWindow();
+    invoke('select_commit', { sha: selected.node.sha }).catch(report);
   }
 
-  /** Jump to a node from the sidebar's parent/child links or a search hit. */
-  function jumpToSha(sha: string): void {
-    const node = nodeBySha.get(sha);
-    if (!node) return;
-    graphCanvas?.revealRow(node.row);
-    onSelectCommit(sha);
+  /** Jump to a row from a parent/child link, a search hit, or the arrow keys. */
+  function jumpToRow(row: number): void {
+    graphCanvas?.revealRow(row);
+    void onSelectRow(row);
+  }
+
+  /** Jump to the commit a sidebar ref points at, once it is laid out. */
+  async function jumpToSha(sha: string): Promise<void> {
+    try {
+      const [row] = await invoke<(number | null)[]>('rows_of', { shas: [sha] });
+      if (row !== null && row !== undefined) jumpToRow(row);
+    } catch (e) {
+      report(e);
+    }
   }
 
   async function onSelectFile(file: FileChange): Promise<void> {
@@ -209,6 +315,7 @@
       diffLines = typeof json === 'string' ? JSON.parse(json) : json;
     } catch (e) {
       diffLines = [];
+      report(e);
     } finally {
       diffLoading = false;
     }
@@ -258,7 +365,7 @@
   </div>
 
   <div id="titlebar-right">
-    <SearchBox bind:this={searchBox} nodes={graphData?.nodes ?? []} onJump={jumpToSha} />
+    <SearchBox bind:this={searchBox} search={searchHistory} revision={rowCount} onJump={jumpToRow} />
   </div>
 </div>
 
@@ -269,7 +376,7 @@
   <div id="top-pane">
     <RepoSidebar
       {repoRefs}
-      loadedShas={new Set(nodeBySha.keys())}
+      loadedShas={loadedRefShas}
       onJump={jumpToSha}
       onOpenRepo={openRepoPath}
     />
@@ -287,10 +394,13 @@
       <div id="canvas-container">
         <GraphCanvas
           bind:this={graphCanvas}
-          {graphData}
-          {onSelectCommit}
+          {rowCount}
+          lanes={Math.max(shownLanes, 1)}
+          {view}
+          generation={growth?.generation ?? 0}
+          onNeedRows={readWindow}
+          {onSelectRow}
           {theme}
-          {highlightRows}
           {headRef}
         />
 
@@ -311,12 +421,12 @@
 
     <CommitDetail
       node={selectedNode}
-      {nodeBySha}
+      {relatives}
       {showAvatars}
       {changedFiles}
       {diffFile}
       {onSelectFile}
-      onJumpToSha={jumpToSha}
+      onJumpToRow={jumpToRow}
     />
   </div><!-- end #top-pane -->
 </div><!-- end #main -->

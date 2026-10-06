@@ -13,6 +13,10 @@ version = "0.1.0"
 edition = "2024"
 rust-version = "1.96"
 
+# No crate writes unsafe code; a block that must is allowed where it stands.
+[workspace.lints.rust]
+unsafe_code = "deny"
+
 [workspace.dependencies]
 ocelli-core = { path = "crates/core" }
 ocelli-git = { path = "crates/git" }

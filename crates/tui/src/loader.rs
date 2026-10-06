@@ -3,8 +3,8 @@
 //! their results come back to the event loop as [`Msg`] values (ADR-0028, the
 //! terminal counterpart of ADR-0019).
 
-use ocelli_core::graph;
-use ocelli_core::model::{DiffLine, FileChange, Graph, RepoRefs};
+use ocelli_core::load::{self, Event};
+use ocelli_core::model::{DiffLine, FileChange};
 use ocelli_core::port::RepositoryReader;
 use ocelli_git::GitReader;
 use std::path::PathBuf;
@@ -13,8 +13,8 @@ use std::thread;
 
 /// A result arriving at the event loop.
 pub enum Msg {
-    Progress(String),
-    Loaded(Result<(Graph, RepoRefs), String>),
+    /// How the load of the history goes (ADR-0016).
+    Load(Event),
     Files {
         sha: String,
         files: Result<Vec<FileChange>, String>,
@@ -33,24 +33,11 @@ pub enum Request {
     Diff { sha: String, path: String },
 }
 
-/// Loads history, refs and layout on a thread of its own. The graph and the
-/// refs come from the same read, so they never describe different states.
+/// Loads the history on a thread of its own (ADR-0016), laid out there, so the
+/// event loop only takes in rows laid out. The load stops once the event loop
+/// has dropped the receiver, as when another repository is opened.
 pub fn spawn_load(path: PathBuf, tx: Sender<Msg>) {
-    thread::spawn(move || {
-        let reader = GitReader;
-        let relay = tx.clone();
-        let mut progress = move |msg: String| {
-            let _ = relay.send(Msg::Progress(msg));
-        };
-
-        let result = (|| -> anyhow::Result<(Graph, RepoRefs)> {
-            let commits = reader.load_commits(&path, &mut progress)?;
-            let repo_refs = reader.load_refs(&path)?;
-            Ok((graph::build_graph(commits), repo_refs))
-        })()
-        .map_err(|e| e.to_string());
-        let _ = tx.send(Msg::Loaded(result));
-    });
+    thread::spawn(move || load::load(&GitReader, &path, &mut |e| tx.send(Msg::Load(e)).is_ok()));
 }
 
 /// Starts the worker for per-commit reads. Requests that queue up while one is

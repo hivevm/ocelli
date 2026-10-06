@@ -1,24 +1,29 @@
 //! `ocelli-measure`: measures Ocelli's quality goals on a real repository (#11).
 //!
-//! `ocelli-measure crossings PATH` lays out the repository at `PATH` as every front end does, up to
-//! the commit limit (ADR-0016), hands git exactly the commits laid out, and prints the number of
+//! `ocelli-measure crossings PATH` lays out the first chunk of the repository at `PATH` as every
+//! front end does (ADR-0016), hands git exactly the commits laid out, and prints the number of
 //! commits and the edge crossings in Ocelli's layout and in `git log --graph` over them (Q-1).
 //! The stash and working-directory nodes are left out, since git draws neither (ADR-0024).
+//!
+//! `ocelli-measure windows PATH` loads the whole history of the repository at `PATH` as the front
+//! ends do and prints, in milliseconds, how long the first window of rows took and how long the
+//! slowest window across the loaded history took to read (Q-2), with the lineage and the search
+//! beside them.
 
 mod crossings;
 mod git_graph;
+mod windows;
 
 use anyhow::{Context, Result, bail};
 use ocelli_core::graph::build_graph;
 use ocelli_core::model::{CommitData, CommitKind};
-use ocelli_core::port::RepositoryReader;
 use ocelli_git::GitReader;
 use std::collections::HashSet;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
-const USAGE: &str = "Usage: ocelli-measure crossings PATH";
+const USAGE: &str = "Usage: ocelli-measure crossings PATH | ocelli-measure windows PATH";
 
 /// The measured numbers of one repository.
 struct Crossings {
@@ -37,13 +42,29 @@ fn main() -> Result<()> {
             println!("git crossings: {}", measured.git);
             Ok(())
         }
+        [command, path] if command == "windows" => {
+            let waits = windows::measure(&PathBuf::from(path))?;
+            let ms = |d: std::time::Duration| format!("{:.1}", d.as_secs_f64() * 1000.0);
+            println!("commits: {}", waits.commits);
+            println!("first window ms: {}", ms(waits.first_window));
+            println!("load ms: {}", ms(waits.load));
+            println!(
+                "slowest while loading ms: {}",
+                ms(waits.slowest_while_loading)
+            );
+            println!("windows: {}", waits.windows);
+            println!("slowest window ms: {}", ms(waits.slowest_window));
+            println!("lineage ms: {}", ms(waits.lineage));
+            println!("search ms: {}", ms(waits.search));
+            Ok(())
+        }
         _ => bail!("{USAGE}"),
     }
 }
 
 fn measure_crossings(path: &Path) -> Result<Crossings> {
     let commits: Vec<CommitData> = GitReader
-        .load_commits(path, &mut |_| {})
+        .load_first_chunk(path, &mut |_| {})
         .with_context(|| format!("cannot read the repository at {}", path.display()))?
         .into_iter()
         .filter(|c| c.kind == CommitKind::Commit)
@@ -70,9 +91,11 @@ fn measure_crossings(path: &Path) -> Result<Crossings> {
 /// The rows of `git log --graph` over exactly `commits`: each row's graph, and the SHA on the rows
 /// that carry a commit.
 ///
-/// The commits Ocelli lays out are the newest of a topological walk, so every child of a commit in
-/// the set is in the set too: the set is what its heads reach, short of the ancestors of the
-/// parents left outside. git is given exactly those heads and that boundary.
+/// The commits Ocelli lays out are the newest of the walk in commit-date order, which yields a
+/// commit after its children unless a date runs backwards (ADR-0016), so the set is what its heads
+/// reach, short of the ancestors of the parents left outside. git is given exactly those heads and
+/// that boundary; where a date running backwards makes the two sets differ, the measurement says
+/// so and fails.
 fn git_log_graph(path: &Path, commits: &[CommitData]) -> Result<Vec<(String, Option<String>)>> {
     let inside: HashSet<&str> = commits.iter().map(|c| c.sha.as_str()).collect();
     let parents: HashSet<&str> = commits

@@ -53,6 +53,7 @@ run "Dev Container toolchain" scripts/check-devcontainer-toolchain.sh
 run "Build, test, lint" scripts/check-build.sh
 run "Measurement self-test" scripts/test-measure-crossings.sh
 run "Memory measurement self-test" scripts/test-measure-memory.sh
+run "Window measurement self-test" scripts/test-measure-windows.sh
 
 printf '\n'
 if ((${#failed[@]})); then

@@ -6,17 +6,18 @@
 //! key reads; none writes to the repository.
 
 use crate::chips::RefContext;
-use crate::explore;
 use crate::files::{self, FileRow, FileView};
 use crate::loader::{Msg, Request};
-use crate::raster::{Glyphs, GraphIndex};
+use crate::raster::Glyphs;
 use crate::sidebar::{self, Action, Activated, Item};
 use crate::state::{DiffView as StoredDiffView, StoredTheme, ViewState};
 use crate::theme::Theme;
-use ocelli_core::model::MAX_COMMITS;
-use ocelli_core::model::{CommitKind, DiffLine, FileChange, Graph, NodeJson, RepoRefs};
+use ocelli_core::graph::LaidChunk;
+use ocelli_core::history::{History, Lineage};
+use ocelli_core::load::{Event, LoadSession};
+use ocelli_core::model::{CommitKind, DiffLine, FileChange, NodeJson, RepoRefs};
 use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 use std::path::PathBuf;
 
 /// The pane that receives navigation keys, left to right.
@@ -30,26 +31,36 @@ pub enum Focus {
 
 const PANES: [Focus; 4] = [Focus::Sidebar, Focus::Graph, Focus::Detail, Focus::Files];
 
-/// A loaded repository: the graph from `ocelli-core` plus the lookups the
-/// terminal needs on top of it.
+/// A loaded repository: the load session the core keeps (ADR-0031), growing
+/// chunk by chunk while the load runs, plus the refs the terminal shows with it.
 pub struct Loaded {
-    pub graph: Graph,
-    pub index: GraphIndex,
+    pub session: LoadSession,
+    /// The most lanes the graph pane has shown, which its width follows.
+    pub shown_lanes: usize,
     pub refs: RefContext,
     pub sidebar: sidebar::Data,
-    row_of: HashMap<String, usize>,
 }
 
 impl Loaded {
-    pub fn new(graph: Graph, repo_refs: RepoRefs) -> Self {
-        let index = GraphIndex::new(&graph);
-        let row_of = graph
-            .nodes
-            .iter()
-            .map(|n| (n.sha.clone(), n.row as usize))
-            .collect();
-        let sidebar = sidebar::Data::new(&repo_refs);
-        let refs = RefContext {
+    /// The first chunk, shown before the refs arrive (ADR-0016).
+    pub fn new(first_chunk: LaidChunk) -> Self {
+        let mut session = LoadSession::new();
+        session.append(first_chunk);
+        Self {
+            session,
+            shown_lanes: 0,
+            refs: RefContext {
+                head: None,
+                locals: Default::default(),
+            },
+            sidebar: sidebar::Data::new(&RepoRefs::default()),
+        }
+    }
+
+    /// Takes in the refs the load read right after the first chunk.
+    pub fn set_refs(&mut self, repo_refs: RepoRefs) {
+        self.sidebar = sidebar::Data::new(&repo_refs);
+        self.refs = RefContext {
             head: repo_refs
                 .locals
                 .iter()
@@ -57,50 +68,38 @@ impl Loaded {
                 .map(|b| b.name.clone()),
             locals: repo_refs.locals.into_iter().map(|b| b.name).collect(),
         };
-        Self {
-            graph,
-            index,
-            refs,
-            sidebar,
-            row_of,
-        }
     }
 
-    pub fn node(&self, row: usize) -> &NodeJson {
-        &self.graph.nodes[self.index.node_at(row)]
+    pub fn history(&self) -> &History {
+        self.session.history()
+    }
+
+    pub fn node(&self, row: usize) -> NodeJson {
+        self.history().node(row)
     }
 
     pub fn rows(&self) -> usize {
-        self.index.rows()
+        self.history().rows()
     }
 
     pub fn row_of(&self, sha: &str) -> Option<usize> {
-        self.row_of.get(sha).copied()
+        self.history().row_of(sha)
     }
 
-    fn by_sha(&self, sha: &str) -> Option<&NodeJson> {
-        self.row_of(sha).map(|r| self.node(r))
-    }
-
-    /// Whether a sidebar entry can act: a ref needs its commit in the loaded
-    /// graph (a ref beyond the commit limit has no row), a switch needs no
-    /// blocking reason.
+    /// Whether a sidebar entry can act: a ref needs its commit laid out (a ref
+    /// to history still loading has no row yet), a switch needs no blocking
+    /// reason.
     pub fn can_act(&self, item: &Item) -> bool {
         match &item.action {
-            Action::Reveal(sha) => self.row_of.contains_key(sha),
+            Action::Reveal(sha) => self.row_of(sha).is_some(),
             Action::Open(path) => !path.as_os_str().is_empty(),
             Action::Blocked(_) => false,
         }
     }
 
-    /// The label for a parent or child link. Synthetic nodes have no useful
-    /// short SHA, so the working-directory node is named instead.
+    /// The label for a parent or child link.
     pub fn link_label(&self, sha: &str) -> String {
-        match self.by_sha(sha) {
-            Some(n) if n.kind == CommitKind::Working => "Uncommitted".to_string(),
-            Some(n) => n.short_sha.clone(),
-            None => sha[..sha.len().min(7)].to_string(),
-        }
+        self.history().link_label(sha)
     }
 }
 
@@ -145,7 +144,7 @@ pub struct App {
     /// highlight and empties the detail pane, as on the desktop.
     pub active: bool,
     /// Rows of the selected commit's lineage.
-    pub lineage: Option<HashSet<usize>>,
+    pub lineage: Option<Lineage>,
     /// First graph row on screen; kept around the selection by [`App::scroll_to_selection`].
     pub offset: usize,
     /// Height of the graph pane's content in rows, as of the last frame.
@@ -244,20 +243,7 @@ impl App {
 
     pub fn on_msg(&mut self, msg: Msg) {
         match msg {
-            Msg::Progress(p) => self.status = p,
-            Msg::Loaded(Ok((graph, repo_refs))) => {
-                let n = graph.nodes.len();
-                // At the commit limit the load was (or may have been) truncated —
-                // say so instead of presenting the cut-off as the whole history.
-                self.status = if n >= MAX_COMMITS {
-                    format!("{n} commits — commit limit reached, older history not shown")
-                } else {
-                    format!("{n} commits")
-                };
-                self.data = Some(Loaded::new(graph, repo_refs));
-                self.select(0);
-            }
-            Msg::Loaded(Err(e)) => self.status = format!("Error: {e}"),
+            Msg::Load(event) => self.on_load(event),
             Msg::Files { sha, files } => {
                 // Results for a commit that is no longer selected are stale.
                 if self.selected_sha().as_deref() == Some(sha.as_str()) {
@@ -277,8 +263,46 @@ impl App {
         }
     }
 
+    /// Takes in how the load goes (ADR-0016).
+    fn on_load(&mut self, event: Event) {
+        match (event, self.data.as_mut()) {
+            // Once the first chunk is shown, the progress line counts chunks.
+            (Event::Progress(p), None) => self.status = p,
+            (Event::Progress(_), Some(_)) => {}
+            (Event::Chunk(chunk), None) => {
+                let data = Loaded::new(chunk);
+                self.status = data.session.status();
+                self.data = Some(data);
+                self.select(0);
+                // A query typed while the history was loading.
+                self.update_matches();
+            }
+            (Event::Chunk(chunk), Some(data)) => {
+                let from = data.session.append(chunk);
+                self.status = data.session.status();
+                // The rows laid out stay where they are, so the selection and
+                // the match jumped to stay too; the search and the lineage grow
+                // by what they reach in the rows just added.
+                let history = data.session.history();
+                if let Some(lineage) = self.lineage.as_mut() {
+                    history.extend_lineage(lineage, from);
+                }
+                let found = history.search_from(&self.search.query, from);
+                self.search.matches.extend(found);
+            }
+            (Event::Refs(refs), Some(data)) => data.set_refs(*refs),
+            (Event::Refs(_), None) => {}
+            (Event::Ended(Err(e)), None) => self.status = format!("Error: {e}"),
+            (Event::Ended(Ok(())), None) => {}
+            (Event::Ended(result), Some(data)) => {
+                data.session.end(result);
+                self.status = data.session.status();
+            }
+        }
+    }
+
     /// The selected commit, when one is selected.
-    pub fn selected_node(&self) -> Option<&NodeJson> {
+    pub fn selected_node(&self) -> Option<NodeJson> {
         let data = self.data.as_ref()?;
         (self.active && data.rows() > 0).then(|| data.node(self.selected))
     }
@@ -299,7 +323,7 @@ impl App {
         self.active = true;
         if changed {
             let node = data.node(row);
-            self.lineage = Some(explore::lineage(node, |sha| data.by_sha(sha)));
+            self.lineage = Some(data.history().lineage(row));
             self.files = None;
             self.diff = None;
             self.link = 0;
@@ -449,7 +473,7 @@ impl App {
     fn update_matches(&mut self) {
         self.search.pos = None;
         self.search.matches = match &self.data {
-            Some(data) => explore::search(&data.graph.nodes, &self.search.query),
+            Some(data) => data.history().search(&self.search.query),
             None => Vec::new(),
         };
     }
@@ -528,7 +552,7 @@ impl App {
                     self.select(row);
                     self.focus = Focus::Graph;
                 }
-                // At the commit limit a ref can point at history never read (ADR-0016).
+                // A ref can point at history not loaded (ADR-0016).
                 None => self.status = format!("{} — outside the loaded history", item.name),
             },
             Action::Open(path) => self.open_repo(path, "Opening…"),
@@ -712,7 +736,7 @@ impl App {
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
-    use ocelli_core::graph::build_graph;
+    use ocelli_core::graph::Layout;
     use ocelli_core::model::{CommitData, FileStatus};
 
     pub(crate) fn commit(sha: &str, time: i64, parents: &[&str], refs: &[&str]) -> CommitData {
@@ -734,16 +758,33 @@ pub(crate) mod tests {
     /// Rows: d (merge, `main`), c (side, `🏷 v1`), b, a — with the sidebar
     /// refs of `sidebar::tests::repo_refs`.
     pub(crate) fn loaded_app() -> App {
-        let graph = build_graph(vec![
-            commit("a", 1, &[], &[]),
-            commit("b", 2, &["a"], &[]),
-            commit("c", 3, &["a"], &["🏷 v1"]),
+        let commits = vec![
             commit("d", 4, &["b", "c"], &["main"]),
-        ]);
+            commit("c", 3, &["a"], &["🏷 v1"]),
+            commit("b", 2, &["a"], &[]),
+            commit("a", 1, &[], &[]),
+        ];
         let refs = crate::sidebar::tests::repo_refs();
         let mut app = App::new("/repo".into(), Glyphs::Unicode);
-        app.on_msg(Msg::Loaded(Ok((graph, refs))));
+        let chunk = Layout::new().lay_out(commits);
+        first_chunk(&mut app, chunk, refs);
+        app.on_msg(load_ended(Ok(())));
         app
+    }
+
+    /// The first chunk of a load, then its refs.
+    fn first_chunk(app: &mut App, chunk: LaidChunk, refs: RepoRefs) {
+        app.on_msg(Msg::Load(Event::Chunk(chunk)));
+        app.on_msg(Msg::Load(Event::Refs(Box::new(refs))));
+    }
+
+    /// A further chunk of a load.
+    fn next_chunk(chunk: LaidChunk) -> Msg {
+        Msg::Load(Event::Chunk(chunk))
+    }
+
+    fn load_ended(result: Result<(), String>) -> Msg {
+        Msg::Load(Event::Ended(result))
     }
 
     pub(crate) fn press(app: &mut App, code: KeyCode) {
@@ -815,7 +856,10 @@ pub(crate) mod tests {
         let mut app = loaded_app();
         press(&mut app, KeyCode::Char('G')); // a
         press(&mut app, KeyCode::Char('k')); // b
-        assert_eq!(app.lineage, Some(rows_of(&app, &["a", "b", "d"])));
+        assert_eq!(
+            app.lineage.as_ref().map(Lineage::rows),
+            Some(rows_of(&app, &["a", "b", "d"]))
+        );
         press(&mut app, KeyCode::Esc);
         assert!(!app.active && app.lineage.is_none() && app.selected_node().is_none());
         press(&mut app, KeyCode::Char('j'));
@@ -1039,21 +1083,147 @@ pub(crate) mod tests {
         assert_eq!(app.theme, Theme::Light);
     }
 
-    #[test]
-    // Verifies: G-13
-    fn the_commit_limit_is_reported() {
-        let mut commits = vec![commit("c0", 0, &[], &[])];
-        for i in 1..MAX_COMMITS {
-            let parent = format!("c{}", i - 1);
-            commits.push(commit(&format!("c{i}"), i as i64, &[parent.as_str()], &[]));
-        }
+    /// A line of `n` commits from `c{top}` down, each on the next, as the walk
+    /// yields them.
+    fn line(top: usize, n: usize) -> Vec<CommitData> {
+        (top + 1 - n..=top)
+            .rev()
+            .map(|i| {
+                let parent = format!("c{}", i.saturating_sub(1));
+                let parents: &[&str] = if i > 0 { &[parent.as_str()] } else { &[] };
+                commit(&format!("c{i}"), i as i64, parents, &[])
+            })
+            .collect()
+    }
+
+    /// The first chunk of a line of 9 commits, `c8` to `c6`, delivered; the
+    /// layout lays out the chunks after it as the loader does.
+    fn chunked_app() -> (App, Layout) {
+        let mut layout = Layout::new();
         let mut app = App::new("/repo".into(), Glyphs::Unicode);
-        app.on_msg(Msg::Loaded(Ok((build_graph(commits), RepoRefs::default()))));
+        let first = layout.lay_out(line(8, 3));
+        first_chunk(&mut app, first, RepoRefs::default());
+        (app, layout)
+    }
+
+    #[test]
+    // Verifies: ADR-0016, ADR-0031, G-13
+    fn a_history_arriving_in_chunks_grows_below_what_is_shown() {
+        let (mut app, mut layout) = chunked_app();
+        assert_eq!(app.status, "3 commits in 1 chunk — loading older history…");
+        press(&mut app, KeyCode::Char('j'));
+        assert_eq!(sha(&app), "c7");
+        app.on_msg(Msg::Load(Event::Progress("Loaded 500 commits...".into())));
         assert!(
-            app.status.contains("commit limit reached"),
-            "{}",
-            app.status
+            app.status.starts_with("3 commits"),
+            "the progress line counts chunks"
         );
+
+        app.on_msg(next_chunk(layout.lay_out(line(5, 3))));
+        assert_eq!(app.status, "6 commits in 2 chunks — loading older history…");
+        assert_eq!(
+            (app.selected, sha(&app)),
+            (1, "c7".into()),
+            "the selection stays"
+        );
+        press(&mut app, KeyCode::Char('G'));
+        assert_eq!(sha(&app), "c3", "the rows added can be scrolled to");
+
+        app.on_msg(next_chunk(layout.lay_out(line(2, 3))));
+        app.on_msg(load_ended(Ok(())));
+        assert_eq!(app.status, "9 commits");
+    }
+
+    #[test]
+    // Verifies: ADR-0016, ADR-0026
+    fn the_first_chunk_shows_before_its_refs_and_the_refs_fill_the_sidebar_after() {
+        let mut layout = Layout::new();
+        let mut app = App::new("/repo".into(), Glyphs::Unicode);
+        app.on_msg(next_chunk(layout.lay_out(line(8, 3))));
+        let data = app.data.as_ref().unwrap();
+        assert_eq!((data.rows(), data.refs.head.as_deref()), (3, None));
+        app.on_msg(Msg::Load(Event::Refs(Box::new(
+            crate::sidebar::tests::repo_refs(),
+        ))));
+        assert!(
+            app.data.as_ref().unwrap().refs.head.is_some(),
+            "the head's branch arrived"
+        );
+    }
+
+    #[test]
+    // Verifies: ADR-0016, G-13
+    fn a_load_failing_before_its_first_chunk_says_so() {
+        let mut app = App::new("/repo".into(), Glyphs::Unicode);
+        app.on_msg(load_ended(Err("not a repository".into())));
+        assert_eq!(app.status, "Error: not a repository");
+        assert!(app.data.is_none());
+    }
+
+    #[test]
+    // Verifies: ADR-0016, G-13
+    fn a_load_stopped_by_an_error_keeps_what_has_arrived_and_says_so() {
+        let (mut app, _) = chunked_app();
+        app.on_msg(load_ended(Err("disk gone".into())));
+        assert_eq!(app.status, "3 commits — loading stopped: disk gone");
+        assert_eq!(app.data.as_ref().unwrap().rows(), 3);
+    }
+
+    #[test]
+    // Verifies: ADR-0031, G-16
+    fn search_reaches_the_chunks_arriving_after_it() {
+        let (mut app, mut layout) = chunked_app();
+        press(&mut app, KeyCode::Char('/'));
+        type_text(&mut app, "commit c");
+        press(&mut app, KeyCode::Enter);
+        press(&mut app, KeyCode::Enter);
+        assert_eq!((app.search.matches.len(), sha(&app)), (3, "c7".into()));
+        app.on_msg(next_chunk(layout.lay_out(line(5, 3))));
+        assert_eq!(app.search.matches.len(), 6, "the new rows are searched");
+        press(&mut app, KeyCode::Enter);
+        assert_eq!(sha(&app), "c6", "the next match follows the one jumped to");
+    }
+
+    #[test]
+    // Verifies: ADR-0031, G-16
+    fn a_search_typed_while_loading_finds_the_first_chunk() {
+        let mut layout = Layout::new();
+        let mut app = App::new("/repo".into(), Glyphs::Unicode);
+        press(&mut app, KeyCode::Char('/'));
+        type_text(&mut app, "commit c");
+        let first = layout.lay_out(line(8, 3));
+        first_chunk(&mut app, first, RepoRefs::default());
+        app.on_msg(next_chunk(layout.lay_out(line(5, 3))));
+        assert_eq!(app.search.matches, (0..6).collect::<Vec<_>>());
+    }
+
+    #[test]
+    // Verifies: ADR-0031, G-17
+    fn the_lineage_reaches_the_chunks_arriving_after_the_selection() {
+        let (mut app, mut layout) = chunked_app();
+        assert_eq!(app.lineage.as_ref().unwrap().rows().len(), 3);
+        app.on_msg(next_chunk(layout.lay_out(line(5, 3))));
+        assert_eq!(
+            app.lineage.as_ref().map(Lineage::rows),
+            Some(rows_of(&app, &["c8", "c7", "c6", "c5", "c4", "c3"]))
+        );
+    }
+
+    #[test]
+    // Verifies: ADR-0015
+    fn the_first_parent_key_follows_gits_first_parent_once_it_has_arrived() {
+        // `m`'s first parent `x` arrives in the later chunk, so the layout
+        // continues `m` on `b` (ADR-0015); `]` still follows git's first
+        // parent, as the detail pane lists it, once `x` is laid out.
+        let mut layout = Layout::new();
+        let mut app = App::new("/repo".into(), Glyphs::Unicode);
+        let first = vec![commit("m", 3, &["x", "b"], &[]), commit("b", 2, &[], &[])];
+        first_chunk(&mut app, layout.lay_out(first), RepoRefs::default());
+        press(&mut app, KeyCode::Char(']'));
+        assert_eq!(sha(&app), "m", "the first parent is not laid out yet");
+        app.on_msg(next_chunk(layout.lay_out(vec![commit("x", 1, &[], &[])])));
+        press(&mut app, KeyCode::Char(']'));
+        assert_eq!(sha(&app), "x");
     }
 
     #[test]

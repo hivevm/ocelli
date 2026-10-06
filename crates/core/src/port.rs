@@ -7,14 +7,16 @@ use std::path::Path;
 
 /// Reads a repository's history and state.
 pub trait RepositoryReader {
-    /// Loads the commits to lay out, newest first, capped at [`crate::model::MAX_COMMITS`] and
-    /// with the stash and working-directory nodes added (ADR-0024). `progress` receives one
-    /// message per step of the load.
-    fn load_commits(
+    /// Loads the whole history in chunks of [`crate::model::CHUNK_COMMITS`] in walk order, the
+    /// first with the stash and working-directory nodes added (ADR-0024), handing each to
+    /// `on_chunk` as it is read; `on_chunk` returns whether to go on, so a new load session can cancel the walk
+    /// (ADR-0016). `progress` receives one message per step.
+    fn load_chunks(
         &self,
         repo: &Path,
         progress: &mut dyn FnMut(String),
-    ) -> Result<Vec<CommitData>>;
+        on_chunk: &mut dyn FnMut(Vec<CommitData>) -> bool,
+    ) -> Result<()>;
 
     /// Loads every ref category the repository sidebar shows.
     fn load_refs(&self, repo: &Path) -> Result<RepoRefs>;

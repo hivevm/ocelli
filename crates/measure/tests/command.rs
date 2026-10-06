@@ -108,7 +108,7 @@ fn assert_measured(out: &Output) {
     );
 }
 
-const LIMIT: usize = ocelli_core::model::MAX_COMMITS;
+const LIMIT: usize = ocelli_core::model::CHUNK_COMMITS;
 
 #[test]
 // Verifies: ADR-0024
@@ -284,4 +284,58 @@ fn measuring_a_repository_starts_none_of_the_programs_its_configuration_names() 
         .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
         .collect();
     assert!(ran.is_empty(), "measuring ran {ran:?}");
+}
+
+#[test]
+// Verifies: Q-2, ADR-0016
+fn the_windows_measurement_loads_every_chunk_and_reports_each_wait() {
+    let scratch = Scratch::new("windows");
+    let repo = scratch.0.join("repo.git");
+    let mut stream = String::new();
+    for mark in 1..=3100 {
+        let parents: Vec<usize> = if mark > 1 { vec![mark - 1] } else { vec![] };
+        commit(
+            &mut stream,
+            "main",
+            mark,
+            1_700_000_000 + mark as u64,
+            &parents,
+        );
+    }
+    fast_import(&repo, &stream);
+    let out = Command::new(env!("CARGO_BIN_EXE_ocelli-measure"))
+        .args(["windows"])
+        .arg(&repo)
+        .output()
+        .unwrap();
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let text = String::from_utf8(out.stdout).unwrap();
+    assert!(
+        text.contains("commits: 3100\n"),
+        "both chunks loaded: {text}"
+    );
+    assert!(
+        text.contains("windows: 52\n"),
+        "60 rows to a window: {text}"
+    );
+    for key in [
+        "first window ms",
+        "load ms",
+        "slowest while loading ms",
+        "slowest window ms",
+        "lineage ms",
+        "search ms",
+    ] {
+        assert!(
+            text.lines().any(|l| l
+                .strip_prefix(key)
+                .and_then(|v| v.strip_prefix(": "))
+                .is_some_and(|v| v.parse::<f64>().is_ok())),
+            "{key} in {text}"
+        );
+    }
 }

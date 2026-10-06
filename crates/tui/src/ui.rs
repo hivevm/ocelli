@@ -8,7 +8,7 @@ use crate::app::{App, Focus};
 use crate::chips::{Planned, RefKind, chip_width, chips, plan};
 use crate::diffsplit::{CellKind, SplitRow, split_rows};
 use crate::files::{FileRow, FileView};
-use crate::raster::rasterize;
+use crate::raster::{self, rasterize};
 use crate::sidebar::{self, Look, RailRow, RowKind};
 use crate::theme::{Palette, lane, palette};
 use ocelli_core::model::{CommitKind, DiffLine, DiffLineKind, FileStatus};
@@ -297,8 +297,16 @@ fn draw_graph(frame: &mut Frame, app: &mut App, p: &Palette, area: Rect) {
         Layout::vertical([Constraint::Length(1), Constraint::Fill(1)]).areas(inner);
     app.scroll_to_selection(body.height as usize);
 
-    let Some(data) = &app.data else { return };
-    let graph_width = data.index.width.max(5);
+    let Some(data) = app.data.as_mut() else {
+        return;
+    };
+    // The graph column is as wide as the most lanes shown, so older history arriving with more
+    // lanes moves nothing until the developer scrolls to it.
+    let window = data.history().window(app.offset, body.height as usize);
+    data.shown_lanes = data.shown_lanes.max(window.lanes());
+    let width = raster::width(data.shown_lanes);
+    let data = &*data;
+    let graph_width = width.max(5);
     let head = Style::new().fg(p.text_dim).add_modifier(Modifier::BOLD);
     frame.render_widget(
         Paragraph::new(Line::from(vec![
@@ -311,14 +319,7 @@ fn draw_graph(frame: &mut Frame, app: &mut App, p: &Palette, area: Rect) {
     );
 
     let lineage = app.lineage.as_ref().filter(|_| app.active);
-    let cells = rasterize(
-        &data.graph,
-        &data.index,
-        app.offset,
-        body.height as usize,
-        app.glyphs,
-        lineage,
-    );
+    let cells = rasterize(&window, width, app.glyphs, lineage);
     let lines: Vec<Line> = cells
         .iter()
         .enumerate()
@@ -326,7 +327,7 @@ fn draw_graph(frame: &mut Frame, app: &mut App, p: &Palette, area: Rect) {
             let row = app.offset + i;
             let node = data.node(row);
             let selected = app.active && row == app.selected;
-            let dim = lineage.is_some_and(|l| !l.contains(&row));
+            let dim = lineage.is_some_and(|l| !l.contains(row));
 
             // Refs column, right-aligned so the chips end where the lanes begin.
             let planned = plan(&chips(&node.refs, &data.refs), REFS_WIDTH);
@@ -1059,5 +1060,40 @@ mod tests {
         for (w, h) in [(1, 1), (10, 3), (30, 2)] {
             screen(&mut app, w, h);
         }
+    }
+
+    #[test]
+    // Verifies: ADR-0031
+    fn older_history_with_more_lanes_moves_nothing_until_scrolled_to() {
+        use crate::app::tests::commit;
+        use crate::loader::Msg;
+        use ocelli_core::graph::Layout;
+        use ocelli_core::load::Event;
+        let mut layout = Layout::new();
+        let mut app = App::new("/repo".into(), crate::raster::Glyphs::Unicode);
+        // A main line longer than the screen is tall.
+        let first: Vec<_> = (1..=20)
+            .rev()
+            .map(|i| commit(&format!("t{i}"), 20 + i, &[&format!("t{}", i - 1)], &[]))
+            .collect();
+        app.on_msg(Msg::Load(Event::Chunk(layout.lay_out(first))));
+        let before = screen(&mut app, 120, 12);
+        // Further down, five lines side by side, wider than the column's least width.
+        let mut older = vec![commit("t0", 20, &["a0"], &[])];
+        for (i, line) in ["a", "b", "c", "d", "e"].iter().enumerate() {
+            let tip = format!("{line}1");
+            let root = format!("{line}0");
+            if i > 0 {
+                older.push(commit(&tip, 19 - i as i64, &[&root], &[]));
+            }
+            older.push(commit(&root, 10 - i as i64, &[], &[]));
+        }
+        app.on_msg(Msg::Load(Event::Chunk(layout.lay_out(older))));
+        let after = screen(&mut app, 120, 12);
+        assert_eq!(
+            graph_lines(&after, 3, 3),
+            graph_lines(&before, 3, 3),
+            "the rows shown stay where they were"
+        );
     }
 }

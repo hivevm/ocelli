@@ -17,16 +17,25 @@
 </script>
 
 <script lang="ts">
-  import type { GraphData, NodeJson, Edge } from './types.ts';
+  import type { NodeJson, Edge, RowWindow } from './types.ts';
+  import { windowToAsk, type RowRange } from './rowWindow.ts';
   import { FONTS, THEMES, seriesColor, type Theme } from './theme/palette.ts';
 
   // ── Props ──────────────────────────────────────────────────────────────────
   interface Props {
-    graphData: GraphData | null;
-    onSelectCommit?: (sha: string) => void;
+    /** Rows the history the host keeps has laid out so far, and the lanes the graph column
+     *  shows: the most the rows shown in this load have reached. */
+    rowCount: number;
+    lanes: number;
+    /** The rows last read from the host (ADR-0031); with a commit selected, it says which of
+     *  them belong to its lineage, and all others are dimmed. */
+    view: RowWindow | null;
+    /** The load the rows belong to; a new one starts the view at the top again. */
+    generation: number;
+    /** Asks for the rows the view needs and does not hold. */
+    onNeedRows: (range: RowRange) => void;
+    onSelectRow?: (row: number) => void;
     theme?: Theme;
-    /** Rows of the selected commit's ancestry; when set, all other rows are dimmed. */
-    highlightRows?: Set<number> | null;
     /**
      * The checked-out branch, so its chip can be marked as such. It comes from
      * the refs payload, which is read together with the graph (ADR-0026), so the
@@ -35,10 +44,13 @@
     headRef?: string | null;
   }
   let {
-    graphData,
-    onSelectCommit,
+    rowCount,
+    lanes,
+    view,
+    generation,
+    onNeedRows,
+    onSelectRow,
     theme = 'dark',
-    highlightRows = null,
     headRef = null,
   }: Props = $props();
 
@@ -112,48 +124,22 @@
   function nodeX(col: number): number { return REFS_WIDTH + GRAPH_LEFT + col * COL_WIDTH + COL_WIDTH / 2; }
   function nodeY(row: number): number { return row * ROW_HEIGHT + ROW_HEIGHT / 2; }
 
-  // ── Row index, rebuilt only when the graph changes ─────────────────────────
+  // ── Rows in view ───────────────────────────────────────────────────────────
   // Rendering must cost O(visible rows), not O(history) — see "Virtual rendering"
-  // in docs/SPECIFICATION.md. Scanning every node and edge per frame would make it
-  // O(n), so nodes are indexed by row and edges are bucketed by their first row.
-  // Edges spanning more than a viewport's worth of rows are kept in a separate
-  // list, so a bounded bucket window plus that short list covers every edge that
-  // can intersect the viewport.
-  const MAX_SHORT_SPAN = 256;
+  // in docs/SPECIFICATION.md. The host keeps the history and answers a window of
+  // rows with every edge crossing it, so drawing touches only that window.
+  const width = $derived(rowCount === 0 ? EMPTY_GRAPH_WIDTH : graphAreaWidth(lanes - 1));
 
-  const index = $derived.by(() => {
-    const nodes = graphData?.nodes ?? [];
-    const edges = graphData?.edges ?? [];
-    const rowCount = nodes.length;
+  /** The rows last asked for, so a frame inside them asks for nothing, and the load they belong to. */
+  let asked: RowRange | null = null;
+  let shownGeneration = -1;
 
-    const nodesByRow: (NodeJson | undefined)[] = new Array(rowCount);
-    let maxCol = 0;
-    for (const n of nodes) {
-      if (n.row >= 0 && n.row < rowCount) nodesByRow[n.row] = n;
-      if (n.col > maxCol) maxCol = n.col;
-    }
-
-    const shortByFirstRow: Edge[][] = Array.from({ length: rowCount }, () => []);
-    const longEdges: Edge[] = [];
-    for (const e of edges) {
-      if (e.minRow < 0 || e.minRow >= rowCount || e.maxRow - e.minRow > MAX_SHORT_SPAN) {
-        longEdges.push(e);
-      } else {
-        shortByFirstRow[e.minRow].push(e);
-      }
-    }
-
-    return {
-      nodesByRow,
-      shortByFirstRow,
-      longEdges,
-      rowCount,
-      width: rowCount === 0 ? EMPTY_GRAPH_WIDTH : graphAreaWidth(maxCol),
-    };
-  });
+  function nodeAt(row: number): NodeJson | undefined {
+    return view && row >= view.top ? view.nodes[row - view.top] : undefined;
+  }
 
   function totalContentHeight(): number {
-    return index.rowCount * ROW_HEIGHT;
+    return rowCount * ROW_HEIGHT;
   }
 
   // ── Canvas sizing ──────────────────────────────────────────────────────────
@@ -174,16 +160,8 @@
   });
 
   $effect(() => {
-    void [graphData, scrollY, hoveredRow, selectedRow, theme, highlightRows, headRef];
+    void [view, rowCount, lanes, generation, scrollY, hoveredRow, selectedRow, theme, headRef];
     render();
-  });
-
-  $effect(() => {
-    if (graphData) {
-      scrollY     = 0;
-      hoveredRow  = -1;
-      selectedRow = -1;
-    }
   });
 
   // ── Main render ────────────────────────────────────────────────────────────
@@ -192,11 +170,21 @@
     const W = canvas.width;
     const H = canvas.height;
 
+    // A new load starts the view at the top, with nothing asked for yet. Reset here rather than
+    // in an effect of its own, so the frame that shows the new load asks for its rows.
+    if (generation !== shownGeneration) {
+      shownGeneration = generation;
+      asked       = null;
+      scrollY     = 0;
+      hoveredRow  = -1;
+      selectedRow = -1;
+    }
+
     ctx.clearRect(0, 0, W, H);
     ctx.fillStyle = pal.bg;
     ctx.fillRect(0, 0, W, H);
 
-    if (index.rowCount === 0) {
+    if (rowCount === 0) {
       ctx.fillStyle = pal.emptyTitle;
       ctx.font = `13px ${FONTS.ui}`;
       ctx.textAlign = 'center';
@@ -212,9 +200,15 @@
     scrollY = Math.min(Math.max(scrollY, 0), maxScroll);
 
     const visRowMin = Math.max(0, Math.floor(scrollY / ROW_HEIGHT));
-    const visRowMax = Math.min(index.rowCount - 1, Math.ceil((scrollY + H) / ROW_HEIGHT));
+    const visRowMax = Math.min(rowCount - 1, Math.ceil((scrollY + H) / ROW_HEIGHT));
+    // One screen of rows beyond the view on either side, so scrolling within it needs no round trip.
+    const ask = windowToAsk(asked, visRowMin, visRowMax, rowCount, Math.ceil(H / ROW_HEIGHT));
+    if (ask) {
+      asked = ask;
+      onNeedRows(ask);
+    }
     // Columns: [branch/tag][graph lanes][sha, message]
-    const infoX = REFS_WIDTH + index.width;
+    const infoX = REFS_WIDTH + width;
 
     // Row backgrounds
     for (let r = visRowMin; r <= visRowMax; r++) {
@@ -254,33 +248,23 @@
     ctx.lineWidth = LINE_WIDTH;
     ctx.lineCap = 'round';
     ctx.lineJoin = 'round';
-    const bucketFrom = Math.max(0, visRowMin - MAX_SHORT_SPAN);
-    for (let r = bucketFrom; r <= visRowMax; r++) {
-      for (const edge of index.shortByFirstRow[r]) {
-        if (edge.maxRow < visRowMin) continue;
-        drawEdge(edge);
-      }
-    }
-    for (const edge of index.longEdges) {
-      if (edge.maxRow < visRowMin || edge.minRow > visRowMax) continue;
-      drawEdge(edge);
-    }
+    view?.edges.forEach((edge, i) => {
+      if (edge.maxRow < visRowMin || edge.minRow > visRowMax) return;
+      drawEdge(edge, view.litEdges?.[i] ?? true);
+    });
 
     // Nodes — one row lookup per visible row, already in row order
     for (let r = visRowMin; r <= visRowMax; r++) {
-      const node = index.nodesByRow[r];
-      if (node) drawNode(node, infoX, W);
+      const node = nodeAt(r);
+      if (node) drawNode(node, infoX, W, view?.litNodes?.[r - view.top] ?? true);
     }
   }
 
   // ── Edge rendering with short corner curves (GitKraken style) ────────────
-  function drawEdge(edge: Edge): void {
-    // An edge is on the ancestry path iff both endpoints are: every loaded
-    // parent of an ancestry node is itself ancestry, so child→parent edges
-    // inside the set stay bright and everything else fades.
-    const dimmed =
-      highlightRows !== null &&
-      !(highlightRows.has(edge.sourceRow) && highlightRows.has(edge.targetRow));
+  function drawEdge(edge: Edge, lit: boolean): void {
+    // An edge is on the lineage iff both endpoints are, which the host says per
+    // edge: lineage edges stay bright and everything else fades.
+    const dimmed = !lit;
     if (dimmed) ctx!.globalAlpha = DIM_GRAPH;
 
     const x1 = nodeX(edge.sourceCol);
@@ -323,12 +307,12 @@
   }
 
   // ── Node rendering ─────────────────────────────────────────────────────────
-  function drawNode(node: NodeJson, infoX: number, canvasW: number): void {
+  function drawNode(node: NodeJson, infoX: number, canvasW: number, lit: boolean): void {
     const cx = nodeX(node.col);
     const cy = nodeY(node.row) - scrollY;
     const color = branchColor(node.col);
     const isSelected = node.row === selectedRow;
-    const dimmed = highlightRows !== null && !highlightRows.has(node.row);
+    const dimmed = !lit;
     if (dimmed) ctx!.globalAlpha = DIM_GRAPH;
 
     // A glyph's fill is the canvas background: it punches a hole in the edge
@@ -604,10 +588,9 @@
   function onClick(e: MouseEvent): void {
     const rect = (e.currentTarget as HTMLCanvasElement).getBoundingClientRect();
     const row = Math.floor((e.clientY - rect.top + scrollY) / ROW_HEIGHT);
-    if (row < 0 || row >= index.rowCount) return;
+    if (row < 0 || row >= rowCount) return;
     selectedRow = row;
-    const node = index.nodesByRow[row];
-    if (node) onSelectCommit?.(node.sha);
+    onSelectRow?.(row);
   }
 
   function onWheel(e: WheelEvent): void {
@@ -624,7 +607,7 @@
   /// Selects a row from outside (e.g. the detail sidebar's parent/child links)
   /// and scrolls it into view when it is off-screen. render() clamps scrollY.
   export function revealRow(row: number): void {
-    if (row < 0 || row >= index.rowCount) return;
+    if (row < 0 || row >= rowCount) return;
     selectedRow = row;
     const H = canvas?.height ?? 0;
     const top = row * ROW_HEIGHT;

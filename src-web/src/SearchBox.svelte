@@ -1,19 +1,41 @@
 <script lang="ts">
-  import { searchNodes } from './search.ts';
-  import type { NodeJson } from './types.ts';
+  import type { Found } from './types.ts';
 
   interface Props {
-    nodes: NodeJson[];
-    onJump: (sha: string) => void;
+    /** Searches the history the host keeps (G-16). */
+    search: (query: string) => Promise<Found>;
+    /** Changes as the history grows, so the matches cover the rows that arrive. */
+    revision: number;
+    onJump: (row: number) => void;
   }
-  let { nodes, onJump }: Props = $props();
+  let { search, revision, onJump }: Props = $props();
 
   let query = $state('');
   let input = $state<HTMLInputElement | null>(null);
   // Position of the last match jumped to; -1 = not navigating yet. Reset
-  // whenever the query (and thus the match list) changes.
+  // whenever the query (and thus the match list) changes; rows arriving as the
+  // history loads lie below every match, so they keep it.
   let pos = $state(-1);
-  const matches = $derived(searchNodes(nodes, query));
+  let found = $state<Found>({ generation: 0, rows: [], hits: [] });
+  const matches = $derived(found.rows);
+  /** Numbers the searches, so an answer overtaken by a newer one is dropped. */
+  let searches = 0;
+
+  $effect(() => {
+    const q = query;
+    void revision;
+    const n = ++searches;
+    if (q.trim() === '') {
+      found = { generation: 0, rows: [], hits: [] };
+      return;
+    }
+    void search(q).then((f) => {
+      if (n !== searches) return;
+      // Another load's rows are other commits: the position starts over.
+      if (f.generation !== found.generation) pos = -1;
+      found = f;
+    });
+  });
 
   // Results panel: open while the field has focus and a query is set. Rows
   // use onmousedown-preventDefault so clicking them does not blur the input.
@@ -21,7 +43,8 @@
   let panel = $state<HTMLElement | null>(null);
   const panelOpen = $derived(focused && query.trim() !== '' && matches.length > 0);
   // Rendering thousands of rows would make typing sluggish; everything beyond
-  // the cap is reachable via Enter-cycling and shown as a "+N more" footer.
+  // the cap is reachable via Enter-cycling and shown as a "+N more" footer. The
+  // host sends the nodes of as many matches (`SEARCH_HITS`), the rows of all.
   const MAX_PANEL_ROWS = 200;
 
   $effect(() => {
@@ -46,7 +69,7 @@
     const len = matches.length;
     if (len === 0) return;
     pos = pos === -1 && direction === -1 ? len - 1 : (pos + direction + len) % len;
-    onJump(matches[pos].sha);
+    onJump(matches[pos]);
   }
 
   function onKeydown(e: KeyboardEvent): void {
@@ -60,7 +83,7 @@
 
   function pickMatch(index: number): void {
     pos = index;
-    onJump(matches[index].sha);
+    onJump(matches[index]);
   }
 </script>
 
@@ -111,7 +134,7 @@
 
   {#if panelOpen}
     <div class="search-panel" bind:this={panel}>
-      {#each matches.slice(0, MAX_PANEL_ROWS) as match, i (match.sha)}
+      {#each found.hits.slice(0, MAX_PANEL_ROWS) as match, i (match.sha)}
         <button
           class="search-hit"
           class:active={i === pos}
