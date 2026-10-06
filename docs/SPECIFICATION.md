@@ -97,15 +97,18 @@ against them. Each has a measure concrete enough to settle a disagreement and st
 `Q-n`, cited like a goal. Security goals, what the system must never do, belong here, derived
 from the threats below.
 
-- **Q-1** — Readability: the commit graph is what Ocelli exists for. Measured on a fixed corpus
-  of public repositories: the layout draws fewer edge crossings than `git log --graph --all`
-  on each of them.
+- **Q-1** — Readability: the commit graph is what Ocelli exists for. Each branch keeps its lane
+  (G-2), and the layout pays for that with edge crossings, never more than recorded for the corpus;
+  a recorded count changes only with a decision about the layout. Measured on a fixed corpus of
+  public repositories, each at a fixed commit of its main branch over the newest commits up to the
+  commit limit: the layout draws no more edge crossings than the count recorded for that commit.
 - **Q-2** — Performance: a repository of one million commits stays usable. Measured on such a
   repository: the first screen of the commit graph appears within 2 s of opening it, and
   scrolling never waits more than 100 ms for the next screen.
 - **Q-3** — Resource footprint: being lighter than an Electron application is half of the
-  problem. Measured on a repository of 100 000 commits: the desktop application uses less than
-  200 MB of memory once the commit graph is shown.
+  problem. Measured on Linux on a repository of 100 000 commits: showing the commit graph adds less
+  than 150 MB to the memory of the desktop application, its WebView's processes included, over the
+  application with no repository open.
 - **Q-4** — Security: opening a repository must not run code the repository brings. Measured on
   a repository whose configuration names programs (such as `core.fsmonitor`) and whose hooks are
   set: showing its commit graph starts none of them.

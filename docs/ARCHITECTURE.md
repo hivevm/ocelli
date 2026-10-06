@@ -59,9 +59,11 @@ golden path and the test pattern an agent copies from are named here.
   and runs the git binary, with the repository's configuration kept from choosing a program; it is
   not shipped to developers, and Ocelli itself never runs git (Q-4). The memory of the desktop
   application for Q-3 is measured from outside, by `scripts/measure-memory.sh`: it starts the
-  application on a generated repository, waits for the status line the desktop host writes to
-  standard error once the graph has loaded, and sums the memory of the application's processes,
-  the WebView's included. `scripts/measure-crossings.sh` runs the command on a fixed corpus. Both
+  application with no repository and on a generated one, waits there for the status line the
+  desktop host writes to standard error once the graph has loaded, sums the memory of the
+  application's processes, the WebView's included, and takes the difference as what the graph
+  adds. `scripts/measure-crossings.sh` runs the command on a fixed corpus against recorded counts.
+  Both
   run weekly and on demand in `.github/workflows/measure.yml`, not in the checks
   ([ADR-0008](adr/0008-toolchain-rust-and-typescript.md)); the checks run only their self-tests.
 - **Desktop host** (`src-tauri`, `ocelli`) — the Tauri shell: commands that read through

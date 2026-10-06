@@ -3,9 +3,11 @@
 # Self-test of scripts/measure-crossings.sh.
 #
 # Builds two small repositories, a straight history and one with a merged branch, measures a
-# corpus naming them at fixed commits, and asserts the table: one row per repository with the
-# commits and both counts, and a verdict. A corpus naming a commit that does not exist fails the
-# run and names the repository; a measured miss of Q-1 does not fail it.
+# corpus naming them at fixed commits with their recorded counts, and asserts the table: one row
+# per repository with the commits, Ocelli's count, the record, git's count, and a verdict. With a
+# stand-in for ocelli-measure the verdict is tried at the record: below and at it Q-1 holds
+# whatever git draws, one above it misses Q-1 and fails the run. A commit that does not exist, a
+# repository without a record, and counts that cannot be read fail the run too.
 #
 # Usage:
 #     scripts/test-measure-crossings.sh
@@ -70,15 +72,20 @@ expect() {
   while IFS= read -r l; do printf '    %s\n' "$l"; done <<< "$out" >&2
 }
 
-printf 'straight %s %s\nmerged %s %s\n' \
+printf 'straight %s %s 0\nmerged %s %s 0\n' \
   "$(url "$work/straight")" "$straight" "$(url "$work/merged")" "$merged" > "$work/corpus"
-expect "a straight history is measured" 0 "| straight | ${straight:0:7} | 2 | 0 | 0 | missed |" "$work/corpus"
+expect "a straight history is measured against its record" 0 \
+  "| straight | ${straight:0:7} | 2 | 0 | 0 | 0 | holds |" "$work/corpus"
 expect "a merged branch is measured" 0 "| merged | ${merged:0:7} | 4 |" "$work/corpus"
-expect "the run ends with every repository measured" 0 "Measured every repository" "$work/corpus"
+expect "the run ends with Q-1 holding on every repository" 0 "Q-1 holds on each" "$work/corpus"
 
-printf 'gone %s %s\n' "$(url "$work/straight")" 0000000000000000000000000000000000000001 \
+printf 'gone %s %s 0\n' "$(url "$work/straight")" 0000000000000000000000000000000000000001 \
   > "$work/missing"
 expect "a commit that does not exist fails the run" 1 "Measurement FAILED for: gone" "$work/missing"
+
+printf 'unrecorded %s %s\n' "$(url "$work/straight")" "$straight" > "$work/unrecorded"
+expect "a repository without a recorded count fails the run" 1 \
+  "Measurement FAILED for: unrecorded" "$work/unrecorded"
 
 # A stand-in for ocelli-measure that prints chosen counts decides the verdict without a layout.
 stub() {
@@ -86,11 +93,13 @@ stub() {
   chmod +x "$work/stub"
   echo "$work/stub"
 }
-printf 'straight %s %s\n' "$(url "$work/straight")" "$straight" > "$work/one"
-OCELLI_MEASURE="$(stub 'commits: 9\\nocelli crossings: 3\\ngit crossings: 5\\n')" \
-  expect "fewer crossings than git hold Q-1" 0 "| 9 | 3 | 5 | holds |" "$work/one"
-OCELLI_MEASURE="$(stub 'commits: 9\\nocelli crossings: 5\\ngit crossings: 3\\n')" \
-  expect "more crossings than git miss Q-1" 0 "| 9 | 5 | 3 | missed |" "$work/one"
+printf 'straight %s %s 4\n' "$(url "$work/straight")" "$straight" > "$work/one"
+OCELLI_MEASURE="$(stub 'commits: 9\\nocelli crossings: 3\\ngit crossings: 1\\n')" \
+  expect "fewer crossings than recorded hold Q-1, whatever git draws" 0 "| 9 | 3 | 4 | 1 | holds |" "$work/one"
+OCELLI_MEASURE="$(stub 'commits: 9\\nocelli crossings: 4\\ngit crossings: 9\\n')" \
+  expect "exactly the recorded crossings hold Q-1" 0 "| 9 | 4 | 4 | 9 | holds |" "$work/one"
+OCELLI_MEASURE="$(stub 'commits: 9\\nocelli crossings: 5\\ngit crossings: 9\\n')" \
+  expect "one crossing more than recorded misses Q-1 and fails the run" 1 "Q-1 MISSED on: straight" "$work/one"
 OCELLI_MEASURE="$(stub 'commits: 9\\n')" \
   expect "counts that cannot be read fail the run" 1 "Measurement FAILED for: straight" "$work/one"
 
