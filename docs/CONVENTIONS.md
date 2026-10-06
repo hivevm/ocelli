@@ -47,7 +47,11 @@ skimmed. The design revision drops what prevented nothing
   producer can make, the rare ones its ADR names included, such as a date running backwards or a
   parent in a later chunk. A script that reports a verdict is
   tested on each verdict and at its boundary, since a flipped or truncated comparison passes a
-  test that sees one side only.
+  test that sees one side only. A test of a computed size or count uses an input past every floor
+  or clamp applied to it, so a wrong count changes the outcome.
+- **A property test excepts a case only where the specification or an ADR names the exception.**
+  The exception cites that clause where it is made and counts that the excepted case occurs; an
+  exception no clause names weakens the suite.
 - **A failure is reported, never dropped or read as a value.** In the web interface a failed
   command sets the status bar, and ESLint rejects a `.catch` whose handler takes no error; in a
   script a failure exits non-zero and says what failed. A count that cannot be read, or a

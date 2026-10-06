@@ -51,8 +51,9 @@ to invent.
 - **Main branch** — the branch a repository treats as its line of record, usually `main` or
   `master`.
   _Avoid:_ trunk, default branch, master branch.
-- **Main line** — the main branch's tip and every first parent down from it, drawn straight in the
-  leftmost lane; where no main branch exists, the checked-out commit's.
+- **Main line** — the main branch's tip and each first parent down from it until one laid out
+  before its child, drawn straight in the leftmost lane; where no main branch exists, the
+  checked-out commit's.
 - **Merge edge** — an edge that joins a parent in another lane to a merge commit, where a branch
   is merged.
   _Avoid:_ merge line.

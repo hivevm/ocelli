@@ -110,8 +110,10 @@ The few paths worth following end to end, such as a request, a job, or a build, 
 lives between them. Only what a newcomer would otherwise reconstruct from code.
 
 - **Opening a repository.** A front end's host runs the core's `load` on a thread of its own: it
-  asks `GitReader` for the history chunk by chunk, lays each chunk out with a `Layout`, reads the
-  refs once the first chunk is handed over, and hands progress, chunks, refs, and the end over as
+  asks `GitReader` for the main line's tip, then for the history chunk by chunk, lays each chunk out
+  with a `Layout` that keeps the leftmost lane for that tip's main line
+  ([ADR-0032](adr/0032-main-line-in-the-leftmost-lane.md)), reads the refs once the first chunk is
+  handed over, and hands progress, chunks, refs, and the end over as
   events, each chunk to be appended to a `LoadSession`. The terminal application receives the
   events at its event loop as messages and reads the window of rows in view from its session. The
   desktop host runs the load on Tokio's blocking pool, appends the chunks to the `LoadSession` of
