@@ -1,60 +1,67 @@
 #!/usr/bin/env bash
 #
-# Measures Q-3 (feature spec #11, #16): the memory the desktop application takes once it shows the
-# commit graph of a repository of 100 000 commits.
+# Measures Q-3 (feature spec #11): what showing the commit graph of a repository of 100 000 commits
+# adds to the memory of the desktop application, its WebView's processes included, over the
+# application with no repository open, on Linux. Verifies: Q-3
 #
 # The repository is generated, the same each time: a main line with a feature branch of five
-# commits merged back every fifty. The application starts on it under a virtual display. Once it
-# reports the loaded graph on standard error, the proportional set size (PSS) of the application
-# and every process it starts, the WebKit processes included, is summed once a second until the
-# sum stops changing. An application that never reports a loaded graph fails the run: its memory
-# would be that of an empty window. The application lays out at most the commit limit of the
-# repository (ADR-0016), so most of the memory is the application itself. The run measures
-# twice: when the two sums differ by 10 percent or more it reports the spread and gives no
-# verdict; otherwise it says whether Q-3 holds. While Q-3 is missed the script only reports, as
-# decided with the maintainer in #16: it fails when the memory cannot be measured or the runs
-# spread, not when the limit is missed.
+# commits merged back every fifty. The application starts under a virtual display, once with no
+# repository and once on the repository; the proportional set size (PSS) of the application and
+# every process it starts, the WebKit processes included, is summed once a second until the sum
+# stops changing. On the repository the sampling starts only once the application reports the
+# loaded graph on standard error; an application that never does fails the run, since its memory
+# would be that of an empty window. Each is measured twice. When the two runs of either differ by
+# 10 percent or more the run reports the spread and fails without a verdict. Otherwise the memory
+# added is the larger loaded sum less the smaller empty one, and Q-3 holds below the limit; at or
+# above it the run fails. The absolute memory is reported beside it and decides nothing: whether
+# the desktop host keeps its own footprint is ADR-0018's, which no test decides.
 #
 # Usage:
 #     scripts/measure-memory.sh
-#     scripts/measure-memory.sh --verdict FIRST_KB SECOND_KB   (only the verdict, for the self-test)
+#     scripts/measure-memory.sh --verdict EMPTY_KB EMPTY_KB LOADED_KB LOADED_KB   (the verdict only)
 # Environment, all optional: OCELLI_DESKTOP, the application (built here with the Tauri CLI when
 # unset); OCELLI_MEMORY_COMMITS, the size of the repository (100000); OCELLI_MEMORY_LIMIT_MB, the
-# limit (200); OCELLI_MEMORY_WRAPPER, what starts the application on a display ("xvfb-run -a");
-# OCELLI_MEMORY_SETTLE, the seconds of samples taken before the sum may count as settled (10);
-# OCELLI_MEMORY_TIMEOUT, the seconds a run may take (180).
-# Exit code 0 when the memory was measured, 1 when it could not be or the runs spread.
+# memory the graph may add (150); OCELLI_MEMORY_WRAPPER, what starts the application on a display
+# ("xvfb-run -a"); OCELLI_MEMORY_SETTLE, the seconds of samples taken before a sum may count as
+# settled (10); OCELLI_MEMORY_TIMEOUT, the seconds a run may take (180).
+# Exit code 0 when Q-3 holds, 1 when it is missed or the memory cannot be measured.
 
 set -uo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 commits="${OCELLI_MEMORY_COMMITS:-100000}"
-limit_mb="${OCELLI_MEMORY_LIMIT_MB:-200}"
+limit_mb="${OCELLI_MEMORY_LIMIT_MB:-150}"
 wrapper="${OCELLI_MEMORY_WRAPPER-xvfb-run -a}"
 settle="${OCELLI_MEMORY_SETTLE:-10}"
 timeout="${OCELLI_MEMORY_TIMEOUT:-180}"
 
-# judge <first kB> <second kB> — set verdict and rc from the two runs and the limit: no verdict
-# and a failed run when they differ by 10 percent or more of the larger, else whether the larger
-# stays below the limit, which is only reported.
-judge() {
+# spread <a kB> <b kB> — whether two runs differ by 10 percent or more of the larger.
+spread() {
   local high=$(($1 > $2 ? $1 : $2)) low=$(($1 > $2 ? $2 : $1))
-  if (((high - low) * 10 >= high)); then
+  (((high - low) * 10 >= high))
+}
+
+# judge <empty kB> <empty kB> <loaded kB> <loaded kB> — set added (kB), verdict, and rc: no verdict
+# and a failed run when either pair spreads, else whether the added memory stays below the limit.
+judge() {
+  local empty=$(($1 < $2 ? $1 : $2)) loaded=$(($3 > $4 ? $3 : $4))
+  added=$((loaded > empty ? loaded - empty : 0))
+  if spread "$1" "$2" || spread "$3" "$4"; then
     verdict="no verdict: the runs differ by 10 percent or more"
     rc=1
-  elif ((high >= limit_mb * 1024)); then
+  elif ((added >= limit_mb * 1024)); then
     verdict="missed"
-    rc=0
+    rc=1
   else
     verdict="holds"
     rc=0
   fi
 }
 
-# With --verdict, only judge two given runs, so that the self-test can try the verdict at its
+# With --verdict, only judge four given runs, so that the self-test can try the verdict at its
 # boundaries without starting an application.
 if [[ "${1:-}" == --verdict ]]; then
-  judge "$2" "$3"
+  judge "$2" "$3" "$4" "$5"
   echo "$verdict"
   exit "$rc"
 fi
@@ -129,12 +136,13 @@ pss_kb() {
   echo "$sum"
 }
 
-# measure — start the application on the repository and print the commits it loaded and its
-# settled PSS in kB. It runs in a subshell, so it stops the application itself on every way out.
+# measure [repository] — start the application, on the repository when one is given, and print
+# the commits it loaded (0 without one) and its settled PSS in kB. It runs in a subshell, so it
+# stops the application itself on every way out.
 measure() {
-  local pid samples=() kb low high i loaded window=$((settle < 5 ? settle : 5))
+  local pid samples=() kb low high i loaded=0 window=$((settle < 5 ? settle : 5))
   # shellcheck disable=SC2086  # the wrapper is a command and its arguments
-  $wrapper "$app" "$work/repo.git" >"$work/app.log" 2>&1 &
+  $wrapper "$app" "$@" >"$work/app.log" 2>&1 &
   pid=$!
   trap 'kill_tree "$pid"' RETURN
   for ((i = 0; i < timeout; i++)); do
@@ -144,10 +152,12 @@ measure() {
       sed 's/^/    /' "$work/app.log" >&2
       return 1
     fi
-    # The status line the desktop host writes after a load, loaded_status in
-    # src-tauri/src/commands.rs, whose tests hold this shape.
-    loaded="$(grep -m 1 -oE '^[0-9]+ commits' "$work/app.log" | grep -oE '^[0-9]+')"
-    [[ -z "$loaded" ]] && continue
+    if (($#)); then
+      # The status line the desktop host writes after a load, loaded_status in
+      # src-tauri/src/commands.rs, whose tests hold this shape.
+      loaded="$(grep -m 1 -oE '^[0-9]+ commits' "$work/app.log" | grep -oE '^[0-9]+')"
+      [[ -z "$loaded" ]] && continue
+    fi
     kb="$(pss_kb "$pid")"
     samples+=("$kb")
     ((${#samples[@]} < settle)) && continue
@@ -168,19 +178,20 @@ measure() {
 }
 
 generate "$work/repo.git" "$commits" || { echo "memory: cannot generate the repository" >&2; exit 1; }
-read -r loaded first < <(measure) && [[ -n "${first:-}" ]] || exit 1
-read -r _ second < <(measure) && [[ -n "${second:-}" ]] || exit 1
-mb() { awk -v kb="$1" 'BEGIN { printf "%.1f", kb / 1024 }'; }
-first_mb="$(mb "$first")"
-second_mb="$(mb "$second")"
-judge "$first" "$second"
+read -r _ empty1 < <(measure) && [[ -n "${empty1:-}" ]] || exit 1
+read -r _ empty2 < <(measure) && [[ -n "${empty2:-}" ]] || exit 1
+read -r loaded loaded1 < <(measure "$work/repo.git") && [[ -n "${loaded1:-}" ]] || exit 1
+read -r _ loaded2 < <(measure "$work/repo.git") && [[ -n "${loaded2:-}" ]] || exit 1
+judge "$empty1" "$empty2" "$loaded1" "$loaded2"
 
-report="| Commits | Laid out | First run | Second run | Limit | Q-3 |
-|---|---|---|---|---|---|"
-report+=$'\n'"| $commits | $loaded | $first_mb MB | $second_mb MB | $limit_mb MB | $verdict |"
+mb() { awk -v kb="$1" 'BEGIN { printf "%.1f", kb / 1024 }'; }
+report="| Commits | Laid out | Empty | Loaded | Added | Limit | Q-3 |
+|---|---|---|---|---|---|---|"
+report+=$'\n'"| $commits | $loaded | $(mb "$empty1") / $(mb "$empty2") MB | $(mb "$loaded1") / $(mb "$loaded2") MB | $(mb "$added") MB | $limit_mb MB | $verdict |"
 
 echo "$report"
 if [[ -n "${GITHUB_STEP_SUMMARY:-}" ]]; then
-  { echo "## Q-3: memory of the desktop application"; echo; echo "$report"; } >> "$GITHUB_STEP_SUMMARY"
+  { echo "## Q-3: memory the commit graph adds to the desktop application"; echo; echo "$report"; } \
+    >> "$GITHUB_STEP_SUMMARY"
 fi
 exit "$rc"

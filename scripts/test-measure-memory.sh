@@ -3,13 +3,14 @@
 # Self-test of scripts/measure-memory.sh.
 #
 # A stand-in for the desktop application reports the commits of the repository it is given, as
-# the application reports its loaded graph, starts a child process, and keeps running; the script
-# measures it on a small generated repository without a display. The stand-in's memory, its child
-# included, holds a generous limit and misses a limit of 0 MB, which is reported without failing
-# the run. A stand-in that exits at once, one that never reports a loaded graph, and one whose two
+# the application reports its loaded graph, holds about 20 MB more with a repository than
+# without, starts a child process, and keeps running; the script
+# measures it, with no repository and on a small generated one, without a display. What the
+# stand-in adds, its child included, holds a generous limit and misses a limit of 10 MB, below
+# the 20 MB it adds, which fails the run. A stand-in that exits at once, one that never reports a loaded graph, and one whose two
 # runs differ by far more than 10 percent each fail the run instead of giving a verdict. The
-# verdict alone is tried at its boundaries: one kB below the limit, at it, and at a spread of
-# exactly 10 percent.
+# verdict alone is tried at its boundaries: one kB less added than the limit, exactly the limit,
+# which of the runs make the added memory, and a spread of exactly 10 percent in either pair.
 #
 # The script it tests reads /proc and is Linux-only by design (#11), so off Linux the self-test
 # skips with a notice, as the shell lint does without ShellCheck, and CI runs it on Linux.
@@ -34,8 +35,9 @@ trap 'rm -rf "$work"' EXIT
 # The stand-ins' own "$1" and "$(...)" are theirs, not this script's.
 # shellcheck disable=SC2016
 {
-  printf '#!/usr/bin/env bash\n[[ -d "$1" ]] || exit 3\n'
-  printf 'echo "$(git -C "$1" rev-list --count --all) commits" >&2\nsleep 301 &\nwait\n'
+  printf '#!/usr/bin/env bash\nif [[ -n "${1:-}" ]]; then\n  [[ -d "$1" ]] || exit 3\n'
+  printf '  big=$(head -c 20000000 /dev/zero | tr "\\0" a)\n'
+  printf '  echo "$(git -C "$1" rev-list --count --all) commits" >&2\nfi\nsleep 301 &\nwait\n'
 } > "$work/runs"
 printf '#!/usr/bin/env bash\nexit 0\n' > "$work/exits"
 printf '#!/usr/bin/env bash\nsleep 301 &\nwait\n' > "$work/silent"
@@ -68,8 +70,8 @@ expect() {
 
 expect "a generated repository of 120 commits, all laid out, holds a generous limit" 0 \
   "| 120 | 120 |" OCELLI_DESKTOP="$work/runs" OCELLI_MEMORY_LIMIT_MB=1000
-expect "a limit below the application's memory is missed and only reported" 0 \
-  "| 0 MB | missed |" OCELLI_DESKTOP="$work/runs" OCELLI_MEMORY_LIMIT_MB=0
+expect "less than the stand-in adds is missed and fails the run" 1 \
+  "| 10 MB | missed |" OCELLI_DESKTOP="$work/runs" OCELLI_MEMORY_LIMIT_MB=10
 expect "an application that exits fails the run" 1 "the application exited" \
   OCELLI_DESKTOP="$work/exits"
 expect "an application that never reports a loaded graph fails the run" 1 \
@@ -78,22 +80,25 @@ expect "an application that never reports a loaded graph fails the run" 1 \
 expect "two runs far apart give no verdict and fail the run" 1 "no verdict" \
   OCELLI_DESKTOP="$work/grows" OCELLI_MEMORY_LIMIT_MB=1000
 
-# verdict <name> <first kB> <second kB> <exit> <verdict> — the verdict alone, at its boundaries,
-# against the limit of 200 MB.
+# verdict <name> <empty> <empty> <loaded> <loaded> <exit> <verdict> — the verdict alone, in kB,
+# at its boundaries, against a limit of 150 MB added (153600 kB).
 verdict() {
   local out rc
-  out="$(OCELLI_MEMORY_LIMIT_MB=200 bash "$SCRIPT" --verdict "$2" "$3")"; rc=$?
-  if [[ $rc -eq $4 && "$out" == "$5"* ]]; then
+  out="$(OCELLI_MEMORY_LIMIT_MB=150 bash "$SCRIPT" --verdict "$2" "$3" "$4" "$5")"; rc=$?
+  if [[ $rc -eq $6 && "$out" == "$7"* ]]; then
     passed=$((passed + 1))
   else
     failed=$((failed + 1))
-    echo "FAIL: $1 (expected exit $4 with \"$5\", exit $rc: $out)" >&2
+    echo "FAIL: $1 (expected exit $6 with \"$7\", exit $rc: $out)" >&2
   fi
 }
-verdict "one kB below the limit holds Q-3" 204799 204700 0 "holds"
-verdict "exactly the limit misses Q-3" 204800 204700 0 "missed"
-verdict "runs exactly 10 percent apart give no verdict" 1000 900 1 "no verdict"
-verdict "runs just under 10 percent apart give a verdict" 1000 901 0 "holds"
+verdict "one kB less added than the limit holds Q-3" 400000 400100 553599 553500 0 "holds"
+verdict "exactly the limit added misses Q-3 and fails the run" 400000 400100 553600 553500 1 "missed"
+verdict "the smaller empty and the larger loaded run make the added memory" \
+  400100 400000 553599 553500 0 "holds"
+verdict "empty runs exactly 10 percent apart give no verdict" 1000 900 1050 1050 1 "no verdict"
+verdict "loaded runs exactly 10 percent apart give no verdict" 1000 1000 2000 1800 1 "no verdict"
+verdict "runs just under 10 percent apart give a verdict" 1000 901 1050 1050 0 "holds"
 
 if pgrep -f '^sleep 301$' >/dev/null; then
   failed=$((failed + 1))
