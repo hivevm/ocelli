@@ -259,8 +259,8 @@
   }
 </script>
 
-<!-- A leaf row. Rows that cannot act stay inert and say why: at the commit limit
-     a ref can point at history that was never read (ADR-0016), a submodule may
+<!-- A leaf row. Rows that cannot act stay inert and say why: a ref can point at
+     history that is not loaded (ADR-0016), a submodule may
      never have been checked out, and a working tree may be the one on screen.
      A button that silently does nothing is worse than one that explains. -->
 {#snippet leafRow(label: string, item: Entry, depth: number)}
@@ -658,7 +658,7 @@
     background: var(--accent-bg-strong);
   }
 
-  /* A ref beyond the commit limit has no row to reveal — say so by greying it
+  /* A ref whose commit has not loaded has no row to reveal — say so by greying it
      out rather than offering a click that cannot do anything. */
   .row.unreachable {
     color: var(--text-faint);

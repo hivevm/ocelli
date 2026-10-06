@@ -6,7 +6,7 @@
 > is updated in the same change as the structure it describes
 > ([ADR-0001](adr/0001-agent-governance-model.md)).
 >
-> **Last design revision:** 2026-10-05, due after 20 changes. The revision that ran moves the
+> **Last design revision:** 2026-10-06, due after 20 changes. The revision that ran moves the
 > date; the number is this project's to set; a sensor counts the changes outside `docs/` since
 > the commit that set the date and says when the next is due
 > ([ADR-0006](adr/0006-feature-layer.md)).
@@ -19,7 +19,8 @@ than anywhere else, and none beats one that has stopped being true.
 ```
  developer ──▶ desktop application (src-tauri + src-web) ─┐
  developer ──▶ terminal application (crates/tui) ─────────┤──▶ ocelli-core ◀── ocelli-git ──▶ repository
-                                                          │    (layout, port)   (git2)       on disk
+                                                          │    (layout, history,  (git2)     on disk
+                                                          │     port)
                                                           └─ both depend on ocelli-core and ocelli-git
 ```
 
@@ -42,42 +43,60 @@ golden path and the test pattern an agent copies from are named here.
   ([ADR-0009](adr/0009-ports-and-adapters.md)); the layout in `graph.rs` is pure functions over
   values ([ADR-0010](adr/0010-functional-core-layout.md)), laid out after Pvigier
   ([ADR-0015](adr/0015-layout-after-pvigier-by-chunk.md)) with edges shaped by type
-  ([ADR-0030](adr/0030-edge-shapes-and-tracks-out-of-the-main-line.md)).
+  ([ADR-0030](adr/0030-edge-shapes-and-tracks-out-of-the-main-line.md)). `History` in `history.rs` keeps the graph laid
+  out so far and answers the front ends' reads of it: a window of rows with the edges crossing it,
+  search, and lineage ([ADR-0031](adr/0031-front-ends-read-row-windows.md)). `load.rs` runs a
+  load session through the port, and a `LoadSession` is what a front end keeps of it, its
+  `History` and its status line, for both front ends and the measurement alike.
 - **Git adapter** (`crates/git`, `ocelli-git`) — `GitReader`, the repository port implemented
-  with git2: history up to the commit limit with the stash and working-directory nodes, the refs
-  the sidebar lists, changed files, and diffs ([ADR-0019](adr/0019-git2-repository-reader.md),
+  with git2: the history in chunks of 3 000 commits, the first with the stash and
+  working-directory nodes, the refs the sidebar lists, changed files, and diffs
+  ([ADR-0019](adr/0019-git2-repository-reader.md),
   [ADR-0016](adr/0016-history-loads-in-chunks.md),
-  [ADR-0024](adr/0024-synthetic-nodes-in-the-first-chunk.md)).
-  It starts no program a repository names (Q-4).
+  [ADR-0024](adr/0024-synthetic-nodes-in-the-first-chunk.md)); the walk runs in commit-date order
+  and turns libgit2's object cache off for the whole process. It starts no program a repository
+  names (Q-4).
 - **Terminal application** (`crates/tui`, `ocelli-cli`) — draws the core's graph with box-drawing
-  characters on ratatui, reads through `GitReader` on worker threads, and keeps its view state in
-  a file ([ADR-0028](adr/0028-terminal-application-ratatui.md),
-  [ADR-0029](adr/0029-cli-state-file.md)).
+  characters on ratatui; it loads and lays out the history chunk by chunk on a loader thread,
+  keeps the core's `History` at its event loop, reads files and diffs through `GitReader` on a
+  worker thread, and keeps its view state in a file
+  ([ADR-0028](adr/0028-terminal-application-ratatui.md), [ADR-0029](adr/0029-cli-state-file.md)).
 - **Measurement** (`crates/measure`, `ocelli-measure`) — a command that lays out a repository as
   the front ends do and measures a quality goal on it: the number of edge crossings for Q-1, next
-  to those of `git log --graph` over the same commits. It drives the core through the git adapter
-  and runs the git binary, with the repository's configuration kept from choosing a program; it is
-  not shipped to developers, and Ocelli itself never runs git (Q-4). The memory of the desktop
-  application for Q-3 is measured from outside, by `scripts/measure-memory.sh`: it starts the
-  application with no repository and on a generated one, waits there for the status line the
-  desktop host writes to standard error once the graph has loaded, sums the memory of the
+  to those of `git log --graph` over the same commits, and the waits of Q-2: the first window of
+  rows as soon as the first chunk is laid out, and every window across the history once all of it
+  has loaded into the core's `History`. It drives the core through the git
+  adapter and runs the git binary, with the repository's configuration kept from choosing a
+  program; it is not shipped to developers, and Ocelli itself never runs git (Q-4). The memory of
+  the desktop application for Q-3 is measured from outside, by `scripts/measure-memory.sh`: it
+  starts the application with no repository and on a generated one, waits there for the status
+  line the desktop host writes to standard error once the graph has loaded, sums the memory of the
   application's processes, the WebView's included, and takes the difference as what the graph
   adds. `scripts/measure-crossings.sh` runs the command on a fixed corpus against recorded counts.
-  Both
-  run weekly and on demand in `.github/workflows/measure.yml`, not in the checks
+  For Q-2, `scripts/measure-windows.sh` runs its `windows` measurement on a generated history of a
+  million commits with thirty branch lines side by side and some dates running backwards: the wait
+  for the first window of rows, for the slowest chunk taken in while the rest loads, and for the
+  slowest window across the loaded history; `scripts/generate-history.sh` writes the generated
+  histories of Q-2 and Q-3. All
+  three run weekly and on demand in `.github/workflows/measure.yml`, not in the checks
   ([ADR-0008](adr/0008-toolchain-rust-and-typescript.md)); the checks run only their self-tests.
-- **Desktop host** (`src-tauri`, `ocelli`) — the Tauri shell: commands that read through
-  `GitReader` on the blocking pool and hand the graph to the web interface as JSON
-  ([ADR-0018](adr/0018-tauri-desktop-host.md)).
-- **Web interface** (`src-web`) — Svelte and TypeScript: the canvas, the sidebar, the commit
-  detail, the diff overlay, search, and themes
+- **Desktop host** (`src-tauri`, `ocelli`) — the Tauri shell: it loads the history through
+  `GitReader` on the blocking pool into the `History` of a load session (`session.rs`), and its
+  commands answer the web interface's reads of it, windows of rows, search, and the selected
+  commit with its lineage, as JSON ([ADR-0018](adr/0018-tauri-desktop-host.md),
+  [ADR-0031](adr/0031-front-ends-read-row-windows.md)). Once a load ends it hands the memory the
+  load freed back to the system through glibc's `malloc_trim`, the workspace's one `unsafe` block
+  outside its tests.
+- **Web interface** (`src-web`) — Svelte and TypeScript: the canvas, which holds only the window
+  of rows it draws, the sidebar, the commit detail, the diff overlay, the search field, and themes
   ([ADR-0022](adr/0022-svelte-web-interface.md), [ADR-0017](adr/0017-virtual-rendering.md),
   [ADR-0020](adr/0020-diff-overlay-and-file-list.md),
   [ADR-0021](adr/0021-themes-tokens-and-palettes.md),
   [ADR-0026](adr/0026-repository-sidebar.md)).
 
-**The golden path** is the core's layout behind the git adapter: `crates/core/src/graph.rs`, read
-through `crates/git/src/lib.rs`. **The test pattern** is a reference test: a fixed or generated
+**The golden path** is the core's chunked layout and its `History` behind the git adapter's
+chunked load: `crates/core/src/graph.rs` and `crates/core/src/history.rs`, fed by `load_chunks`
+in `crates/git/src/lib.rs`. **The test pattern** is a reference test: a fixed or generated
 input and the output the reference implementation produced, compared exactly
 (`crates/core/tests/layout_reference.rs`, `crates/git/tests/load_reference.rs`), beside the
 structural tests of the shape in `crates/core/tests/structure.rs`.
@@ -87,15 +106,20 @@ structural tests of the shape in `crates/core/tests/structure.rs`.
 The few paths worth following end to end, such as a request, a job, or a build, and where state
 lives between them. Only what a newcomer would otherwise reconstruct from code.
 
-- **Opening a repository.** A front end asks `GitReader` for the commits, which arrive capped at
-  the commit limit with progress reported through a callback, then for the refs; `build_graph`
-  lays the commits out, and the front end draws the rows in view. The desktop host runs both reads
-  on Tokio's blocking pool and sends the graph and the refs to the web interface as two events;
-  the terminal application runs them on a thread of its own and receives them as messages. A
-  path on the command line opens the same way: `ocelli-cli [PATH]` from the start, and the desktop
-  host hands its path to the web interface through the `startup_repo` command once the interface's
-  listeners stand, so the load runs as one the developer started.
-- **Selecting a commit.** The front end asks `GitReader` for the changed files, and for the diff
+- **Opening a repository.** A front end's host runs the core's `load` on a thread of its own: it
+  asks `GitReader` for the history chunk by chunk, lays each chunk out with a `Layout`, reads the
+  refs once the first chunk is handed over, and hands progress, chunks, refs, and the end over as
+  events, each chunk to be appended to a `LoadSession`. The terminal application receives the
+  events at its event loop as messages and reads the window of rows in view from its session. The
+  desktop host runs the load on Tokio's blocking pool, appends the chunks to the `LoadSession` of
+  its current load, and tells the web interface as `history-grew` and `load-refs` events; the web
+  interface then reads the window of rows in view, searches, and selects through commands, and a
+  newer load refuses an older one's chunks, which stops its walk. A path on the command line opens
+  the same way: `ocelli-cli [PATH]` from the start, and the desktop host hands its path to the web
+  interface through the `startup_repo` command once the interface's listeners stand, so the load
+  runs as one the developer started.
+- **Selecting a commit.** The core computes the commit's lineage, which the windows read after
+  light up, and the front end asks `GitReader` for the changed files, and for the diff
   of a file once one is opened; the working-directory node's sentinel SHA reads the uncommitted
   changes.
 - **State between sessions.** The web interface keeps the theme, the avatars toggle, the diff

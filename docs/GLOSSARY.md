@@ -12,6 +12,10 @@ to invent.
 - **Branch edge** — an edge that leaves the lane of a commit to reach a child in another lane,
   where a branch forks off.
   _Avoid:_ fork line.
+- **Chunk** — a run of up to 3 000 commits in the order the walk over a repository's refs yields
+  them, the unit in which a history is loaded and laid out; each chunk is laid out below the ones
+  before it.
+  _Avoid:_ page, batch, slice.
 - **Commit graph** — the commits of a repository drawn as nodes, each joined by an edge to its
   parents, with every branch and tag shown.
   _Avoid:_ tree, history graph, log graph.
@@ -36,6 +40,8 @@ to invent.
   commit keeps its colour across a theme switch; deliberately not a theme token
   ([ADR-0021](adr/0021-themes-tokens-and-palettes.md)).
   _Avoid:_ branch colour, since a branch is a ref and a lane outlives it.
+- **Late child** — a commit the walk yields after its parent, because its committer date runs
+  backwards against it; it is laid out in its chunk, below its parent.
 - **Layout** — the rows, lanes, and edges the core computes for a loaded repository. A front end
   draws a layout and never computes one.
 - **Lineage** — the commits a commit descends from and those that descend from it.
@@ -67,7 +73,8 @@ to invent.
 - **View state** — what a front end remembers between sessions: the theme, the sidebar's width or
   minimised rail, and the diff layout; never anything read from a repository.
 - **Window** — the range of rows a front end is drawing, the same term in both front ends since
-  the terminal has no viewport in the browser's sense.
+  the terminal has no viewport in the browser's sense; the core answers it with those rows and the
+  edges crossing them.
   _Avoid:_ viewport.
 - **Working-directory node** — the node at the top of the commit graph that stands for the
   uncommitted changes of the working directory.

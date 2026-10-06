@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 
-/// The most commits one load lays out (ADR-0016); older history is cut off.
-pub const MAX_COMMITS: usize = 3000;
+/// The most commits one chunk of a load holds (ADR-0016); the history loads chunk by chunk.
+pub const CHUNK_COMMITS: usize = 3000;
 
 /// Synthetic SHA used for the working-directory ("uncommitted changes") node.
 /// It is not a real object id; callers compare against it to diff the workdir.
@@ -9,7 +9,7 @@ pub const WORKDIR_SHA: &str = "WORKING_DIRECTORY";
 
 /// Distinguishes regular commits from the synthetic nodes we surface in the
 /// graph (a stash entry, or the working-directory "uncommitted changes" node).
-#[derive(Debug, Clone, Copy, PartialEq, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub enum CommitKind {
     Commit,
@@ -18,7 +18,7 @@ pub enum CommitKind {
 }
 
 /// Raw commit data as loaded from git2, before any layout is assigned.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CommitData {
     pub sha: String,
     pub message: String,
@@ -33,21 +33,10 @@ pub struct CommitData {
     pub kind: CommitKind,
 }
 
-/// A commit enriched with graph layout coordinates.
-/// Uses Vec<usize> for adjacency (index-based, not object references).
-#[derive(Debug, Clone)]
-pub struct Node {
-    pub commit: CommitData,
-    pub row: i32,                   // -1 = unassigned; 0 = newest
-    pub col: i32,                   // -1 = unassigned; 0 = leftmost
-    pub source_indices: Vec<usize>, // parent nodes (older, higher row)
-    pub target_indices: Vec<usize>, // child nodes (newer, lower row)
-}
-
 /// A connection between a child commit and one of its parents.
 /// `is_branch` marks a BRANCH edge (the first parent, staying in one column);
 /// otherwise it is a MERGE edge, which crosses columns.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Edge {
     pub source_row: i32,
@@ -61,7 +50,7 @@ pub struct Edge {
 
 /// The serializable form of a node sent to the frontend.
 /// The camelCase field names are the contract the canvas renderer reads.
-#[derive(Debug, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct NodeJson {
     pub row: i32,

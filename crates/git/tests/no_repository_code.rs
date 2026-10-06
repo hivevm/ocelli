@@ -121,7 +121,7 @@ fn reading_a_repository_runs_none_of_its_programs() {
 
     let reader = GitReader;
     let mut quiet = |_: String| {};
-    let commits = reader.load_commits(&dir, &mut quiet).unwrap();
+    let commits = reader.load_first_chunk(&dir, &mut quiet).unwrap();
     assert_eq!(
         build_graph(commits).nodes.len(),
         3,

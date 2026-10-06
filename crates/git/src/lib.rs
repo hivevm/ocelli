@@ -14,13 +14,26 @@ use std::path::Path;
 #[derive(Debug, Default, Clone, Copy)]
 pub struct GitReader;
 
-impl RepositoryReader for GitReader {
-    fn load_commits(
+impl GitReader {
+    /// The first chunk of the history alone (ADR-0016), for what measures or tests the newest
+    /// commits; the front ends load through [`RepositoryReader::load_chunks`].
+    pub fn load_first_chunk(
         &self,
         repo: &Path,
         progress: &mut dyn FnMut(String),
     ) -> Result<Vec<CommitData>> {
-        git::load_repository(repo, progress)
+        git::load_first_chunk(repo, progress)
+    }
+}
+
+impl RepositoryReader for GitReader {
+    fn load_chunks(
+        &self,
+        repo: &Path,
+        progress: &mut dyn FnMut(String),
+        on_chunk: &mut dyn FnMut(Vec<CommitData>) -> bool,
+    ) -> Result<()> {
+        git::load_chunks(repo, progress, on_chunk)
     }
 
     fn load_refs(&self, repo: &Path) -> Result<RepoRefs> {

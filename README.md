@@ -54,7 +54,7 @@ The problem, the goals, and the success criteria live in
 | **Keyboard navigation**| `↑`/`↓` walk the commit rows, `Esc` deselects                          |
 | **Avatars (opt-in)**   | Gravatar avatars in the detail panel — off by default, no network requests until enabled |
 | **Background loading** | History loads off the UI thread; the UI stays responsive              |
-| **Commit limit**       | Up to 3 000 commits per load; the status bar says when the limit cut the history |
+| **Whole history**      | The newest 3 000 commits show at once, the rest loads while you scroll; the status bar counts the chunks |
 
 ## Prerequisites
 
@@ -99,9 +99,9 @@ line: `ocelli /path/to/repository`, a relative path resolved against the current
 development, `bun run tauri dev -- -- /path/to/repository` passes it through; give an absolute path
 there, since the development build runs in `src-tauri/`.
 
-The graph loads in the background, with progress shown in the status bar — including a note when
-the commit limit truncated the history. Scroll through the history; branch and tag chips mark the
-commits the refs point at.
+The graph loads in the background: the newest commits show at once, and the older history
+follows while you scroll, search, and follow lineage, with the status bar counting what has
+arrived. Branch and tag chips mark the commits the refs point at.
 
 The sidebar on the left lists what the repository *contains*: branches, remotes, working trees,
 tags, and submodules. Selecting a branch or tag reveals its commit in the graph; selecting a
@@ -126,6 +126,8 @@ is switched on — a fresh installation makes no network requests
 `ocelli-cli [--ascii] [PATH]` opens the repository at `PATH` (default: the current directory)
 in the terminal — the same rows, columns and edges as the desktop app, drawn with box-drawing
 characters (`--ascii` for terminals without them). It only reads, and it never touches the network.
+The newest commits show at once; the older history loads in the background while you scroll,
+search, and follow lineage, and the status line counts what has arrived.
 
 It offers what the desktop window offers, laid out the same way:
 

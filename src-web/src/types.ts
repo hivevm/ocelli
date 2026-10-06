@@ -30,9 +30,48 @@ export interface Edge {
   maxRow: number;
 }
 
-export interface GraphData {
+/** Rows `top..top + nodes.length` of the history the host keeps, with every edge crossing them
+ *  (ADR-0031). With a commit selected, `litNodes` and `litEdges` say which of them belong to its
+ *  lineage; null when nothing is selected. */
+export interface RowWindow {
+  /** The load the rows belong to; an answer from an older load is dropped. */
+  generation: number;
+  top: number;
+  /** The lanes the window's nodes and edges reach. */
+  lanes: number;
   nodes: NodeJson[];
   edges: Edge[];
+  litNodes: boolean[] | null;
+  litEdges: boolean[] | null;
+}
+
+/** How far the history of a load has come; a new `generation` is a new load. */
+export interface Growth {
+  generation: number;
+  rows: number;
+  lanes: number;
+  loading: boolean;
+  status: string;
+}
+
+/** A parent or child of the selected commit; `row` is null until it is laid out. */
+export interface Relative {
+  sha: string;
+  label: string;
+  row: number | null;
+}
+
+export interface Selected {
+  generation: number;
+  node: NodeJson;
+  relatives: Relative[];
+}
+
+/** Every row matching a search, newest first, and the nodes of the first ones. */
+export interface Found {
+  generation: number;
+  rows: number[];
+  hits: NodeJson[];
 }
 
 // ── Repository sidebar (ADR-0026) ──────────────────────────────────────────

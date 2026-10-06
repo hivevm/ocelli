@@ -1,7 +1,8 @@
 //! Turns the laid-out commit graph into terminal cells (ADR-0028).
 //!
-//! The rows, columns and edges come unchanged from `ocelli_core::graph`; this
-//! module only decides which box-drawing character each cell shows. A graph
+//! The rows, columns and edges come unchanged from the window of rows the core
+//! answers (ADR-0031); this module only decides which box-drawing character
+//! each cell shows. A graph
 //! column occupies two cells — the glyph cell at `x = 2 * col` and a connector
 //! cell to its right — and every row is one line.
 //!
@@ -11,18 +12,14 @@
 //! column and bends at the child's row — whichever side the child is on. The
 //! rounded box corners `╭ ╮ ╰ ╯` are the terminal form of the softened bend.
 
-use ocelli_core::model::{CommitKind, Edge, Graph, NodeJson};
-use std::collections::HashSet;
+use ocelli_core::history::Lineage;
+use ocelli_core::history::Window;
+use ocelli_core::model::{CommitKind, Edge, NodeJson};
 
 const UP: u8 = 1;
 const DOWN: u8 = 2;
 const LEFT: u8 = 4;
 const RIGHT: u8 = 8;
-
-/// Edges spanning more rows than this are not bucketed by their first row but
-/// kept in a separate list, so a window query scans a bounded number of
-/// buckets plus that short list — the same scheme the desktop canvas uses.
-const LONG_EDGE_ROWS: usize = 64;
 
 /// The character set the graph is drawn with.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -48,76 +45,9 @@ const EMPTY: Cell = Cell {
     dim: false,
 };
 
-/// Lookups built once per load, so that rasterising a window costs
-/// `O(visible rows)` rather than `O(history)` (ADR-0017).
-pub struct GraphIndex {
-    /// `by_row[row]` is the index into `graph.nodes` of the node in that row.
-    by_row: Vec<usize>,
-    /// Short edges, bucketed by their first (lowest) row.
-    short_by_min_row: Vec<Vec<usize>>,
-    /// Edges spanning more than [`LONG_EDGE_ROWS`] rows.
-    long: Vec<usize>,
-    /// Width of the graph in cells.
-    pub width: usize,
-}
-
-impl GraphIndex {
-    pub fn new(graph: &Graph) -> Self {
-        let rows = graph.nodes.len();
-        let mut by_row = vec![0; rows];
-        for (i, n) in graph.nodes.iter().enumerate() {
-            by_row[n.row as usize] = i;
-        }
-
-        let mut short_by_min_row = vec![Vec::new(); rows];
-        let mut long = Vec::new();
-        for (i, e) in graph.edges.iter().enumerate() {
-            if (e.max_row - e.min_row) as usize > LONG_EDGE_ROWS {
-                long.push(i);
-            } else {
-                short_by_min_row[e.min_row as usize].push(i);
-            }
-        }
-
-        let columns = graph.nodes.iter().map(|n| n.col + 1).max().unwrap_or(0) as usize;
-        Self {
-            by_row,
-            short_by_min_row,
-            long,
-            width: (2 * columns).saturating_sub(1),
-        }
-    }
-
-    pub fn rows(&self) -> usize {
-        self.by_row.len()
-    }
-
-    /// Index into `graph.nodes` of the node in `row`.
-    pub fn node_at(&self, row: usize) -> usize {
-        self.by_row[row]
-    }
-
-    /// Every edge whose row span intersects `top..=bottom` — including edges
-    /// that only pass through the window with both ends off-screen.
-    fn edges_in<'g>(
-        &self,
-        graph: &'g Graph,
-        top: usize,
-        bottom: usize,
-    ) -> impl Iterator<Item = &'g Edge> {
-        let first_bucket = top.saturating_sub(LONG_EDGE_ROWS);
-        let last_bucket = bottom.min(self.short_by_min_row.len().saturating_sub(1));
-        let short = self
-            .short_by_min_row
-            .get(first_bucket..=last_bucket)
-            .unwrap_or_default()
-            .iter()
-            .flatten();
-        short
-            .chain(self.long.iter())
-            .map(|&i| &graph.edges[i])
-            .filter(move |e| e.max_row as usize >= top && e.min_row as usize <= bottom)
-    }
+/// The width in cells of a graph of `lanes` lanes.
+pub fn width(lanes: usize) -> usize {
+    (2 * lanes).saturating_sub(1)
 }
 
 /// Cell state while edges are being collected: the directions that meet in the
@@ -131,19 +61,19 @@ struct Work {
     h_dim: bool,
 }
 
-/// The window being rasterised: `rows` lines starting at row `top`.
-struct Window {
+/// The cells being rasterised: `rows` lines starting at row `top`.
+struct Canvas {
     top: usize,
     cells: Vec<Vec<Work>>,
 }
 
-impl Window {
+impl Canvas {
     fn bottom(&self) -> usize {
         self.top + self.cells.len() - 1
     }
 
     /// A vertical run in cell column `x` from `top_row` down to `bottom_row`,
-    /// clipped to the window.
+    /// clipped to the canvas.
     fn vertical(&mut self, x: usize, top_row: usize, bottom_row: usize, lane: usize, dim: bool) {
         let from = top_row.max(self.top);
         let to = bottom_row.min(self.bottom());
@@ -195,15 +125,17 @@ impl Window {
         let lane = if e.is_branch { tc } else { sc };
 
         let (left, right) = (xs.min(xt), xs.max(xt));
+        // A late child stands below its parent (ADR-0015); its edge runs down instead of up.
+        let (upper, lower) = (sr.min(tr), sr.max(tr));
         if sc == tc {
-            self.vertical(xs, tr, sr, lane, dim);
+            self.vertical(xs, upper, lower, lane, dim);
         } else if e.is_branch {
-            // BRANCH: along the parent's row, then up the child's lane.
+            // BRANCH: along the parent's row, then into the child's lane.
             self.horizontal(sr, left, right, lane, dim);
-            self.vertical(xt, tr, sr, lane, dim);
+            self.vertical(xt, upper, lower, lane, dim);
         } else {
-            // MERGE: up the parent's column, then along the child's row.
-            self.vertical(xs, tr, sr, lane, dim);
+            // MERGE: along the parent's column, then along the child's row.
+            self.vertical(xs, upper, lower, lane, dim);
             self.horizontal(tr, left, right, lane, dim);
         }
     }
@@ -249,40 +181,35 @@ fn node_char(node: &NodeJson, glyphs: Glyphs) -> char {
     }
 }
 
-/// Rasterises rows `top..top + rows` of the graph, one `Vec<Cell>` of
-/// `index.width` cells per row. Rows past the end of the history are omitted.
+/// Rasterises a window of rows, one `Vec<Cell>` of `width` cells per row.
 ///
 /// With a `highlight` set of rows (a selected commit's lineage), nodes outside
 /// it are dimmed, and so is every edge that does not join two of its rows —
 /// every loaded parent of a lineage node is itself in the lineage, so the
 /// edges inside the set are exactly the lineage's own.
 pub fn rasterize(
-    graph: &Graph,
-    index: &GraphIndex,
-    top: usize,
-    rows: usize,
+    window: &Window,
+    width: usize,
     glyphs: Glyphs,
-    highlight: Option<&HashSet<usize>>,
+    highlight: Option<&Lineage>,
 ) -> Vec<Vec<Cell>> {
-    let off = |row: i32| highlight.is_some_and(|h| !h.contains(&(row as usize)));
-    let rows = rows.min(index.rows().saturating_sub(top));
-    if rows == 0 {
+    let off = |row: i32| highlight.is_some_and(|h| !h.contains(row as usize));
+    if window.nodes.is_empty() {
         return Vec::new();
     }
-    let mut window = Window {
-        top,
-        cells: vec![vec![Work::default(); index.width]; rows],
+    let mut canvas = Canvas {
+        top: window.top,
+        cells: vec![vec![Work::default(); width]; window.nodes.len()],
     };
-    for e in index.edges_in(graph, top, window.bottom()) {
-        window.edge(e, off(e.source_row) || off(e.target_row));
+    for e in &window.edges {
+        canvas.edge(e, off(e.source_row) || off(e.target_row));
     }
 
-    window
+    canvas
         .cells
         .iter()
-        .enumerate()
-        .map(|(i, line)| {
-            let node = &graph.nodes[index.node_at(top + i)];
+        .zip(&window.nodes)
+        .map(|(line, node)| {
             line.iter()
                 .enumerate()
                 .map(|(x, w)| {
@@ -312,8 +239,8 @@ pub fn rasterize(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use ocelli_core::graph::build_graph;
-    use ocelli_core::model::CommitData;
+    use ocelli_core::history::History;
+    use ocelli_core::model::{CommitData, Graph};
 
     fn commit(sha: &str, time: i64, parents: &[&str]) -> CommitData {
         CommitData {
@@ -331,17 +258,32 @@ mod tests {
         }
     }
 
-    fn render(graph: &Graph, top: usize, rows: usize, glyphs: Glyphs) -> Vec<String> {
-        let index = GraphIndex::new(graph);
-        rasterize(graph, &index, top, rows, glyphs, None)
+    fn laid_out(commits: Vec<CommitData>) -> History {
+        let mut h = History::new();
+        h.add_chunk(commits);
+        h
+    }
+
+    fn chars(cells: Vec<Vec<Cell>>) -> Vec<String> {
+        cells
             .iter()
             .map(|line| line.iter().map(|c| c.ch).collect::<String>())
             .collect()
     }
 
+    /// Rows `top..top + rows` of a laid-out history, through the window the core answers.
+    fn render(h: &History, top: usize, rows: usize, glyphs: Glyphs) -> Vec<String> {
+        chars(rasterize(
+            &h.window(top, rows),
+            width(h.lanes()),
+            glyphs,
+            None,
+        ))
+    }
+
     /// `a` ← `b` on main, `c` branches off `a` and is merged back by `d`.
-    fn fork_and_merge() -> Graph {
-        build_graph(vec![
+    fn fork_and_merge() -> History {
+        laid_out(vec![
             commit("a", 1, &[]),
             commit("b", 2, &["a"]),
             commit("c", 3, &["a"]),
@@ -351,7 +293,7 @@ mod tests {
 
     #[test]
     fn linear_history_is_one_straight_lane() {
-        let g = build_graph(vec![
+        let g = laid_out(vec![
             commit("a", 1, &[]),
             commit("b", 2, &["a"]),
             commit("c", 3, &["b"]),
@@ -391,7 +333,27 @@ mod tests {
         assert_eq!(render(&g, 1, 2, Glyphs::Unicode), ["│ ●", "● │"]);
     }
 
-    /// A hand-built graph, for shapes the layout itself avoids producing.
+    /// The whole of a hand-built graph as one window.
+    fn whole(g: &Graph) -> Window {
+        Window {
+            top: 0,
+            nodes: g.nodes.clone(),
+            edges: g.edges.clone(),
+        }
+    }
+
+    fn render_whole(g: &Graph) -> Vec<String> {
+        let lanes = g
+            .nodes
+            .iter()
+            .map(|n| n.col as usize + 1)
+            .max()
+            .unwrap_or(0);
+        chars(rasterize(&whole(g), width(lanes), Glyphs::Unicode, None))
+    }
+
+    /// A hand-built graph, for shapes the layout itself avoids producing. Its nodes are given
+    /// in row order.
     fn graph(nodes: &[(i32, i32)], edges: &[(i32, i32, i32, i32, bool)]) -> Graph {
         use ocelli_core::model::NodeJson;
         Graph {
@@ -441,12 +403,13 @@ mod tests {
             &[(0, 1), (1, 2), (2, 0), (3, 1)],
             &[(3, 1, 0, 1, true), (2, 0, 1, 2, true)],
         );
-        assert_eq!(
-            render(&g, 0, 10, Glyphs::Unicode),
-            ["  ●  ", "  │ ●", "●─┼─╯", "  ●  "]
-        );
-        let index = GraphIndex::new(&g);
-        let cells = rasterize(&g, &index, 2, 1, Glyphs::Unicode, None);
+        assert_eq!(render_whole(&g), ["  ●  ", "  │ ●", "●─┼─╯", "  ●  "]);
+        let row_2 = Window {
+            top: 2,
+            nodes: vec![g.nodes[2].clone()],
+            edges: g.edges.clone(),
+        };
+        let cells = rasterize(&row_2, width(3), Glyphs::Unicode, None);
         assert_eq!(
             cells[0][2].lane,
             Some(1),
@@ -461,16 +424,17 @@ mod tests {
 
     #[test]
     // Verifies: ADR-0017, G-14
-    fn long_edges_are_found_by_a_window_far_from_both_ends() {
-        // A side branch whose fork is more than LONG_EDGE_ROWS below its tip.
+    fn long_edges_are_drawn_in_a_window_far_from_both_ends() {
+        // A side branch whose fork lies 75 rows below its tip, beyond the
+        // span the core buckets edges by.
         let mut commits = vec![commit("root", 0, &[]), commit("side", 1000, &["root"])];
         let mut prev = "root".to_string();
-        for i in 1..=(LONG_EDGE_ROWS as i64 + 10) {
+        for i in 1..=74 {
             let sha = format!("m{i}");
             commits.push(commit(&sha, i, &[prev.as_str()]));
             prev = sha;
         }
-        let g = build_graph(commits);
+        let g = laid_out(commits);
         let lines = render(&g, 30, 1, Glyphs::Unicode);
         assert_eq!(lines.len(), 1);
         assert_eq!(lines[0].chars().filter(|&c| c == '│').count(), 1);
@@ -483,7 +447,7 @@ mod tests {
         stash.kind = CommitKind::Stash;
         let mut work = commit("w", 4, &["a"]);
         work.kind = CommitKind::Working;
-        let g = build_graph(vec![commit("a", 1, &[]), stash, work]);
+        let g = laid_out(vec![commit("a", 1, &[]), stash, work]);
         let lines = render(&g, 0, 10, Glyphs::Unicode).concat();
         assert!(lines.contains('◆') && lines.contains('◌'), "{lines}");
     }
@@ -498,7 +462,16 @@ mod tests {
             &[(0, 1), (1, 1), (2, 0)],
             &[(1, 1, 0, 1, true), (2, 0, 0, 1, false)],
         );
-        assert_eq!(render(&g, 0, 10, Glyphs::Unicode), ["╭─●", "│ ●", "●  "]);
+        assert_eq!(render_whole(&g), ["╭─●", "│ ●", "●  "]);
+    }
+
+    #[test]
+    // Verifies: ADR-0015
+    fn an_edge_down_to_a_late_child_is_drawn_between_its_ends() {
+        // The parent in row 0 and its late child in row 2, below it, on lane 0; a commit of lane 1
+        // between them.
+        let g = graph(&[(0, 0), (1, 1), (2, 0)], &[(0, 0, 2, 0, true)]);
+        assert_eq!(render_whole(&g), ["●  ", "│ ●", "●  "]);
     }
 
     #[test]
@@ -506,22 +479,22 @@ mod tests {
     fn a_fork_to_the_left_bends_at_the_bottom() {
         // `p` (column 1) is the first parent of `d` (column 0).
         let g = graph(&[(0, 0), (1, 1)], &[(1, 1, 0, 0, true)]);
-        assert_eq!(render(&g, 0, 10, Glyphs::Unicode), ["●  ", "╰─●"]);
+        assert_eq!(render_whole(&g), ["●  ", "╰─●"]);
     }
 
     #[test]
     fn outside_a_highlighted_lineage_nodes_and_edges_are_dimmed() {
         let g = fork_and_merge();
-        let index = GraphIndex::new(&g);
+        let w = g.window(0, 4);
         // Lineage of b: rows 0 (d), 2 (b), 3 (a) — c's row 1 is outside.
-        let lineage: HashSet<usize> = [0, 2, 3].into();
-        let cells = rasterize(&g, &index, 0, 4, Glyphs::Unicode, Some(&lineage));
+        let lineage = g.lineage(2);
+        let cells = rasterize(&w, width(g.lanes()), Glyphs::Unicode, Some(&lineage));
         let dim = |row: usize, x: usize| cells[row][x].dim;
         assert!(!dim(0, 0) && !dim(1, 0) && !dim(2, 0), "d—b—a stays bright");
         assert!(dim(1, 2), "c is outside the lineage");
         assert!(dim(0, 1) && dim(0, 2), "the merge edge d←c is dimmed");
         assert!(dim(3, 1) && dim(3, 2), "the fork a→c is dimmed");
-        let none = rasterize(&g, &index, 0, 4, Glyphs::Unicode, None);
+        let none = rasterize(&w, width(g.lanes()), Glyphs::Unicode, None);
         assert!(none.iter().flatten().all(|c| !c.dim));
     }
 
