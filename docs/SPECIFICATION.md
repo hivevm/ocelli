@@ -41,8 +41,7 @@ it starts and runs on a fraction of the resources an Electron application takes.
 Lead with the commit graph. Ocelli starts from GitGraph, the read-only viewer this repository
 built before: its layout, its look, and its behaviour carry over unchanged onto Ocelli's
 architecture first, because the layout is what no free tool offers and GitGraph has proven it.
-Editing, the remote server, and histories beyond GitGraph's commit limit follow once the viewer
-stands on the new architecture.
+Editing and the remote server follow once the viewer stands on the new architecture.
 Every front end offers the same commit graph and the same operations, so that a developer who
 learns Ocelli in one place knows it in the others.
 
@@ -71,10 +70,13 @@ that test exists the criterion is pending work, and the traceability check lists
    application, the web interface, and the terminal application.
 9. **G-9** — When the commit graph is drawn, the system shall draw an edge between lanes as an
    orthogonal L-shape whose bend follows its type, a branch edge bending at its parent's row and a
-   merge edge at its child's row, and shall route no edge through a commit it does not join.
+   merge edge at its child's row, a merge out of the main line running up a track of its own with
+   a bend at each end, and shall route no edge through a commit it does not join, an edge down to
+   a late child excepted.
 10. **G-10** — When the commit graph is drawn, the system shall place every commit above its
-    parents and order commits by committer date where the topology leaves the order open, newest
-    at the top.
+    parents, except a late child, a commit whose committer date runs backwards against a parent
+    laid out before it, which stands below that parent, and order commits by committer date where
+    the topology leaves the order open, newest at the top.
 11. **G-11** — When the commit graph is drawn, the system shall show each local branch, remote
     branch, and tag as a ref chip on the commit it points at.
 12. **G-12** — When the developer selects a commit, the system shall show its SHA, message,
@@ -100,8 +102,8 @@ from the threats below.
 - **Q-1** — Readability: the commit graph is what Ocelli exists for. Each branch keeps its lane
   (G-2), and the layout pays for that with edge crossings, never more than recorded for the corpus;
   a recorded count changes only with a decision about the layout. Measured on a fixed corpus of
-  public repositories, each at a fixed commit of its main branch over the newest commits up to the
-  commit limit: the layout draws no more edge crossings than the count recorded for that commit.
+  public repositories, each at a fixed commit of its main branch over the first chunk of its
+  history: the layout draws no more edge crossings than the count recorded for that commit.
 - **Q-2** — Performance: a repository of one million commits stays usable. Measured on such a
   repository: the first screen of the commit graph appears within 2 s of opening it, and
   scrolling never waits more than 100 ms for the next screen.

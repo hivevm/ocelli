@@ -1,7 +1,7 @@
 //! `ocelli-measure`: measures Ocelli's quality goals on a real repository (#11).
 //!
 //! `ocelli-measure crossings PATH` lays out the first chunk of the repository at `PATH` as every
-//! front end does (ADR-0016), hands git exactly the commits laid out, and prints the number of
+//! front end does (ADR-0016), its main line in the leftmost lane (ADR-0032), hands git exactly the commits laid out, and prints the number of
 //! commits and the edge crossings in Ocelli's layout and in `git log --graph` over them (Q-1).
 //! The stash and working-directory nodes are left out, since git draws neither (ADR-0024).
 //!
@@ -15,8 +15,9 @@ mod git_graph;
 mod windows;
 
 use anyhow::{Context, Result, bail};
-use ocelli_core::graph::build_graph;
+use ocelli_core::graph::Layout;
 use ocelli_core::model::{CommitData, CommitKind};
+use ocelli_core::port::RepositoryReader;
 use ocelli_git::GitReader;
 use std::collections::HashSet;
 use std::io::Write;
@@ -69,7 +70,12 @@ fn measure_crossings(path: &Path) -> Result<Crossings> {
         .into_iter()
         .filter(|c| c.kind == CommitKind::Commit)
         .collect();
-    let graph = build_graph(commits.clone());
+    // Laid out as the front ends lay it out, the main line in the leftmost lane (ADR-0032).
+    let tip = GitReader
+        .load_main_tip(path)
+        .with_context(|| format!("cannot read the main line of {}", path.display()))?;
+    let mut layout = tip.map_or_else(Layout::new, Layout::with_main_line);
+    let edges = layout.lay_out(commits.clone()).edges;
     let ascii = git_log_graph(path, &commits)?;
     let rows: Vec<&str> = ascii.iter().map(|(graph, _)| graph.as_str()).collect();
     let shown: HashSet<&str> = ascii.iter().filter_map(|(_, sha)| sha.as_deref()).collect();
@@ -83,7 +89,7 @@ fn measure_crossings(path: &Path) -> Result<Crossings> {
     }
     Ok(Crossings {
         commits: commits.len(),
-        ocelli: crossings::count(&graph),
+        ocelli: crossings::count_edges(&edges),
         git: git_graph::count(&rows)?,
     })
 }

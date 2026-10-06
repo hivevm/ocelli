@@ -18,6 +18,11 @@ pub trait RepositoryReader {
         on_chunk: &mut dyn FnMut(Vec<CommitData>) -> bool,
     ) -> Result<()>;
 
+    /// The tip of the main line (ADR-0032): the commit of the local branch `origin/HEAD` names,
+    /// else of `main`, else of `master`, else the checked-out commit; none where `HEAD` does not
+    /// resolve either.
+    fn load_main_tip(&self, repo: &Path) -> Result<Option<String>>;
+
     /// Loads every ref category the repository sidebar shows.
     fn load_refs(&self, repo: &Path) -> Result<RepoRefs>;
 

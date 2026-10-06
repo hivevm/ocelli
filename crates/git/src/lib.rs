@@ -36,6 +36,10 @@ impl RepositoryReader for GitReader {
         git::load_chunks(repo, progress, on_chunk)
     }
 
+    fn load_main_tip(&self, repo: &Path) -> Result<Option<String>> {
+        refs::load_main_tip(repo)
+    }
+
     fn load_refs(&self, repo: &Path) -> Result<RepoRefs> {
         refs::load_repo_refs(repo)
     }

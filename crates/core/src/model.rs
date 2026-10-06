@@ -46,6 +46,10 @@ pub struct Edge {
     pub is_branch: bool,
     pub min_row: i32,
     pub max_row: i32,
+    /// The lane a merge out of the main line runs up between its ends (ADR-0030); none for every
+    /// other edge, and then left out of the JSON.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub track: Option<i32>,
 }
 
 /// The serializable form of a node sent to the frontend.

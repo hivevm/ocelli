@@ -21,6 +21,39 @@ use ocelli_core::model::{
 };
 use std::path::Path;
 
+/// The tip of the main line (ADR-0032): the commit of the local branch `origin/HEAD` names, else
+/// of `main`, else of `master`, else the checked-out commit; none where `HEAD` does not resolve
+/// either. A remote branch alone does not make a main line.
+pub fn load_main_tip(repo_path: &Path) -> Result<Option<String>> {
+    let repo = Repository::discover(repo_path)?;
+    let local = |name: &str| {
+        repo.find_branch(name, BranchType::Local)
+            .ok()
+            .and_then(|b| b.get().peel_to_commit().ok())
+            .map(|c| c.id().to_string())
+    };
+    let named_by_origin = repo
+        .find_reference("refs/remotes/origin/HEAD")
+        .ok()
+        .and_then(|r| r.symbolic_target().map(str::to_string))
+        .and_then(|target| {
+            target
+                .strip_prefix("refs/remotes/origin/")
+                .map(str::to_string)
+        });
+    let tip = named_by_origin
+        .and_then(|name| local(&name))
+        .or_else(|| local("main"))
+        .or_else(|| local("master"))
+        .or_else(|| {
+            repo.head()
+                .ok()
+                .and_then(|h| h.peel_to_commit().ok())
+                .map(|c| c.id().to_string())
+        });
+    Ok(tip)
+}
+
 /// Loads every ref category the sidebar shows, in one pass over the repository.
 pub fn load_repo_refs(repo_path: &Path) -> Result<RepoRefs> {
     let repo = Repository::discover(repo_path)?;

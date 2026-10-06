@@ -1,8 +1,8 @@
 //! Verifies: ADR-0016
 //!
 //! The history loads in chunks: repositories of several chunks, made with git, load chunk by chunk
-//! in commit-date order, a child dated before its parent after it, the first chunk as a load of the first chunk alone returns it, together the whole
-//! history, and a load stops when it is told to. The chunks lay out into one commit graph.
+//! in commit-date order, a child dated before its parent after it, together the whole history, and
+//! a load stops when it is told to. The chunks lay out into one commit graph.
 
 use ocelli_core::graph::build_graph;
 use ocelli_core::history::History;
