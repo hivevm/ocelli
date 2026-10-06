@@ -9,6 +9,16 @@ use tauri::{AppHandle, Emitter, State, Window};
 /// Shared application state
 pub struct AppState {
     pub current_repo: Mutex<Option<PathBuf>>,
+    /// The repository named on the command line, handed to the web interface once.
+    pub startup_repo: Mutex<Option<String>>,
+}
+
+/// The repository named on the command line, if any, the first time it is asked for. The web
+/// interface asks once its listeners stand and opens it like any other path, so a load started
+/// at startup never emits into a window that is not listening yet.
+#[tauri::command]
+pub fn startup_repo(state: State<'_, AppState>) -> Option<String> {
+    state.startup_repo.lock().unwrap().take()
 }
 
 /// Loads a repository by path and emits graph data to the frontend.
@@ -50,16 +60,10 @@ pub async fn open_repo(
                 // The sidebar's refs come from the same read as the history, so
                 // the two never describe different states of the repository.
                 let _ = window_clone.emit("load-refs", refs_json);
-                // At the commit limit the load was (or may have been) truncated —
-                // say so instead of presenting the cut-off as the whole history.
-                let status = if node_count >= MAX_COMMITS {
-                    format!(
-                        "{} commits — commit limit reached, older history not shown",
-                        node_count
-                    )
-                } else {
-                    format!("{} commits", node_count)
-                };
+                let status = loaded_status(node_count);
+                // The same line on standard error, so that a script driving the application,
+                // scripts/measure-memory.sh among them, can tell that the graph has loaded.
+                eprintln!("{status}");
                 let _ = window_clone.emit("set-status", status);
             }
             Err(e) => {
@@ -169,6 +173,21 @@ async fn load_and_layout(
     Ok((graph_json, refs_json))
 }
 
+/// The status line after a load. At the commit limit the load was (or may have been) truncated, so
+/// it says so instead of presenting the cut-off as the whole history. It starts with the number of
+/// commits and ` commits`, the shape `scripts/measure-memory.sh` reads from standard error to tell
+/// that the graph has loaded.
+fn loaded_status(node_count: usize) -> String {
+    if node_count >= MAX_COMMITS {
+        format!(
+            "{} commits — commit limit reached, older history not shown",
+            node_count
+        )
+    } else {
+        format!("{} commits", node_count)
+    }
+}
+
 /// Counts nodes in a serialized JSON graph (for status message).
 fn count_nodes_from_json(json: &str) -> usize {
     if let Ok(val) = serde_json::from_str::<serde_json::Value>(json)
@@ -177,4 +196,24 @@ fn count_nodes_from_json(json: &str) -> usize {
         return nodes.len();
     }
     0
+}
+
+#[cfg(test)]
+mod tests {
+    use super::loaded_status;
+    use ocelli_core::model::MAX_COMMITS;
+
+    #[test]
+    fn the_status_below_the_limit_names_the_commits() {
+        assert_eq!(loaded_status(42), "42 commits");
+    }
+
+    #[test]
+    fn the_status_at_the_limit_says_older_history_is_cut_and_keeps_the_shape() {
+        let line = loaded_status(MAX_COMMITS);
+        assert_eq!(
+            line,
+            format!("{MAX_COMMITS} commits — commit limit reached, older history not shown")
+        );
+    }
 }

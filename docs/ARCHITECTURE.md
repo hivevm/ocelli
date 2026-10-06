@@ -6,7 +6,7 @@
 > is updated in the same change as the structure it describes
 > ([ADR-0001](adr/0001-agent-governance-model.md)).
 >
-> **Last design revision:** 2026-10-04, due after 20 changes. The revision that ran moves the
+> **Last design revision:** 2026-10-05, due after 20 changes. The revision that ran moves the
 > date; the number is this project's to set; a sensor counts the changes outside `docs/` since
 > the commit that set the date and says when the next is due
 > ([ADR-0006](adr/0006-feature-layer.md)).
@@ -27,7 +27,9 @@ Ocelli reads repositories on the local file system through git2 and writes nothi
 makes no network request: the one exception, Gravatar avatars in the desktop application, is off
 until the developer turns it on ([ADR-0023](adr/0023-no-egress-hardened-webview.md)). The web
 interface runs only inside the desktop host; the remote server of the specification does not
-exist yet.
+exist yet. The measurement of the quality goals, which ships to nobody, is the one part that runs
+the git binary and fetches over the network: the corpus of public repositories, in the Measure
+workflow.
 
 ## Building blocks
 
@@ -51,6 +53,19 @@ golden path and the test pattern an agent copies from are named here.
   characters on ratatui, reads through `GitReader` on worker threads, and keeps its view state in
   a file ([ADR-0028](adr/0028-terminal-application-ratatui.md),
   [ADR-0029](adr/0029-cli-state-file.md)).
+- **Measurement** (`crates/measure`, `ocelli-measure`) — a command that lays out a repository as
+  the front ends do and measures a quality goal on it: the number of edge crossings for Q-1, next
+  to those of `git log --graph` over the same commits. It drives the core through the git adapter
+  and runs the git binary, with the repository's configuration kept from choosing a program; it is
+  not shipped to developers, and Ocelli itself never runs git (Q-4). The memory of the desktop
+  application for Q-3 is measured from outside, by `scripts/measure-memory.sh`: it starts the
+  application with no repository and on a generated one, waits there for the status line the
+  desktop host writes to standard error once the graph has loaded, sums the memory of the
+  application's processes, the WebView's included, and takes the difference as what the graph
+  adds. `scripts/measure-crossings.sh` runs the command on a fixed corpus against recorded counts.
+  Both
+  run weekly and on demand in `.github/workflows/measure.yml`, not in the checks
+  ([ADR-0008](adr/0008-toolchain-rust-and-typescript.md)); the checks run only their self-tests.
 - **Desktop host** (`src-tauri`, `ocelli`) — the Tauri shell: commands that read through
   `GitReader` on the blocking pool and hand the graph to the web interface as JSON
   ([ADR-0018](adr/0018-tauri-desktop-host.md)).
@@ -76,7 +91,10 @@ lives between them. Only what a newcomer would otherwise reconstruct from code.
   the commit limit with progress reported through a callback, then for the refs; `build_graph`
   lays the commits out, and the front end draws the rows in view. The desktop host runs both reads
   on Tokio's blocking pool and sends the graph and the refs to the web interface as two events;
-  the terminal application runs them on a thread of its own and receives them as messages.
+  the terminal application runs them on a thread of its own and receives them as messages. A
+  path on the command line opens the same way: `ocelli-cli [PATH]` from the start, and the desktop
+  host hands its path to the web interface through the `startup_repo` command once the interface's
+  listeners stand, so the load runs as one the developer started.
 - **Selecting a commit.** The front end asks `GitReader` for the changed files, and for the diff
   of a file once one is opened; the working-directory node's sentinel SHA reads the uncommitted
   changes.

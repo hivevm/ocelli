@@ -149,6 +149,15 @@
         currentRepoPath = e.payload;
       }),
     ]);
+    // A repository named on the command line opens once every listener stands, the same way a
+    // path from the sidebar does, so its errors reach the status bar like any other.
+    unlisten.then(async () => {
+      const path = await invoke<string | null>('startup_repo').catch((e: unknown) => {
+        status = 'Error: ' + e;
+        return null;
+      });
+      if (path) await openRepoPath(path);
+    });
     return () => { unlisten.then(fns => fns.forEach(fn => fn())); };
   });
 
