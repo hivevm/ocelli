@@ -8,11 +8,13 @@
   import CommitDetail from './CommitDetail.svelte';
   import RepoSidebar from './RepoSidebar.svelte';
   import StatusBar, { READY_STATUS } from './StatusBar.svelte';
+  import ConfirmDialog from './ConfirmDialog.svelte';
   import { refShas } from './refTree.ts';
   import type { RowRange } from './rowWindow.ts';
   import { Newest } from './hostAnswers.ts';
+  import { Reselect, deleteTag, type TagRequest } from './writes.ts';
   import type {
-    NodeJson, FileChange, DiffLine, RepoRefs, Growth, RowWindow, Relative, Selected, Found,
+    NodeJson, FileChange, DiffLine, RepoRefs, Growth, RowWindow, Relative, Selected, Found, Tag,
   } from './types.ts';
   import { applyTheme, storedTheme, type Theme } from './theme/palette.ts';
 
@@ -73,6 +75,13 @@
   const selects = new Newest();
   const refreshes = new Newest();
   const currentLoad = (): number | undefined => growth?.generation;
+  // The commit to select again in the reload after a write (ADR-0033).
+  const reselect = new Reselect();
+  // The question open before a write that discards work, and how it is answered (ADR-0034).
+  let question = $state<{ lost: string; answer: (confirmed: boolean) => void } | null>(null);
+  const selectedTags = $derived(
+    selectedNode ? (repoRefs?.tags ?? []).filter(t => t.sha === selectedNode?.sha) : [],
+  );
 
   /** A command that failed: the status bar says so. */
   function report(e: unknown): void {
@@ -127,6 +136,22 @@
     void updateLoadedRefs();
     // The selection's parents and lineage may reach into the rows just added.
     if (selectedNode) void refreshRelatives(selectedNode.sha);
+    void selectAgain(next);
+  }
+
+  /** Selects the commit a write left selected, once the reload has laid it out. */
+  async function selectAgain(next: Growth): Promise<void> {
+    const sha = reselect.wanted(next);
+    if (!sha) return;
+    try {
+      const [row] = await invoke<(number | null)[]>('rows_of', { shas: [sha] });
+      // A row of another load would name another commit.
+      if (growth?.generation !== next.generation) return;
+      const laidOut = row !== null && row !== undefined;
+      if (reselect.settle(sha, laidOut, next) && laidOut) jumpToRow(row);
+    } catch (e) {
+      report(e);
+    }
   }
 
   async function refreshRelatives(sha: string): Promise<void> {
@@ -253,10 +278,24 @@
     await invoke('browse_repo').catch((e: unknown) => { status = 'Error: ' + e; });
   }
 
-  async function refreshRepo(): Promise<void> {
-    if (!currentRepoPath) return;
+  /** Loads the current repository again; resolves with whether the load started. */
+  async function refreshRepo(): Promise<boolean> {
+    if (!currentRepoPath) return false;
     status = 'Refreshing…';
-    await invoke('open_repo', { path: currentRepoPath }).catch((e: unknown) => { status = 'Error: ' + e; });
+    try {
+      await invoke('open_repo', { path: currentRepoPath });
+      return true;
+    } catch (e) {
+      status = 'Error: ' + e;
+      return false;
+    }
+  }
+
+  /** Loads again after a write, the commit selected now selected again in the reload
+      (ADR-0033): the developer may have selected another while the write ran. */
+  async function reloadAfterWrite(): Promise<void> {
+    if (selectedNode) reselect.remember(selectedNode.sha, growth?.generation ?? 0);
+    if (!(await refreshRepo())) reselect.forget();
   }
 
   /// Switches to another repository the sidebar points at — a submodule, a
@@ -268,10 +307,51 @@
     await invoke('open_repo', { path }).catch((e: unknown) => { status = 'Error: ' + e; });
   }
 
+  /** Tags a commit (G-7): the reload after it shows the tag, the commit selected again. Resolves
+      with why the host refused it, or null. */
+  async function createTag(tag: TagRequest): Promise<string | null> {
+    try {
+      await invoke('create_tag', { ...tag });
+    } catch (e) {
+      return String(e);
+    }
+    await reloadAfterWrite();
+    return null;
+  }
+
+  /** Puts the question before a write that discards work; resolves with the answer. */
+  function ask(lost: string): Promise<boolean> {
+    return new Promise(resolve => {
+      question = {
+        lost,
+        answer: (confirmed) => {
+          question = null;
+          resolve(confirmed);
+        },
+      };
+    });
+  }
+
+  /** Deletes a tag once the developer confirms it; the reload after shows it gone. */
+  async function removeTag(tag: Tag): Promise<void> {
+    try {
+      const done = await deleteTag(tag, ask, async (t, confirmed) => {
+        await invoke('delete_tag', { name: t.name, sha: t.sha, annotated: t.annotated, confirmed });
+      });
+      if (done === 'kept') return;
+    } catch (e) {
+      report(e);
+      return;
+    }
+    await reloadAfterWrite();
+  }
+
   /** Selects the commit in `row`: the host computes its lineage, which the window read after
       lights up, and its changed files follow. */
   async function onSelectRow(row: number): Promise<void> {
     let selected: Selected | null;
+    // A commit the developer selects during the reload wins over the one a write left to select.
+    reselect.forget();
     try {
       selected = await selects.ask(() => invoke<Selected | null>('select_row', { row }), currentLoad);
     } catch (e) {
@@ -427,9 +507,16 @@
       {diffFile}
       {onSelectFile}
       onJumpToRow={jumpToRow}
+      onCreateTag={createTag}
+      tags={selectedTags}
+      onDeleteTag={removeTag}
     />
   </div><!-- end #top-pane -->
 </div><!-- end #main -->
+
+{#if question}
+  <ConfirmDialog lost={question.lost} action="Delete tag" onAnswer={question.answer} />
+{/if}
 
 <StatusBar
   {status}

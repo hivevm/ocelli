@@ -1,7 +1,8 @@
 <script lang="ts">
   import FileTree from './FileTree.svelte';
   import { buildFileTree } from './fileTree.ts';
-  import type { NodeJson, FileChange, Relative } from './types.ts';
+  import { tagRequest, type TagRequest } from './writes.ts';
+  import type { NodeJson, FileChange, Relative, Tag } from './types.ts';
 
   interface Props {
     node: NodeJson | null;
@@ -12,9 +13,22 @@
     diffFile: string | null;
     onSelectFile: (file: FileChange) => void;
     onJumpToRow: (row: number) => void;
+    /** Asks the host for the tag (G-7); resolves with why it was refused, or null once written. */
+    onCreateTag: (request: TagRequest) => Promise<string | null>;
+    /** The tags on `node`, as the refs read them. */
+    tags: Tag[];
+    /** Deletes a tag, once the developer has confirmed it (ADR-0034). */
+    onDeleteTag: (tag: Tag) => void;
   }
-  let { node, relatives, showAvatars, changedFiles, diffFile, onSelectFile, onJumpToRow }: Props =
-    $props();
+  let {
+    node, relatives, showAvatars, changedFiles, diffFile, onSelectFile, onJumpToRow, onCreateTag,
+    tags, onDeleteTag,
+  }: Props = $props();
+
+  /** The tag a `🏷 name` chip shows, when the refs have read it. */
+  function tagOf(ref: string): Tag | undefined {
+    return ref.startsWith('🏷') ? tags.find(t => `🏷 ${t.name}` === ref) : undefined;
+  }
 
   let fileViewMode = $state<'flat' | 'tree'>('tree');
   const fileTree = $derived(buildFileTree(changedFiles));
@@ -23,10 +37,36 @@
   let copied = $state(false);
   let copyTimer: ReturnType<typeof setTimeout> | undefined;
 
+  // The tag form, closed and emptied when another commit is selected.
+  let tagging = $state(false);
+  let tagName = $state('');
+  let tagMessage = $state('');
+  let tagError = $state<string | null>(null);
+  let tagBusy = $state(false);
+  const tag = $derived(node ? tagRequest(node.sha, tagName, tagMessage) : null);
+
   $effect(() => {
     void node;
     copied = false;
+    tagging = false;
+    tagName = '';
+    tagMessage = '';
+    tagError = null;
+    tagBusy = false;
   });
+
+  async function submitTag(e: SubmitEvent): Promise<void> {
+    e.preventDefault();
+    if (!tag || tagBusy) return;
+    const asked = node?.sha;
+    tagBusy = true;
+    const error = await onCreateTag(tag);
+    // The answer belongs to the commit it was asked for, not one selected meanwhile.
+    if (node?.sha !== asked) return;
+    tagBusy = false;
+    tagError = error;
+    if (error === null) tagging = false;
+  }
 
   async function copySha(): Promise<void> {
     if (!node || node.kind === 'working') return;
@@ -69,14 +109,41 @@
       {#if node.refs.length > 0}
         <div class="detail-refs">
           {#each node.refs as ref}
+            {@const tag = tagOf(ref)}
             <span class="ref-chip {ref.startsWith('🏷') ? 'tag' : ref.includes('/') ? 'remote' : 'local'}">
               {ref}
+              {#if tag}
+                <button class="chip-delete" title="Delete the tag {tag.name}"
+                        aria-label="Delete the tag {tag.name}" onclick={() => onDeleteTag(tag)}>×</button>
+              {/if}
             </span>
           {/each}
         </div>
       {/if}
 
       <div class="detail-message">{node.message}</div>
+
+      {#if node.kind === 'commit'}
+        {#if tagging}
+          <form class="tag-form" onsubmit={submitTag}>
+            <!-- svelte-ignore a11y_autofocus -->
+            <input class="tag-input" placeholder="Tag name" aria-label="Tag name" autofocus
+                   bind:value={tagName} />
+            <textarea class="tag-input" rows="2" aria-label="Tag message"
+                      placeholder="Message — leave empty for a lightweight tag"
+                      bind:value={tagMessage}></textarea>
+            {#if tagError}<div class="tag-error">{tagError}</div>{/if}
+            <div class="tag-actions">
+              <button type="button" class="tag-btn" onclick={() => (tagging = false)}>Cancel</button>
+              <button type="submit" class="tag-btn primary" disabled={!tag || tagBusy}>
+                {tag?.message === null ? 'Create lightweight tag' : 'Create tag'}
+              </button>
+            </div>
+          </form>
+        {:else}
+          <button class="tag-btn" onclick={() => (tagging = true)}>Tag…</button>
+        {/if}
+      {/if}
     </div>
 
     <div class="sidebar-divider"></div>
@@ -333,6 +400,90 @@
   .ref-chip.local  { background: var(--accent-bg); color: var(--accent); border: 1px solid var(--accent-border); }
   .ref-chip.remote { background: var(--blue-bg); color: var(--blue); border: 1px solid var(--blue-border); }
   .ref-chip.tag    { background: var(--amber-bg); color: var(--amber); border: 1px solid var(--amber-border); }
+
+  .chip-delete {
+    margin-left: 4px;
+    padding: 0 2px;
+    font: inherit;
+    line-height: 1;
+    color: inherit;
+    background: transparent;
+    border: none;
+    opacity: 0.6;
+    cursor: pointer;
+  }
+
+  .chip-delete:hover {
+    opacity: 1;
+  }
+
+  .tag-form {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    margin-top: 8px;
+  }
+
+  .tag-input {
+    font: inherit;
+    font-size: var(--font-size);
+    color: var(--text);
+    background: var(--bg-elev);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    padding: 4px 6px;
+    resize: vertical;
+  }
+
+  .tag-input:focus {
+    outline: none;
+    border-color: var(--accent-border-strong);
+  }
+
+  .tag-error {
+    color: var(--error);
+    font-size: 11px;
+  }
+
+  .tag-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 6px;
+  }
+
+  .tag-btn {
+    align-self: flex-start;
+    margin-top: 8px;
+    font: inherit;
+    font-size: 11px;
+    color: var(--text-muted);
+    background: transparent;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    padding: 2px 8px;
+    cursor: pointer;
+    transition: var(--transition);
+  }
+
+  .tag-actions .tag-btn {
+    margin-top: 0;
+  }
+
+  .tag-btn:hover:not(:disabled) {
+    border-color: var(--border-hover);
+    color: var(--text);
+  }
+
+  .tag-btn.primary {
+    color: var(--accent);
+    background: var(--accent-bg);
+    border-color: var(--accent-border);
+  }
+
+  .tag-btn:disabled {
+    opacity: 0.5;
+    cursor: default;
+  }
 
   .detail-relatives {
     display: flex;

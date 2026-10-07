@@ -436,6 +436,7 @@ fn load_tags(repo: &Repository) -> Vec<Tag> {
             name: name.to_string(),
             short_sha: short(&sha),
             sha,
+            annotated: reference.peel(ObjectType::Tag).is_ok(),
         });
     }
 

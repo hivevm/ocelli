@@ -1,8 +1,8 @@
-//! The repository port (ADR-0009): what the core needs from a repository, owned by the core and
-//! implemented by an adapter. Every path names a directory inside the repository to read.
+//! The repository ports (ADR-0009): what the core needs from a repository, owned by the core and
+//! implemented by an adapter. Every path names a directory inside the repository.
 
 use crate::model::{CommitData, DiffLine, FileChange, RepoRefs};
-use anyhow::Result;
+use anyhow::{Result, bail};
 use std::path::Path;
 
 /// Reads a repository's history and state.
@@ -33,4 +33,130 @@ pub trait RepositoryReader {
     /// Loads the diff of one file of a commit; [`crate::model::WORKDIR_SHA`] yields the
     /// uncommitted diff.
     fn load_file_diff(&self, repo: &Path, sha: &str, file_path: &str) -> Result<Vec<DiffLine>>;
+}
+
+/// A write to a repository (ADR-0033), naming the state it expects to find: a write whose expected
+/// state the repository no longer holds is refused with nothing changed.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Write {
+    /// Tags `commit` with `name`, which is expected to be free: annotated by the configured
+    /// identity with `message` where one is given, lightweight where none is.
+    CreateTag {
+        name: String,
+        commit: String,
+        message: Option<String>,
+    },
+    /// Deletes the tag `name`, expected to point at `commit` and to be annotated or lightweight
+    /// as `annotated` says.
+    DeleteTag {
+        name: String,
+        commit: String,
+        annotated: bool,
+    },
+}
+
+impl Write {
+    /// What the write discards, in the words a confirmation names it with, or `None` for a write
+    /// that discards nothing (ADR-0034).
+    pub fn discards(&self) -> Option<String> {
+        match self {
+            Write::CreateTag { .. } => None,
+            Write::DeleteTag {
+                name,
+                annotated: true,
+                ..
+            } => Some(format!("the tag {name} and its message")),
+            Write::DeleteTag { name, .. } => Some(format!("the tag {name}")),
+        }
+    }
+}
+
+/// Whether the developer confirmed a write (ADR-0034).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Confirmation {
+    /// The developer was asked and said yes.
+    Given,
+    /// The developer was not asked.
+    Absent,
+}
+
+/// Writes to a repository, running no program the repository names (ADR-0033).
+pub trait RepositoryWriter {
+    /// Performs `write`, or refuses it with nothing changed and says why.
+    fn write(&self, repo: &Path, write: &Write) -> Result<()>;
+}
+
+/// Hands `write` to `writer`, refusing a write that discards work before it reaches the
+/// repository unless the developer has confirmed it (ADR-0034). Every front end writes through
+/// here.
+pub fn perform(
+    writer: &impl RepositoryWriter,
+    repo: &Path,
+    write: &Write,
+    confirmation: Confirmation,
+) -> Result<()> {
+    if let Some(lost) = write.discards()
+        && confirmation != Confirmation::Given
+    {
+        bail!("discarding {lost} needs the developer's confirmation");
+    }
+    writer.write(repo, write)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::cell::RefCell;
+
+    /// A writer that records what reaches it.
+    #[derive(Default)]
+    struct Recorder(RefCell<Vec<Write>>);
+
+    impl RepositoryWriter for Recorder {
+        fn write(&self, _: &Path, write: &Write) -> Result<()> {
+            self.0.borrow_mut().push(write.clone());
+            Ok(())
+        }
+    }
+
+    fn create() -> Write {
+        Write::CreateTag {
+            name: "v1".into(),
+            commit: "c".into(),
+            message: None,
+        }
+    }
+
+    fn delete(annotated: bool) -> Write {
+        Write::DeleteTag {
+            name: "v1".into(),
+            commit: "c".into(),
+            annotated,
+        }
+    }
+
+    #[test]
+    // Verifies: ADR-0034, Q-6
+    fn each_write_that_discards_work_names_what_it_discards() {
+        assert_eq!(create().discards(), None);
+        assert_eq!(delete(false).discards().as_deref(), Some("the tag v1"));
+        assert_eq!(
+            delete(true).discards().as_deref(),
+            Some("the tag v1 and its message")
+        );
+    }
+
+    #[test]
+    // Verifies: ADR-0034, Q-6
+    fn a_write_that_discards_work_without_a_confirmation_never_reaches_the_repository() {
+        let writer = Recorder::default();
+        let repo = Path::new("/repo");
+        let error = perform(&writer, repo, &delete(true), Confirmation::Absent).unwrap_err();
+        assert!(error.to_string().contains("confirmation"), "{error}");
+        assert!(writer.0.borrow().is_empty());
+
+        perform(&writer, repo, &delete(true), Confirmation::Given).unwrap();
+        perform(&writer, repo, &create(), Confirmation::Absent).unwrap();
+        assert_eq!(*writer.0.borrow(), [delete(true), create()]);
+    }
 }

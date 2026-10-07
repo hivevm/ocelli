@@ -222,15 +222,17 @@ fn commands_on_the_main_thread(source: &str) -> Vec<String> {
                 .to_string();
             let off_main =
                 attribute.contains("async") || rest.split('{').next()?.contains("async fn");
-            let reads = rest.contains("session") || rest.contains("GitReader");
+            let reads = ["session", "GitReader", "GitWriter"]
+                .iter()
+                .any(|uses| rest.contains(uses));
             (reads && !off_main).then_some(name)
         })
         .collect()
 }
 
 #[test]
-// Verifies: ADR-0019, G-13
-fn every_command_that_reads_the_history_or_the_repository_runs_off_the_main_thread() {
+// Verifies: ADR-0019, ADR-0033, G-13
+fn every_command_that_reads_or_writes_the_repository_runs_off_the_main_thread() {
     let source = read("../../src-tauri/src/commands.rs");
     assert_eq!(commands_on_the_main_thread(&source), Vec::<String>::new());
 }
@@ -240,6 +242,40 @@ fn every_command_that_reads_the_history_or_the_repository_runs_off_the_main_thre
 fn the_command_scan_sees_a_command_on_the_main_thread() {
     let source = "#[tauri::command]\npub fn read(state: State) -> W { state.session.window(0, 1) }\n\
                   #[tauri::command(async)]\npub fn fine(state: State) { state.session.x() }\n\
-                  #[tauri::command]\npub async fn also(state: State) { GitReader.x() }\n";
-    assert_eq!(commands_on_the_main_thread(source), ["read"]);
+                  #[tauri::command]\npub async fn also(state: State) { GitReader.x() }\n\
+                  #[tauri::command]\npub fn write(state: State) { GitWriter.write() }\n";
+    assert_eq!(commands_on_the_main_thread(source), ["read", "write"]);
+}
+
+/// The writers a front end's source hands a write to other than through `port::perform`.
+fn writes_past_the_confirmation(source: &str) -> usize {
+    let code = shipped(source);
+    code.matches("GitWriter").count()
+        - code.matches("perform(&GitWriter").count()
+        - code
+            .lines()
+            .filter(|l| l.trim_start().starts_with("use ") && l.contains("GitWriter"))
+            .count()
+}
+
+#[test]
+// Verifies: ADR-0034, Q-6
+fn every_front_end_writes_through_the_cores_confirmation_rule() {
+    for front_end in ["../../src-tauri/src/commands.rs", "../tui/src/loader.rs"] {
+        let source = read(front_end);
+        assert!(
+            source.contains("perform(&GitWriter"),
+            "{front_end} writes at all"
+        );
+        assert_eq!(writes_past_the_confirmation(&source), 0, "{front_end}");
+    }
+}
+
+#[test]
+// Verifies: ADR-0034
+fn the_write_scan_sees_a_write_past_the_confirmation() {
+    let source = "use ocelli_git::{GitReader, GitWriter};\n\
+                  fn a() { port::perform(&GitWriter, p, w, c) }\n\
+                  fn b() { GitWriter.write(p, w) }\n";
+    assert_eq!(writes_past_the_confirmation(source), 1);
 }

@@ -1,12 +1,13 @@
 //! Background git access. git2 never runs on the thread that draws: the
 //! repository load and every per-commit read happen on worker threads, and
 //! their results come back to the event loop as [`Msg`] values (ADR-0028, the
-//! terminal counterpart of ADR-0019).
+//! terminal counterpart of ADR-0019). A write runs on a thread of its own too
+//! (ADR-0033).
 
 use ocelli_core::load::{self, Event};
 use ocelli_core::model::{DiffLine, FileChange};
-use ocelli_core::port::RepositoryReader;
-use ocelli_git::GitReader;
+use ocelli_core::port::{self, Confirmation, RepositoryReader, Write};
+use ocelli_git::{GitReader, GitWriter};
 use std::path::PathBuf;
 use std::sync::mpsc::{Receiver, Sender, channel};
 use std::thread;
@@ -24,6 +25,8 @@ pub enum Msg {
         path: String,
         lines: Result<Vec<DiffLine>, String>,
     },
+    /// A write done, or refused with nothing changed.
+    Written(Result<(), String>),
 }
 
 /// A read the event loop asks the worker for.
@@ -38,6 +41,17 @@ pub enum Request {
 /// has dropped the receiver, as when another repository is opened.
 pub fn spawn_load(path: PathBuf, tx: Sender<Msg>) {
     thread::spawn(move || load::load(&GitReader, &path, &mut |e| tx.send(Msg::Load(e)).is_ok()));
+}
+
+/// Performs a write on a thread of its own: unlike reads, a write is never
+/// collapsed into a newer one. The core refuses one that discards work
+/// without the developer's confirmation (ADR-0034).
+pub fn spawn_write(path: PathBuf, write: Write, confirmation: Confirmation, tx: Sender<Msg>) {
+    thread::spawn(move || {
+        let result =
+            port::perform(&GitWriter, &path, &write, confirmation).map_err(|e| e.to_string());
+        let _ = tx.send(Msg::Written(result));
+    });
 }
 
 /// Starts the worker for per-commit reads. Requests that queue up while one is

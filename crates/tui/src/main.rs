@@ -1,4 +1,4 @@
-//! `ocelli-cli` — the read-only terminal frontend of Ocelli (ADR-0028).
+//! `ocelli-cli` — the terminal frontend of Ocelli (ADR-0028).
 //!
 //! History and refs come from `ocelli-git` and the layout from `ocelli-core`,
 //! exactly as for the desktop application; this crate only rasterises and
@@ -29,7 +29,8 @@ const USAGE: &str = "\
 Usage: ocelli-cli [--ascii] [PATH]
 
 Shows the commit graph of the git repository at PATH (default: the current
-directory) in the terminal. Read-only: nothing in the repository is changed.
+directory) in the terminal. Nothing in the repository is changed but by a
+write the developer asks for, such as tagging a commit.
 
 Options:
   --ascii        Draw the graph with ASCII characters instead of box drawing
@@ -111,6 +112,9 @@ fn run(
     state_path: Option<PathBuf>,
 ) -> anyhow::Result<()> {
     let mut session = Session::start(&app.repo);
+    // Writes report on a channel of their own, which outlives every session: a
+    // refresh while a write runs must not lose what it did or why it failed.
+    let (written_tx, written_rx) = channel();
     let mut saved = app.view_state();
 
     while !app.quit {
@@ -126,7 +130,13 @@ fn run(
         if let Some(path) = app.reload.take() {
             session = Session::start(&path);
         }
+        if let Some((write, confirmation)) = app.write.take() {
+            loader::spawn_write(app.repo.clone(), write, confirmation, written_tx.clone());
+        }
         while let Ok(msg) = session.rx.try_recv() {
+            app.on_msg(msg);
+        }
+        while let Ok(msg) = written_rx.try_recv() {
             app.on_msg(msg);
         }
         for req in app.requests.drain(..) {

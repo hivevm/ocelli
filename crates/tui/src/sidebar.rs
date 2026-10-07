@@ -595,6 +595,7 @@ pub(crate) mod tests {
                 name: "v1".into(),
                 sha: "c".into(),
                 short_sha: "c".into(),
+                annotated: true,
             }],
             submodules: vec![
                 submodule("lib/a", SubmoduleState::InSync),

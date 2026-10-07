@@ -150,6 +150,8 @@ export interface Tag {
   name: string;
   sha: string;
   shortSha: string;
+  /** A tag object with a message of its own, rather than a bare reference. */
+  annotated: boolean;
 }
 
 export interface RepoRefs {

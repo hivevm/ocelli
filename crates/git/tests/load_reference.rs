@@ -66,6 +66,14 @@ fn a_fixed_repository_loads_as_the_reference_did() {
         );
         worktree["path"] = "<repo>/".into();
     }
+    // Whether a tag is annotated came after the reference implementation (G-7).
+    let annotated: Vec<_> = refs["tags"]
+        .as_array_mut()
+        .unwrap()
+        .iter_mut()
+        .map(|tag| tag.as_object_mut().unwrap().remove("annotated").unwrap())
+        .collect();
+    assert_eq!(annotated, [false, true], "light, v1.0");
     assert_eq!(refs, expected("repo-refs.json"));
 
     let (head, merge) = {
