@@ -3,7 +3,9 @@
 //! sidebar, graph with lineage highlight, search, commit detail with
 //! parent/child links, flat or tree file list, unified or side-by-side diff,
 //! theme switch, open and refresh — with guitar-style keys (ADR-0028). Every
-//! key reads; none writes to the repository.
+//! key reads but `t`, which tags the selected commit, and `d` on a tag in the
+//! sidebar, which deletes it once the developer has answered `y` (ADR-0033,
+//! ADR-0034).
 
 use crate::chips::RefContext;
 use crate::files::{self, FileRow, FileView};
@@ -15,7 +17,8 @@ use crate::theme::Theme;
 use ocelli_core::graph::LaidChunk;
 use ocelli_core::history::{History, Lineage};
 use ocelli_core::load::{Event, LoadSession};
-use ocelli_core::model::{CommitKind, DiffLine, FileChange, NodeJson, RepoRefs};
+use ocelli_core::model::{CommitKind, DiffLine, FileChange, NodeJson, RepoRefs, Tag};
+use ocelli_core::port::{Confirmation, Write};
 use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use std::collections::HashSet;
 use std::path::PathBuf;
@@ -39,6 +42,8 @@ pub struct Loaded {
     pub shown_lanes: usize,
     pub refs: RefContext,
     pub sidebar: sidebar::Data,
+    /// The tags as read, for what deleting one discards.
+    pub tags: Vec<Tag>,
 }
 
 impl Loaded {
@@ -54,12 +59,14 @@ impl Loaded {
                 locals: Default::default(),
             },
             sidebar: sidebar::Data::new(&RepoRefs::default()),
+            tags: Vec::new(),
         }
     }
 
     /// Takes in the refs the load read right after the first chunk.
     pub fn set_refs(&mut self, repo_refs: RepoRefs) {
         self.sidebar = sidebar::Data::new(&repo_refs);
+        self.tags = repo_refs.tags.clone();
         self.refs = RefContext {
             head: repo_refs
                 .locals
@@ -130,6 +137,15 @@ pub struct Search {
     pub pos: Option<usize>,
 }
 
+/// The tag asked for after `t` (G-7): its name, then its message.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TagPrompt {
+    pub sha: String,
+    pub name: String,
+    /// `None` while the name is typed; the message once it is.
+    pub message: Option<String>,
+}
+
 pub struct App {
     pub repo: PathBuf,
     pub status: String,
@@ -160,12 +176,20 @@ pub struct App {
     pub search: Search,
     /// Path being typed after `o`; `None` when no prompt is open.
     pub prompt: Option<String>,
+    /// The tag being typed after `t`; `None` when no tag prompt is open.
+    pub tag_prompt: Option<TagPrompt>,
     pub quit: bool,
     /// Reads for the worker, drained by the event loop after every key.
     pub requests: Vec<Request>,
     /// A repository to switch to, taken by the event loop, which then starts a
     /// fresh load and drops every result still in flight for the old one.
     pub reload: Option<PathBuf>,
+    /// A write that discards work, waiting for the developer's answer (ADR-0034).
+    pub confirm: Option<Write>,
+    /// A write for the event loop to run; its result comes back as [`Msg::Written`].
+    pub write: Option<(Write, Confirmation)>,
+    /// The commit to select again once its row arrives in a reload after a write.
+    pub reselect: Option<String>,
     /// Text for the terminal clipboard, taken by the event loop.
     pub clipboard: Option<String>,
 }
@@ -193,9 +217,13 @@ impl App {
             diff_split: false,
             search: Search::default(),
             prompt: None,
+            tag_prompt: None,
             quit: false,
             requests: Vec::new(),
             reload: None,
+            confirm: None,
+            write: None,
+            reselect: None,
             clipboard: None,
         }
     }
@@ -254,6 +282,14 @@ impl App {
                     });
                 }
             }
+            Msg::Written(Err(e)) => self.status = format!("Not written: {e}"),
+            // The repository is read again, the commit that was selected
+            // selected again once its row arrives (ADR-0033).
+            Msg::Written(Ok(())) => {
+                let reselect = self.selected_sha();
+                self.open_repo(self.repo.clone(), "Written — reloading…");
+                self.reselect = reselect;
+            }
             Msg::Diff { sha, path, lines } => {
                 let current = self.files.as_ref().map(|f| f.sha.as_str()) == Some(sha.as_str());
                 if let Some(diff) = self.diff.as_mut().filter(|d| d.path == path && current) {
@@ -265,6 +301,21 @@ impl App {
 
     /// Takes in how the load goes (ADR-0016).
     fn on_load(&mut self, event: Event) {
+        let ended = matches!(event, Event::Ended(_));
+        self.take_in(event);
+        if let Some(sha) = self.reselect.clone() {
+            match self.data.as_ref().and_then(|d| d.row_of(&sha)) {
+                Some(row) => {
+                    self.reselect = None;
+                    self.select(row);
+                }
+                None if ended => self.reselect = None,
+                None => {}
+            }
+        }
+    }
+
+    fn take_in(&mut self, event: Event) {
         match (event, self.data.as_mut()) {
             // Once the first chunk is shown, the progress line counts chunks.
             (Event::Progress(p), None) => self.status = p,
@@ -376,6 +427,12 @@ impl App {
         if self.prompt.is_some() {
             return self.prompt_key(key);
         }
+        if self.tag_prompt.is_some() {
+            return self.tag_key(key);
+        }
+        if let Some(write) = self.confirm.take() {
+            return self.answer(write, key);
+        }
         if self.search.editing {
             return self.search_key(key);
         }
@@ -442,6 +499,89 @@ impl App {
             }
             _ => {}
         }
+    }
+
+    /// `t`: asks for a tag on the selected commit. The working-directory node
+    /// and stash nodes are no commits a tag could name.
+    fn start_tag(&mut self) {
+        let Some(node) = self.selected_node() else {
+            return;
+        };
+        if node.kind != CommitKind::Commit {
+            self.status = "Only a commit can be tagged".to_string();
+            return;
+        }
+        self.tag_prompt = Some(TagPrompt {
+            sha: node.sha.clone(),
+            name: String::new(),
+            message: None,
+        });
+    }
+
+    fn tag_key(&mut self, key: KeyEvent) {
+        let Some(tag) = &mut self.tag_prompt else {
+            return;
+        };
+        let text = tag.message.as_mut().unwrap_or(&mut tag.name);
+        match key.code {
+            KeyCode::Char(c) => text.push(c),
+            KeyCode::Backspace => {
+                text.pop();
+            }
+            KeyCode::Esc => self.tag_prompt = None,
+            KeyCode::Enter if tag.message.is_none() => {
+                if !tag.name.trim().is_empty() {
+                    tag.message = Some(String::new());
+                }
+            }
+            KeyCode::Enter => {
+                let Some(tag) = self.tag_prompt.take() else {
+                    return;
+                };
+                let name = tag.name.trim().to_string();
+                self.status = format!("Tagging {name}…");
+                // An empty message makes a lightweight tag.
+                let write = Write::CreateTag {
+                    name,
+                    commit: tag.sha,
+                    message: tag.message.filter(|m| !m.trim().is_empty()),
+                };
+                self.write = Some((write, Confirmation::Absent));
+            }
+            _ => {}
+        }
+    }
+
+    /// The answer to a write that discards work: only `y` writes, every other
+    /// key keeps the work (ADR-0034).
+    fn answer(&mut self, write: Write, key: KeyEvent) {
+        if key.code == KeyCode::Char('y') {
+            self.status = "Deleting…".to_string();
+            self.write = Some((write, Confirmation::Given));
+        } else {
+            self.status = "Nothing deleted".to_string();
+        }
+    }
+
+    /// `d` on a tag in the sidebar: asks before deleting it.
+    fn start_delete_tag(&mut self) {
+        let Some(data) = &self.data else { return };
+        let rows = sidebar::rows(&data.sidebar, &self.side);
+        let Some(sidebar::RowKind::Leaf(item)) = rows.get(self.side.selected).map(|r| &r.kind)
+        else {
+            return;
+        };
+        if item.look != sidebar::Look::Tag {
+            return;
+        }
+        let Some(tag) = data.tags.iter().find(|t| t.name == item.name) else {
+            return;
+        };
+        self.confirm = Some(Write::DeleteTag {
+            name: tag.name.clone(),
+            commit: tag.sha.clone(),
+            annotated: tag.annotated,
+        });
     }
 
     fn start_search(&mut self) {
@@ -529,6 +669,7 @@ impl App {
             KeyCode::Char('g') | KeyCode::Home => *sel = 0,
             KeyCode::Char('G') | KeyCode::End => *sel = len.saturating_sub(1),
             KeyCode::Char('/') if !minimised => self.side.editing = true,
+            KeyCode::Char('d') if !minimised => self.start_delete_tag(),
             KeyCode::Char('l') | KeyCode::Right if minimised => self.activate_sidebar(),
             KeyCode::Char('l') | KeyCode::Right => self.move_focus(1),
             KeyCode::Enter | KeyCode::Char(' ') => self.activate_sidebar(),
@@ -586,6 +727,10 @@ impl App {
                 self.copy_sha();
                 None
             }
+            KeyCode::Char('t') => {
+                self.start_tag();
+                None
+            }
             KeyCode::Enter => {
                 if !self.active {
                     self.select(row);
@@ -630,6 +775,7 @@ impl App {
             }
             KeyCode::Char('k') | KeyCode::Up => self.link = self.link.saturating_sub(1),
             KeyCode::Char('y') => self.copy_sha(),
+            KeyCode::Char('t') => self.start_tag(),
             KeyCode::Enter => {
                 let Some(sha) = links.get(self.link) else {
                     return;
@@ -1074,6 +1220,164 @@ pub(crate) mod tests {
         press(&mut app, KeyCode::Char('r'));
         assert_eq!(app.reload, Some(PathBuf::from("/repo")));
         assert_eq!(app.status, "Refreshing…");
+    }
+
+    #[test]
+    // Verifies: ADR-0033, G-7
+    fn t_asks_for_a_name_then_a_message_and_hands_the_tag_to_the_event_loop() {
+        let mut app = loaded_app();
+        press(&mut app, KeyCode::Char('j'));
+        press(&mut app, KeyCode::Char('t'));
+        press(&mut app, KeyCode::Enter);
+        assert_eq!(
+            app.tag_prompt.as_ref().unwrap().message,
+            None,
+            "a name first"
+        );
+        type_text(&mut app, "v2");
+        press(&mut app, KeyCode::Enter);
+        type_text(&mut app, "Second");
+        press(&mut app, KeyCode::Enter);
+        assert_eq!(app.tag_prompt, None);
+        let tag = Write::CreateTag {
+            name: "v2".into(),
+            commit: "c".into(),
+            message: Some("Second".into()),
+        };
+        assert_eq!(app.write, Some((tag, Confirmation::Absent)));
+        assert_eq!(app.status, "Tagging v2…");
+    }
+
+    #[test]
+    fn a_tag_without_a_message_is_lightweight_and_esc_writes_nothing() {
+        let mut app = loaded_app();
+        press(&mut app, KeyCode::Char('t'));
+        type_text(&mut app, "mark");
+        press(&mut app, KeyCode::Enter);
+        press(&mut app, KeyCode::Enter);
+        let Some((Write::CreateTag { message, .. }, _)) = app.write.take() else {
+            panic!("no tag written");
+        };
+        assert_eq!(message, None);
+
+        press(&mut app, KeyCode::Char('t'));
+        type_text(&mut app, "x");
+        press(&mut app, KeyCode::Esc);
+        assert_eq!(app.tag_prompt, None);
+        assert_eq!(app.write, None);
+        press(&mut app, KeyCode::Char('j'));
+        assert_eq!(sha(&app), "c", "keys move again once the prompt is closed");
+    }
+
+    #[test]
+    fn only_a_selected_commit_can_be_tagged() {
+        let mut working = commit(ocelli_core::model::WORKDIR_SHA, 9, &["d"], &[]);
+        working.kind = CommitKind::Working;
+        let mut app = App::new("/repo".into(), Glyphs::Unicode);
+        first_chunk(
+            &mut app,
+            Layout::new().lay_out(vec![working]),
+            RepoRefs::default(),
+        );
+        press(&mut app, KeyCode::Char('t'));
+        assert_eq!(app.tag_prompt, None);
+        assert_eq!(app.status, "Only a commit can be tagged");
+
+        let mut app = loaded_app();
+        press(&mut app, KeyCode::Esc);
+        press(&mut app, KeyCode::Char('t'));
+        assert_eq!(app.tag_prompt, None, "nothing selected, nothing to tag");
+    }
+
+    #[test]
+    // Verifies: ADR-0033
+    fn a_write_done_reloads_and_selects_the_commit_again_once_its_row_arrives() {
+        let mut app = loaded_app();
+        press(&mut app, KeyCode::Char('j'));
+        app.on_msg(Msg::Written(Ok(())));
+        assert_eq!(app.reload, Some(PathBuf::from("/repo")));
+        assert_eq!(app.reselect.as_deref(), Some("c"));
+        let commits = vec![
+            commit("d", 4, &["b", "c"], &["main"]),
+            commit("c", 3, &["a"], &["🏷 v1", "🏷 v2"]),
+            commit("b", 2, &["a"], &[]),
+            commit("a", 1, &[], &[]),
+        ];
+        app.on_msg(next_chunk(Layout::new().lay_out(commits)));
+        assert_eq!(sha(&app), "c");
+        assert!(
+            app.selected_node()
+                .unwrap()
+                .refs
+                .contains(&"🏷 v2".to_string())
+        );
+        assert_eq!(app.reselect, None);
+    }
+
+    #[test]
+    fn a_write_refused_says_why_and_reloads_nothing() {
+        let mut app = loaded_app();
+        app.on_msg(Msg::Written(Err("a tag named 'v1' exists already".into())));
+        assert_eq!(app.status, "Not written: a tag named 'v1' exists already");
+        assert_eq!(app.reload, None);
+        assert!(app.data.is_some());
+    }
+
+    /// The sidebar's selection on the tag `v1` of `sidebar::tests::repo_refs`.
+    fn on_the_tag(app: &mut App) {
+        // The rail's tag glyph expands the sidebar with the section open.
+        press(app, KeyCode::Char('1'));
+        app.focus = Focus::Sidebar;
+        app.side.rail_selected = 4;
+        press(app, KeyCode::Enter);
+        let data = app.data.as_ref().unwrap();
+        let rows = sidebar::rows(&data.sidebar, &app.side);
+        app.side.selected = rows.iter().position(|r| r.label == "v1").unwrap();
+    }
+
+    #[test]
+    // Verifies: ADR-0034, Q-6
+    fn d_on_a_tag_asks_and_deletes_it_only_on_an_explicit_yes() {
+        let mut app = loaded_app();
+        on_the_tag(&mut app);
+        press(&mut app, KeyCode::Char('d'));
+        let delete = Write::DeleteTag {
+            name: "v1".into(),
+            commit: "c".into(),
+            annotated: true,
+        };
+        assert_eq!(app.confirm, Some(delete.clone()));
+        press(&mut app, KeyCode::Char('y'));
+        assert_eq!(app.confirm, None);
+        assert_eq!(app.write, Some((delete, Confirmation::Given)));
+    }
+
+    #[test]
+    // Verifies: ADR-0034, Q-6
+    fn any_other_answer_keeps_the_tag_and_writes_nothing() {
+        for answer in [
+            KeyCode::Char('n'),
+            KeyCode::Enter,
+            KeyCode::Esc,
+            KeyCode::Char('Y'),
+        ] {
+            let mut app = loaded_app();
+            on_the_tag(&mut app);
+            press(&mut app, KeyCode::Char('d'));
+            press(&mut app, answer);
+            assert_eq!(app.confirm, None);
+            assert_eq!(app.write, None, "{answer:?}");
+            assert_eq!(app.status, "Nothing deleted");
+        }
+    }
+
+    #[test]
+    fn d_on_anything_but_a_tag_asks_nothing() {
+        let mut app = loaded_app();
+        app.focus = Focus::Sidebar;
+        app.side.selected = 0;
+        press(&mut app, KeyCode::Char('d'));
+        assert_eq!(app.confirm, None);
     }
 
     #[test]

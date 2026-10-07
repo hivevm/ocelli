@@ -24,7 +24,9 @@ than anywhere else, and none beats one that has stopped being true.
                                                           └─ both depend on ocelli-core and ocelli-git
 ```
 
-Ocelli reads repositories on the local file system through git2 and writes nothing to them. It
+Ocelli reads repositories on the local file system through git2, and writes to them through git2
+only what the developer asks for, such as a tag
+([ADR-0033](adr/0033-writes-what-git-writes.md)). It
 makes no network request: the one exception, Gravatar avatars in the desktop application, is off
 until the developer turns it on ([ADR-0023](adr/0023-no-egress-hardened-webview.md)). The web
 interface runs only inside the desktop host; the remote server of the specification does not
@@ -38,31 +40,32 @@ The parts the system is made of, each with one responsibility, named in the voca
 [`GLOSSARY.md`](GLOSSARY.md). One level deep, deeper only where the size of a part earns it. The
 golden path and the test pattern an agent copies from are named here.
 
-- **Core** (`crates/core`, `ocelli-core`) — the commit graph's model, its layout, and the
-  repository port `RepositoryReader`. It depends on no technology and no adapter
-  ([ADR-0009](adr/0009-ports-and-adapters.md)); the layout in `graph.rs` is pure functions over
-  values ([ADR-0010](adr/0010-functional-core-layout.md)), laid out after Pvigier
-  ([ADR-0015](adr/0015-layout-after-pvigier-by-chunk.md)) with the main line alone in the leftmost
-  lane ([ADR-0032](adr/0032-main-line-in-the-leftmost-lane.md)) and edges shaped by type, a merge
-  out of the main line up a track of its own
+- **Core** (`crates/core`, `ocelli-core`) — the commit graph's model, its layout, and the repository
+  ports, `RepositoryReader` and `RepositoryWriter` with the `Write`s it takes. It depends on no
+  technology and no adapter ([ADR-0009](adr/0009-ports-and-adapters.md)); the layout in `graph.rs`
+  is pure functions over values ([ADR-0010](adr/0010-functional-core-layout.md)), laid out after
+  Pvigier ([ADR-0015](adr/0015-layout-after-pvigier-by-chunk.md)) with the main line alone in the
+  leftmost lane ([ADR-0032](adr/0032-main-line-in-the-leftmost-lane.md)) and edges shaped by type, a
+  merge out of the main line up a track of its own
   ([ADR-0030](adr/0030-edge-shapes-and-tracks-out-of-the-main-line.md)). `History` in `history.rs`
-  keeps the graph laid out so far and answers the front ends' reads of it: a window of rows with
-  the edges crossing it, search, and lineage
-  ([ADR-0031](adr/0031-front-ends-read-row-windows.md)). `load.rs` runs a load session through
-  the port, and a `LoadSession` is what a front end keeps of it, its `History` and its status
-  line, for both front ends and the measurement alike.
+  keeps the graph laid out so far and answers the front ends' reads of it: a window of rows with the
+  edges crossing it, search, and lineage ([ADR-0031](adr/0031-front-ends-read-row-windows.md)).
+  `load.rs` runs a load session through the port, and a `LoadSession` is what a front end keeps of
+  it, its `History` and its status line, for both front ends and the measurement alike.
 - **Git adapter** (`crates/git`, `ocelli-git`) — `GitReader`, the repository port implemented
   with git2: the main line's tip, the history in chunks of 3 000 commits, the first with the stash
   and working-directory nodes, the refs the sidebar lists, changed files, and diffs
   ([ADR-0019](adr/0019-git2-repository-reader.md),
   [ADR-0016](adr/0016-history-loads-in-chunks.md),
   [ADR-0024](adr/0024-synthetic-nodes-in-the-first-chunk.md)); the walk runs in commit-date order
-  and turns libgit2's object cache off for the whole process. It starts no program a repository
-  names (Q-4).
+  and turns libgit2's object cache off for the whole process. `GitWriter` implements the writer
+  port in `write.rs`, each write checked against the state it names before anything changes
+  ([ADR-0033](adr/0033-writes-what-git-writes.md)).
+  Neither starts a program a repository names (Q-4).
 - **Terminal application** (`crates/tui`, `ocelli-cli`) — draws the core's graph with box-drawing
-  characters on ratatui; it loads and lays out the history chunk by chunk on a loader thread,
-  keeps the core's `History` at its event loop, reads files and diffs through `GitReader` on a
-  worker thread, and keeps its view state in a file
+  characters on ratatui; it loads and lays out the history chunk by chunk on a loader thread, keeps
+  the core's `History` at its event loop, reads files and diffs through `GitReader` on a worker
+  thread, writes through `GitWriter` on a thread of its own, and keeps its view state in a file
   ([ADR-0028](adr/0028-terminal-application-ratatui.md), [ADR-0029](adr/0029-cli-state-file.md)).
 - **Measurement** (`crates/measure`, `ocelli-measure`) — a command that lays out a repository as
   the front ends do and measures a quality goal on it: the number of edge crossings for Q-1, next
@@ -86,7 +89,8 @@ golden path and the test pattern an agent copies from are named here.
 - **Desktop host** (`src-tauri`, `ocelli`) — the Tauri shell: it loads the history through
   `GitReader` on the blocking pool into the `History` of a load session (`session.rs`), and its
   commands answer the web interface's reads of it, windows of rows, search, and the selected
-  commit with its lineage, as JSON ([ADR-0018](adr/0018-tauri-desktop-host.md),
+  commit with its lineage, as JSON, and writes through `GitWriter` on the same pool
+  ([ADR-0018](adr/0018-tauri-desktop-host.md),
   [ADR-0031](adr/0031-front-ends-read-row-windows.md)). Once a load ends it hands the memory the
   load freed back to the system through glibc's `malloc_trim`, the workspace's one `unsafe` block
   outside its tests.
@@ -127,6 +131,14 @@ lives between them. Only what a newcomer would otherwise reconstruct from code.
   light up, and the front end asks `GitReader` for the changed files, and for the diff
   of a file once one is opened; the working-directory node's sentinel SHA reads the uncommitted
   changes.
+- **Writing.** The front end hands the core's `Write` to `port::perform` off the thread that
+  draws, which passes it to `GitWriter`; a write that discards work, as `Write::discards` names
+  it, passes only with the developer's confirmation, which the front end asked for in words that
+  name what is lost ([ADR-0034](adr/0034-discarding-work-only-after-confirmation.md)). A write
+  refused changes nothing and its reason goes to the developer. A write done starts a new
+  load session of the same repository, and the front end selects the commit selected before once
+  the reload has laid it out
+  ([ADR-0033](adr/0033-writes-what-git-writes.md)).
 - **State between sessions.** The web interface keeps the theme, the avatars toggle, the diff
   layout, and the sidebar in `localStorage`; the terminal application keeps the same in
   `ocelli/cli-state.json` under the user's state directory.

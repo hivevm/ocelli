@@ -1,7 +1,7 @@
 use crate::session::{Found, Selected, Session, WindowJson};
 use ocelli_core::load::{self, Event};
-use ocelli_core::port::RepositoryReader;
-use ocelli_git::GitReader;
+use ocelli_core::port::{self, Confirmation, RepositoryReader, Write};
+use ocelli_git::{GitReader, GitWriter};
 use serde::Serialize;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
@@ -229,6 +229,64 @@ pub async fn select_commit(
     let json = serde_json::to_string(&files).map_err(|e| e.to_string())?;
     let _ = window.emit("commit-files", json);
     Ok(())
+}
+
+/// Tags `sha` with `name` (G-7): annotated with `message` where one is given, lightweight where
+/// none is. A tag refused changes nothing and says why; the web interface reloads after a tag
+/// written, the commit selected again (ADR-0033).
+#[tauri::command]
+pub async fn create_tag(
+    name: String,
+    message: Option<String>,
+    sha: String,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    let write = Write::CreateTag {
+        name,
+        commit: sha,
+        message,
+    };
+    perform(write, Confirmation::Absent, &state).await
+}
+
+/// Deletes the tag `name`, expected on `sha` and annotated as `annotated` says. It discards work,
+/// so the core refuses it unless the developer `confirmed` it in the web interface's dialog
+/// (ADR-0034).
+#[tauri::command]
+pub async fn delete_tag(
+    name: String,
+    sha: String,
+    annotated: bool,
+    confirmed: bool,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    let write = Write::DeleteTag {
+        name,
+        commit: sha,
+        annotated,
+    };
+    let confirmation = if confirmed {
+        Confirmation::Given
+    } else {
+        Confirmation::Absent
+    };
+    perform(write, confirmation, &state).await
+}
+
+/// Performs `write` on the open repository through the core, on the blocking pool.
+async fn perform(
+    write: Write,
+    confirmation: Confirmation,
+    state: &State<'_, AppState>,
+) -> Result<(), String> {
+    let repo_path = match state.current_repo.lock().unwrap().clone() {
+        Some(p) => p,
+        None => return Err("No repository open".into()),
+    };
+    tokio::task::spawn_blocking(move || port::perform(&GitWriter, &repo_path, &write, confirmation))
+        .await
+        .map_err(|e| e.to_string())?
+        .map_err(|e| e.to_string())
 }
 
 /// Returns the diff lines for a single file in a commit.

@@ -265,12 +265,14 @@ pub struct ParentRepo {
 }
 
 /// A tag, peeled so an annotated tag resolves to the commit it marks.
-#[derive(Debug, Serialize)]
+#[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Tag {
     pub name: String,
     pub sha: String,
     pub short_sha: String,
+    /// Whether the tag is a tag object with a message of its own, rather than a bare reference.
+    pub annotated: bool,
 }
 
 /// Everything the repository sidebar lists for one repository read.

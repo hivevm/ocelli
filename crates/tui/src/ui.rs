@@ -72,6 +72,12 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
     if app.prompt.is_some() {
         draw_prompt(frame, app, p, main);
     }
+    if app.tag_prompt.is_some() {
+        draw_tag_prompt(frame, app, p, main);
+    }
+    if app.confirm.is_some() {
+        draw_confirm(frame, app, p, main);
+    }
     draw_status(frame, app, p, status);
 }
 
@@ -731,25 +737,75 @@ fn draw_search_panel(frame: &mut Frame, app: &App, p: &Palette, graph: Rect) {
 
 fn draw_prompt(frame: &mut Frame, app: &App, p: &Palette, main: Rect) {
     let Some(text) = &app.prompt else { return };
+    let lines = vec![
+        input_line(p, "", text, true),
+        Line::styled("Enter open · Esc cancel", Style::new().fg(p.text_dim)),
+    ];
+    draw_dialog(frame, p, main, " Open repository ".to_string(), lines);
+}
+
+/// The tag prompt (G-7): the name, then the message, the line being typed
+/// carrying the cursor.
+fn draw_tag_prompt(frame: &mut Frame, app: &App, p: &Palette, main: Rect) {
+    let Some(tag) = &app.tag_prompt else { return };
+    let typing_name = tag.message.is_none();
+    let mut lines = vec![input_line(p, "Name     ", &tag.name, typing_name)];
+    if let Some(message) = &tag.message {
+        lines.push(input_line(p, "Message  ", message, true));
+    }
+    lines.push(Line::styled(
+        if typing_name {
+            "Enter next · Esc cancel"
+        } else {
+            "Enter tag, an empty message makes a lightweight tag · Esc cancel"
+        },
+        Style::new().fg(p.text_dim),
+    ));
+    let short = &tag.sha[..tag.sha.len().min(7)];
+    draw_dialog(frame, p, main, format!(" Tag {short} "), lines);
+}
+
+/// The question before a write that discards work, naming what is lost
+/// (ADR-0034).
+fn draw_confirm(frame: &mut Frame, app: &App, p: &Palette, main: Rect) {
+    let Some(lost) = app.confirm.as_ref().and_then(|w| w.discards()) else {
+        return;
+    };
+    let lines = vec![
+        Line::styled(
+            format!("This discards {lost}, and nothing brings it back."),
+            Style::new().fg(p.text_bright),
+        ),
+        Line::from(vec![
+            Span::styled("y", Style::new().fg(p.accent)),
+            Span::styled(
+                " delete · any other key keeps it",
+                Style::new().fg(p.text_dim),
+            ),
+        ]),
+    ];
+    draw_dialog(frame, p, main, " Delete? ".to_string(), lines);
+}
+
+fn input_line<'a>(p: &Palette, label: &'a str, text: &str, cursor: bool) -> Line<'a> {
+    Line::from(vec![
+        Span::styled(label, Style::new().fg(p.text_muted)),
+        Span::styled(text.to_string(), Style::new().fg(p.text_bright)),
+        Span::styled(if cursor { "▏" } else { "" }, Style::new().fg(p.accent)),
+    ])
+}
+
+/// A box over the panes, a third of the way down.
+fn draw_dialog(frame: &mut Frame, p: &Palette, main: Rect, title: String, lines: Vec<Line>) {
     let width = main.width.min(80);
     let area = Rect {
         x: main.x + (main.width - width) / 2,
         y: main.y + main.height / 3,
         width,
-        height: 4.min(main.height),
+        height: (lines.len() as u16 + 2).min(main.height),
     };
     frame.render_widget(Clear, area);
-    frame.render_widget(
-        Paragraph::new(vec![
-            Line::from(vec![
-                Span::styled(text.clone(), Style::new().fg(p.text_bright)),
-                Span::styled("▏", Style::new().fg(p.accent)),
-            ]),
-            Line::styled("Enter open · Esc cancel", Style::new().fg(p.text_dim)),
-        ])
-        .block(pane(p, " Open repository ", true)),
-        area,
-    );
+    frame.render_widget(Paragraph::new(lines).block(pane(p, title, true)), area);
 }
 
 // ── Status bar ──────────────────────────────────────────────────────────────
@@ -757,6 +813,16 @@ fn draw_prompt(frame: &mut Frame, app: &App, p: &Palette, main: Rect) {
 fn hints(app: &App) -> &'static str {
     if app.prompt.is_some() {
         return "type a path";
+    }
+    if app.confirm.is_some() {
+        return "y deletes · any other key keeps it";
+    }
+    if let Some(tag) = &app.tag_prompt {
+        return if tag.message.is_none() {
+            "type the tag's name"
+        } else {
+            "type a message, or none"
+        };
     }
     if app.search.editing {
         return "Enter/⇧Enter next/prev · ↑/↓ · Tab keep · Esc clear";
@@ -769,9 +835,11 @@ fn hints(app: &App) -> &'static str {
     }
     match app.focus {
         Focus::Sidebar if app.side.minimised => "j/k move · Enter expand · 1 expand",
-        Focus::Sidebar => "j/k move · Enter open/toggle · / filter · 1 minimise",
-        Focus::Graph => "j/k move · ]/[ parent/child · }/{ refs · / search · y copy · Esc deselect",
-        Focus::Detail => "j/k link · Enter jump · y copy",
+        Focus::Sidebar => "j/k move · Enter open/toggle · / filter · d delete tag · 1 minimise",
+        Focus::Graph => {
+            "j/k move · ]/[ parent/child · }/{ refs · / search · y copy · t tag · Esc deselect"
+        }
+        Focus::Detail => "j/k link · Enter jump · y copy · t tag",
         Focus::Files => "j/k move · Enter diff/fold · t tree/flat",
     }
 }
@@ -1047,6 +1115,41 @@ mod tests {
     }
 
     #[test]
+    fn the_tag_prompt_shows_the_commit_the_name_and_then_the_message() {
+        let mut app = loaded_app();
+        press(&mut app, KeyCode::Char('t'));
+        press(&mut app, KeyCode::Char('v'));
+        let text = screen(&mut app, 160, 20).join("\n");
+        assert!(
+            text.contains("Tag d") && text.contains("Name     v▏"),
+            "{text}"
+        );
+        press(&mut app, KeyCode::Enter);
+        let text = screen(&mut app, 160, 20).join("\n");
+        assert!(
+            text.contains("Message  ▏") && text.contains("lightweight"),
+            "{text}"
+        );
+    }
+
+    #[test]
+    // Verifies: ADR-0034
+    fn the_question_before_deleting_names_what_is_lost() {
+        let mut app = loaded_app();
+        app.confirm = Some(ocelli_core::port::Write::DeleteTag {
+            name: "v1".into(),
+            commit: "c".into(),
+            annotated: true,
+        });
+        let text = screen(&mut app, 160, 20).join("\n");
+        assert!(
+            text.contains("This discards the tag v1 and its message")
+                && text.contains("y delete · any other key keeps it"),
+            "{text}"
+        );
+    }
+
+    #[test]
     // Verifies: ADR-0028
     fn a_tiny_terminal_does_not_panic() {
         let mut app = loaded_app();
@@ -1054,6 +1157,11 @@ mod tests {
             screen(&mut app, w, h);
         }
         press(&mut app, KeyCode::Char('o'));
+        press(&mut app, KeyCode::Esc);
+        press(&mut app, KeyCode::Char('t'));
+        for (w, h) in [(1, 1), (10, 3), (30, 2)] {
+            screen(&mut app, w, h);
+        }
         press(&mut app, KeyCode::Esc);
         press(&mut app, KeyCode::Char('/'));
         press(&mut app, KeyCode::Char('c'));
