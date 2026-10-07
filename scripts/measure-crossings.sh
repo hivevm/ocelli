@@ -69,6 +69,7 @@ while read -r name url commit recorded; do
   commits="$(sed -n 's/^commits: //p' <<< "$out")"
   ocelli="$(sed -n 's/^ocelli crossings: //p' <<< "$out")"
   git_count="$(sed -n 's/^git crossings: //p' <<< "$out")"
+  main_line="$(sed -n 's/^main line: //p' <<< "$out")"
   if ! [[ "${recorded:-}" =~ ^[0-9]+$ ]]; then
     echo "measure: the corpus records no crossing count for $name" >&2
     failed+=("$name")
@@ -77,6 +78,12 @@ while read -r name url commit recorded; do
   if ! [[ "$commits" =~ ^[0-9]+$ && "$ocelli" =~ ^[0-9]+$ && "$git_count" =~ ^[0-9]+$ ]]; then
     echo "measure: cannot read the counts of $name from:" >&2
     printf '    %s\n' "$out" >&2
+    failed+=("$name")
+    continue
+  fi
+  # A layout without the main line is one no front end shows (ADR-0032): no measurement at all.
+  if [[ -z "$main_line" || "$main_line" == none ]]; then
+    echo "measure: $name has no main line to lay out, so its layout is not the one the front ends show" >&2
     failed+=("$name")
     continue
   fi

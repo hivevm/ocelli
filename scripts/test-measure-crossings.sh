@@ -7,7 +7,8 @@
 # per repository with the commits, Ocelli's count, the record, git's count, and a verdict. With a
 # stand-in for ocelli-measure the verdict is tried at the record: below and at it Q-1 holds
 # whatever git draws, one above it misses Q-1 and fails the run. A commit that does not exist, a
-# repository without a record, and counts that cannot be read fail the run too.
+# repository without a record, a layout without the main line, and counts that cannot be read fail
+# the run too.
 #
 # Usage:
 #     scripts/test-measure-crossings.sh
@@ -94,12 +95,14 @@ stub() {
   echo "$work/stub"
 }
 printf 'straight %s %s 4\n' "$(url "$work/straight")" "$straight" > "$work/one"
-OCELLI_MEASURE="$(stub 'commits: 9\\nocelli crossings: 3\\ngit crossings: 1\\n')" \
+OCELLI_MEASURE="$(stub 'commits: 9\\nmain line: abc\\nocelli crossings: 3\\ngit crossings: 1\\n')" \
   expect "fewer crossings than recorded hold Q-1, whatever git draws" 0 "| 9 | 3 | 4 | 1 | holds |" "$work/one"
-OCELLI_MEASURE="$(stub 'commits: 9\\nocelli crossings: 4\\ngit crossings: 9\\n')" \
+OCELLI_MEASURE="$(stub 'commits: 9\\nmain line: abc\\nocelli crossings: 4\\ngit crossings: 9\\n')" \
   expect "exactly the recorded crossings hold Q-1" 0 "| 9 | 4 | 4 | 9 | holds |" "$work/one"
-OCELLI_MEASURE="$(stub 'commits: 9\\nocelli crossings: 5\\ngit crossings: 9\\n')" \
+OCELLI_MEASURE="$(stub 'commits: 9\\nmain line: abc\\nocelli crossings: 5\\ngit crossings: 9\\n')" \
   expect "one crossing more than recorded misses Q-1 and fails the run" 1 "Q-1 MISSED on: straight" "$work/one"
+OCELLI_MEASURE="$(stub 'commits: 9\\nmain line: none\\nocelli crossings: 3\\ngit crossings: 1\\n')" \
+  expect "a layout without the main line fails the run" 1 "Measurement FAILED for: straight" "$work/one"
 OCELLI_MEASURE="$(stub 'commits: 9\\n')" \
   expect "counts that cannot be read fail the run" 1 "Measurement FAILED for: straight" "$work/one"
 

@@ -19,6 +19,7 @@
 <script lang="ts">
   import type { NodeJson, Edge, RowWindow } from './types.ts';
   import { windowToAsk, type RowRange } from './rowWindow.ts';
+  import { roundedPath } from './edgePath.ts';
   import { FONTS, THEMES, seriesColor, type Theme } from './theme/palette.ts';
 
   // ── Props ──────────────────────────────────────────────────────────────────
@@ -250,7 +251,7 @@
     ctx.lineJoin = 'round';
     view?.edges.forEach((edge, i) => {
       if (edge.maxRow < visRowMin || edge.minRow > visRowMax) return;
-      drawEdge(edge, view.litEdges?.[i] ?? true);
+      drawEdge(edge, view.litEdges?.[i] ?? true, view.paths[i]);
     });
 
     // Nodes — one row lookup per visible row, already in row order
@@ -261,68 +262,25 @@
   }
 
   // ── Edge rendering with short corner curves (GitKraken style) ────────────
-  function drawEdge(edge: Edge, lit: boolean): void {
+  function drawEdge(edge: Edge, lit: boolean, path: [number, number][]): void {
     // An edge is on the lineage iff both endpoints are, which the host says per
     // edge: lineage edges stay bright and everything else fades.
-    const dimmed = !lit;
-    if (dimmed) ctx!.globalAlpha = DIM_GRAPH;
+    if (!lit) ctx!.globalAlpha = DIM_GRAPH;
 
-    const x1 = nodeX(edge.sourceCol);
-    const y1 = nodeY(edge.sourceRow) - scrollY;
-    const x2 = nodeX(edge.targetCol);
-    const y2 = nodeY(edge.targetRow) - scrollY;
-
-    const color = branchColor(edge.isBranch ? edge.targetCol : edge.sourceCol);
-    ctx!.strokeStyle = color;
+    ctx!.strokeStyle = branchColor(edge.isBranch ? edge.targetCol : edge.sourceCol);
     ctx!.beginPath();
-    ctx!.moveTo(x1, y1);
-
-    if (edge.track !== undefined && edge.track !== null) {
-      // A MERGE out of the main line: along the parent's row to its track, up the track, then
-      // along the child's row, a short curve at each bend (ADR-0030).
-      const xv = nodeX(edge.track);
-      const r = COL_WIDTH / 2;
-      const out = xv > x1 ? 1 : -1;
-      const dy = y2 > y1 ? 1 : -1;
-      const into = x2 > xv ? 1 : -1;
-      ctx!.lineTo(xv - out * r, y1);
-      ctx!.quadraticCurveTo(xv, y1, xv, y1 + dy * r);
-      if (x2 === xv) {
-        // The child stands in the track's lane itself: up the track to it, no second bend.
-        ctx!.lineTo(x2, y2);
-      } else {
-        ctx!.lineTo(xv, y2 - dy * r);
-        ctx!.quadraticCurveTo(xv, y2, xv + into * r, y2);
-        ctx!.lineTo(x2, y2);
-      }
-    } else if (x1 === x2) {
-      // Straight vertical
-      ctx!.lineTo(x2, y2);
-    } else {
-      const r = COL_WIDTH / 2;
-      const dx = x2 > x1 ? 1 : -1; // direction: +1 right, -1 left
-      const dy = y2 > y1 ? 1 : -1; // direction: +1 down,  -1 up
-
-      // The shape follows the edge type, not the side the child is on
-      // (ADR-0030): each vertical run then lies in a column the layout keeps
-      // clear, so no edge can pass through a commit.
-      if (edge.isBranch) {
-        // BRANCH: horizontal first, then vertical up the child's lane.
-        // Bend sits at the target column (x2), at the source row (y1).
-        ctx!.lineTo(x2 - dx * r, y1);
-        ctx!.quadraticCurveTo(x2, y1, x2, y1 + dy * r);
-        ctx!.lineTo(x2, y2);
-      } else {
-        // MERGE: vertical first, up the parent's column, then horizontal.
-        // Bend sits at the source column (x1), at the target row (y2).
-        ctx!.lineTo(x1, y2 - dy * r);
-        ctx!.quadraticCurveTo(x1, y2, x1 + dx * r, y2);
-        ctx!.lineTo(x2, y2);
-      }
+    // The core routes the edge through its corners after its type (ADR-0030); the canvas only
+    // softens each bend with a short curve.
+    const corners = path.map(([row, lane]) => ({ x: nodeX(lane), y: nodeY(row) - scrollY }));
+    for (const step of roundedPath(corners, COL_WIDTH / 2)) {
+      if (step.kind === 'move') ctx!.moveTo(step.to.x, step.to.y);
+      else if (step.kind === 'line') ctx!.lineTo(step.to.x, step.to.y);
+      else ctx!.quadraticCurveTo(step.via.x, step.via.y, step.to.x, step.to.y);
     }
     ctx!.stroke();
     ctx!.globalAlpha = 1;
   }
+
 
   // ── Node rendering ─────────────────────────────────────────────────────────
   function drawNode(node: NodeJson, infoX: number, canvasW: number, lit: boolean): void {

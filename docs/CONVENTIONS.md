@@ -17,11 +17,11 @@ skimmed. The design revision drops what prevented nothing
   implementation's own output, captured before the move; a test written after the move only
   restates the new code.
 - **Logic lives in a pure helper beside the component, not inside it.** Grouping refs into
-  folders, choosing the rows to ask the host for, deriving a file tree, and pairing diff lines
-  are each a function over plain data in a module of its own (`refTree.ts`, `rowWindow.ts`,
-  `fileTree.ts`, `diffSplit.ts`), and the component only draws what it returns; so is ordering a
-  host's answers, which drops one from an older load or overtaken by a newer request
-  (`hostAnswers.ts`). A
+  folders, choosing the rows to ask the host for, rounding an edge's path through its corners,
+  deriving a file tree, and pairing diff lines are each a function over plain data in a module of
+  its own (`refTree.ts`, `rowWindow.ts`, `edgePath.ts`, `fileTree.ts`, `diffSplit.ts`), and the
+  component only draws what it returns; so is ordering a host's answers, which drops one from an
+  older load or overtaken by a newer request (`hostAnswers.ts`). A
   component needs a browser to test and a pane a terminal; a function needs neither.
 - **A behaviour both front ends offer lives once in the core; only drawing is ported.** Search,
   lineage, and a load's bookkeeping, its chunks, status, and growing search and selection, belong

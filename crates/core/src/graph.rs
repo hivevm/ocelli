@@ -604,16 +604,20 @@ fn straight_branches(
     let mut sorted_indices: Vec<usize> = chunk.indices().collect();
     sorted_indices.sort_by_key(|&i| nodes[i].row);
 
-    if main.is_some() && lanes.active.is_empty() {
-        lanes.active.push(None);
-        lanes.start_row.push(0);
-        lanes.last_used_row.push(-1);
-    }
     let Lanes {
         active: active_branches,
         start_row: col_start_row,
         last_used_row,
     } = lanes;
+    // The main line's lane is the first one opened (ADR-0032).
+    if main.is_some() && active_branches.is_empty() {
+        free_lane(
+            active_branches,
+            col_start_row,
+            last_used_row,
+            &HashSet::new(),
+        );
+    }
 
     for &c_idx in &sorted_indices {
         let (branch_children, merge_children): (Vec<usize>, Vec<usize>) = chunk
@@ -662,14 +666,7 @@ fn straight_branches(
                     last_used_row,
                 );
                 taken.insert(0);
-                let track = (1..active_branches.len())
-                    .find(|&j| active_branches[j].is_none() && !taken.contains(&j))
-                    .unwrap_or_else(|| {
-                        active_branches.push(None);
-                        col_start_row.push(0);
-                        last_used_row.push(-1);
-                        active_branches.len() - 1
-                    });
+                let track = free_lane(active_branches, col_start_row, last_used_row, &taken);
                 last_used_row[track] = nodes[c_idx].row;
                 tracks.insert((c_idx, t), track as i32);
             }
@@ -680,14 +677,7 @@ fn straight_branches(
             nodes[c_idx].col = col as i32;
         } else {
             // Find first free non-forbidden slot, or append
-            let insert_col = (0..active_branches.len())
-                .find(|&j| active_branches[j].is_none() && !forbidden.contains(&j))
-                .unwrap_or_else(|| {
-                    active_branches.push(None);
-                    col_start_row.push(0);
-                    last_used_row.push(-1);
-                    active_branches.len() - 1
-                });
+            let insert_col = free_lane(active_branches, col_start_row, last_used_row, &forbidden);
             active_branches[insert_col] = Some(c_idx);
             col_start_row[insert_col] = nodes[c_idx].row;
             nodes[c_idx].col = insert_col as i32;
@@ -715,6 +705,23 @@ fn straight_branches(
         }
     }
     tracks
+}
+
+/// The first lane no branch line occupies and outside `taken`, a new one opened where none is.
+fn free_lane(
+    active: &mut Vec<Option<usize>>,
+    start_row: &mut Vec<i32>,
+    last_used_row: &mut Vec<i32>,
+    taken: &HashSet<usize>,
+) -> usize {
+    (0..active.len())
+        .find(|&j| active[j].is_none() && !taken.contains(&j))
+        .unwrap_or_else(|| {
+            active.push(None);
+            start_row.push(0);
+            last_used_row.push(-1);
+            active.len() - 1
+        })
 }
 
 /// Computes the forbidden column set J(c) for node c — every column in which
@@ -765,6 +772,7 @@ fn compute_forbidden(
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
+    use crate::model::Run;
 
     /// Fixture commit. `time` is the committer date; parents are listed
     /// first-parent first, exactly as git orders them.
@@ -1064,14 +1072,14 @@ pub(crate) mod tests {
     /// following the specification's edge shapes (ADR-0030): a BRANCH edge
     /// runs vertically in the child's column, a MERGE edge in the parent's.
     fn vertical_cells(e: &Edge) -> Vec<(i32, i32)> {
-        let col = if let Some(track) = e.track {
-            track
-        } else if e.is_branch {
-            e.target_col
-        } else {
-            e.source_col
-        };
-        (e.min_row + 1..e.max_row).map(|row| (row, col)).collect()
+        e.route()
+            .into_iter()
+            .filter_map(|run| match run {
+                Run::Down { lane, from, to } => Some((from + 1..to).map(move |row| (row, lane))),
+                Run::Along { .. } => None,
+            })
+            .flatten()
+            .collect()
     }
 
     /// Regression: a merge edge ran vertically through an unrelated commit.

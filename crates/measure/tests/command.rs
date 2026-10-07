@@ -339,3 +339,34 @@ fn the_windows_measurement_loads_every_chunk_and_reports_each_wait() {
         );
     }
 }
+
+/// The main line the command reports it laid out with.
+fn main_line(out: &Output) -> String {
+    String::from_utf8_lossy(&out.stdout)
+        .lines()
+        .find_map(|l| l.strip_prefix("main line: "))
+        .unwrap_or_else(|| panic!("no main line in {out:?}"))
+        .to_string()
+}
+
+#[test]
+// Verifies: ADR-0032, Q-1
+fn crossings_are_measured_on_the_layout_with_the_main_line() {
+    let scratch = Scratch::new("main-line");
+    let repo = scratch.0.join("repo.git");
+    let mut stream = String::new();
+    commit(&mut stream, "main", 1, 1_700_000_001, &[]);
+    commit(&mut stream, "main", 2, 1_700_000_002, &[1]);
+    fast_import(&repo, &stream);
+    let tip = git(&repo, &["rev-parse", "main"]);
+    let out = measure(&repo);
+    assert_measured(&out);
+    assert_eq!(main_line(&out), tip.trim(), "the main branch's tip");
+
+    // A repository whose HEAD names no branch that exists, and with no main branch, has none.
+    git(&repo, &["branch", "-q", "-m", "main", "other"]);
+    git(&repo, &["symbolic-ref", "HEAD", "refs/heads/gone"]);
+    let out = measure(&repo);
+    assert_measured(&out);
+    assert_eq!(main_line(&out), "none");
+}
