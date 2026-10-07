@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 #
 # Self-test of the git hooks under .githooks/: pre-commit refuses a commit on main, pre-push
-# refuses a push while the checks are red (AGENTS.md, sections 5 and 6).
+# refuses a push while the checks are red, while the working tree differs from HEAD, and of a ref
+# that is not the checked-out commit (AGENTS.md, sections 5 and 6).
 #
 # Each case builds a throwaway repository under a temporary directory with core.hooksPath pointing
 # at this repository's .githooks/, runs a real 'git commit' or 'git push' in it — the push goes to
@@ -43,10 +44,12 @@ repo() {
   echo "$dir"
 }
 
-# checks <dir> <exit code> — give the fixture a scripts/check-all.sh that exits as told.
+# checks <dir> <exit code> — give the fixture a committed scripts/check-all.sh that exits as told.
 checks() {
   mkdir -p "$1/scripts"
   printf '#!/usr/bin/env bash\necho "check output for the test"\nexit %s\n' "$2" > "$1/scripts/check-all.sh"
+  g "$1" add scripts/check-all.sh
+  g "$1" commit -q -m checks
 }
 
 # expect <pass|refuse> <name> <dir> <needle> <git args...> — run the git command; a refused one
@@ -87,6 +90,28 @@ d="$(repo green)"
 git -C "${d:?}" switch -q -c feature
 checks "$d" 0
 expect pass "a push while the checks are green" "$d" "" push -q origin feature
+
+d="$(repo dirty)"
+git -C "${d:?}" switch -q -c feature
+checks "$d" 0
+echo changed >> "$d/scripts/check-all.sh"
+expect refuse "a push while a tracked file differs from HEAD" "$d" "differs from HEAD" push -q origin feature
+expect refuse "the refusal names the file" "$d" "scripts/check-all.sh" push -q origin feature
+
+d="$(repo untracked)"
+git -C "${d:?}" switch -q -c feature
+checks "$d" 0
+echo new > "$d/new.txt"
+expect refuse "a push while an untracked file lies about" "$d" "new.txt" push -q origin feature
+printf 'new.txt\n' > "$d/.git/info/exclude"
+expect pass "an ignored file does not count" "$d" "" push -q origin feature
+
+d="$(repo other)"
+git -C "${d:?}" switch -q -c feature
+checks "$d" 0
+git -C "${d:?}" branch -q other
+g "$d" commit -q --allow-empty -m ahead
+expect refuse "a push of a ref that is not the checked-out commit" "$d" "not the checked-out commit" push -q origin other
 
 d="$(repo detached)"
 git -C "${d:?}" checkout -q --detach
