@@ -5,6 +5,9 @@ name: Measure
 # - Q-1, the edge crossings in Ocelli's layout on the corpus of feature spec #11 against the count
 #   recorded for each repository's fixed commit, with git's count beside it, by
 #   scripts/measure-crossings.sh.
+# - Q-2, the wait for the first window of rows of a generated repository of a million commits, for
+#   the slowest chunk taken in while the rest loads, and for the slowest window across its loaded
+#   history, by scripts/measure-windows.sh.
 # - Q-3, the memory the commit graph of a repository of 100 000 commits adds to the desktop
 #   application over the empty application, by scripts/measure-memory.sh under a virtual display on
 #   Linux.
@@ -35,6 +38,18 @@ jobs:
         run: rustup show active-toolchain
       - name: Measure edge crossings on the corpus
         run: bash scripts/measure-crossings.sh
+
+  windows:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Set up the pinned Rust toolchain
+        run: rustup show active-toolchain
+      - name: Measure the waits on a history of a million commits
+        run: bash scripts/measure-windows.sh
 
   memory:
     runs-on: ubuntu-latest

@@ -2,7 +2,10 @@
 //!
 //! ADR-0009 keeps every technology and every adapter out of `ocelli-core`: its manifest may name
 //! only the pure libraries listed here, and the git adapter reaches no front end. ADR-0010 keeps the layout a functional core: the layout
-//! module reaches no file, network, process, thread, clock, environment, or randomness.
+//! module reaches no file, network, process, thread, clock, environment, or randomness. ADR-0019
+//! and G-13 keep the thread that draws free of repository reads and of laying a history out: the
+//! terminal application's event loop does neither, and every command of the desktop host that
+//! reads the history or the repository runs off its main thread.
 
 use std::fs;
 
@@ -141,4 +144,102 @@ fn the_layout_performs_no_effect() {
 fn the_effect_scan_sees_an_effect() {
     let source = "fn f() { let _ = std::time::Instant::now(); }\n#[cfg(test)]\nmod tests {}";
     assert!(shipped(source).contains("std::time"));
+}
+
+#[test]
+fn every_crate_takes_the_workspace_lints_that_deny_unsafe_code() {
+    let workspace = read("../../Cargo.toml");
+    assert!(
+        workspace.contains("[workspace.lints.rust]\nunsafe_code = \"deny\""),
+        "the workspace denies unsafe code"
+    );
+    for member in ["core", "git", "measure", "tui", "../src-tauri"] {
+        let manifest = read(&format!("../{member}/Cargo.toml"));
+        assert!(
+            manifest.contains("[lints]\nworkspace = true"),
+            "{member} takes the workspace lints"
+        );
+    }
+}
+
+/// What reads a repository or lays a history out, which the terminal application's drawing and
+/// key handling must not do (ADR-0019, G-13).
+const BLOCKING: &[&str] = &[
+    "GitReader",
+    "graph::Layout",
+    "lay_out(",
+    "load_chunks",
+    "load::load",
+    "load_refs",
+    "load_commit_files",
+    "load_file_diff",
+];
+
+/// The blocking calls a source makes in the code that ships.
+fn blocking_in(source: &str) -> Vec<&'static str> {
+    let code = shipped(source);
+    BLOCKING
+        .iter()
+        .copied()
+        .filter(|b| code.contains(b))
+        .collect()
+}
+
+#[test]
+// Verifies: ADR-0019, G-13
+fn the_terminal_application_draws_and_handles_keys_without_reading_or_laying_out() {
+    for file in ["app.rs", "ui.rs", "raster.rs"] {
+        let source = read(&format!("../tui/src/{file}"));
+        assert!(
+            blocking_in(&source).is_empty(),
+            "crates/tui/src/{file} calls {:?} on the thread that draws",
+            blocking_in(&source)
+        );
+    }
+}
+
+#[test]
+// Verifies: ADR-0019, G-13
+fn the_blocking_scan_sees_a_read() {
+    let source = "fn f() { GitReader.load_refs(path); }\n#[cfg(test)]\nmod tests {}";
+    assert_eq!(blocking_in(source), ["GitReader", "load_refs"]);
+}
+
+/// The desktop host's commands that read the history or the repository and would run on the
+/// main thread, which Tauri gives a command that is not async.
+fn commands_on_the_main_thread(source: &str) -> Vec<String> {
+    let code = shipped(source);
+    code.split("#[tauri::command")
+        .skip(1)
+        .filter_map(|command| {
+            let (attribute, rest) = command.split_once(']')?;
+            let name = rest
+                .split("fn ")
+                .nth(1)?
+                .split('(')
+                .next()?
+                .trim()
+                .to_string();
+            let off_main =
+                attribute.contains("async") || rest.split('{').next()?.contains("async fn");
+            let reads = rest.contains("session") || rest.contains("GitReader");
+            (reads && !off_main).then_some(name)
+        })
+        .collect()
+}
+
+#[test]
+// Verifies: ADR-0019, G-13
+fn every_command_that_reads_the_history_or_the_repository_runs_off_the_main_thread() {
+    let source = read("../../src-tauri/src/commands.rs");
+    assert_eq!(commands_on_the_main_thread(&source), Vec::<String>::new());
+}
+
+#[test]
+// Verifies: ADR-0019, G-13
+fn the_command_scan_sees_a_command_on_the_main_thread() {
+    let source = "#[tauri::command]\npub fn read(state: State) -> W { state.session.window(0, 1) }\n\
+                  #[tauri::command(async)]\npub fn fine(state: State) { state.session.x() }\n\
+                  #[tauri::command]\npub async fn also(state: State) { GitReader.x() }\n";
+    assert_eq!(commands_on_the_main_thread(source), ["read"]);
 }

@@ -1,9 +1,10 @@
-use ocelli_core::graph;
-use ocelli_core::model::MAX_COMMITS;
+use crate::session::{Found, Selected, Session, WindowJson};
+use ocelli_core::load::{self, Event};
 use ocelli_core::port::RepositoryReader;
 use ocelli_git::GitReader;
-use std::path::PathBuf;
-use std::sync::Mutex;
+use serde::Serialize;
+use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex};
 use tauri::{AppHandle, Emitter, State, Window};
 
 /// Shared application state
@@ -11,6 +12,8 @@ pub struct AppState {
     pub current_repo: Mutex<Option<PathBuf>>,
     /// The repository named on the command line, handed to the web interface once.
     pub startup_repo: Mutex<Option<String>>,
+    /// The history of the newest load (ADR-0031).
+    pub session: Arc<Session>,
 }
 
 /// The repository named on the command line, if any, the first time it is asked for. The web
@@ -21,8 +24,9 @@ pub fn startup_repo(state: State<'_, AppState>) -> Option<String> {
     state.startup_repo.lock().unwrap().take()
 }
 
-/// Loads a repository by path and emits graph data to the frontend.
-/// Returns as soon as the load is spawned; the graph arrives as a `load-graph` event.
+/// Loads a repository by path. Returns as soon as the load is spawned; the history arrives chunk
+/// by chunk, each announced by a `history-grew` event, and the refs as a `load-refs` event right
+/// after the first chunk, read with it so the two describe the same state (ADR-0016, ADR-0031).
 #[tauri::command]
 pub async fn open_repo(
     path: String,
@@ -41,38 +45,140 @@ pub async fn open_repo(
     let _ = window.emit("set-status", "Loading...");
     let _ = window.emit("set-repo-label", path.to_string_lossy().to_string());
 
-    // Spawn the load in the background so this command never blocks the UI
-    let window_clone = window.clone();
-    tokio::spawn(async move {
-        // Progress channel: sends messages from git loading to the window
-        let (tx, mut rx) = tokio::sync::mpsc::channel::<String>(16);
-        let w2 = window_clone.clone();
-        tokio::spawn(async move {
-            while let Some(msg) = rx.recv().await {
-                let _ = w2.emit("set-status", msg);
-            }
-        });
+    // git2 is not async-safe, so the load runs on the blocking pool and never blocks the UI.
+    // The load session begins here, before the load is spawned, so loads begin in the order
+    // they were asked for and the newest is the one shown.
+    let session = Arc::clone(&state.session);
+    let generation = session.begin();
+    tokio::task::spawn_blocking(move || load(&GitReader, &path, &session, generation, &window));
+    Ok(())
+}
 
-        match load_and_layout(path, tx).await {
-            Ok((graph_json, refs_json)) => {
-                let node_count = count_nodes_from_json(&graph_json);
-                let _ = window_clone.emit("load-graph", graph_json);
-                // The sidebar's refs come from the same read as the history, so
-                // the two never describe different states of the repository.
-                let _ = window_clone.emit("load-refs", refs_json);
-                let status = loaded_status(node_count);
-                // The same line on standard error, so that a script driving the application,
-                // scripts/measure-memory.sh among them, can tell that the graph has loaded.
-                eprintln!("{status}");
-                let _ = window_clone.emit("set-status", status);
+/// Where a load reports how far it has come: the window, or a recorder in tests.
+pub trait Report {
+    fn report<S: Serialize + Clone>(&self, event: &str, payload: S);
+}
+
+impl Report for Window {
+    fn report<S: Serialize + Clone>(&self, event: &str, payload: S) {
+        let _ = self.emit(event, payload);
+    }
+}
+
+/// Loads the history of `path` into `session` (ADR-0016), laying each chunk out on this thread,
+/// and tells the window how far it has come. A newer load refuses this one's chunks, which stops
+/// its walk, and keeps it from writing the status line.
+fn load(
+    reader: &impl RepositoryReader,
+    path: &Path,
+    session: &Session,
+    generation: u64,
+    window: &impl Report,
+) {
+    load::load(reader, path, &mut |event| match event {
+        Event::Progress(msg) => {
+            if session.is_current(generation) {
+                window.report("set-status", msg);
             }
-            Err(e) => {
-                let _ = window_clone.emit("set-status", format!("Error: {}", e));
+            true
+        }
+        Event::Chunk(chunk) => {
+            let Some(growth) = session.append(generation, chunk) else {
+                return false;
+            };
+            window.report("history-grew", &growth);
+            window.report("set-status", &growth.status);
+            true
+        }
+        Event::Refs(refs) => {
+            let current = session.is_current(generation);
+            if current {
+                window.report("load-refs", &refs);
             }
+            current
+        }
+        Event::Ended(result) => {
+            // The layout is gone by now; what the load freed goes back before it says so.
+            release_freed_memory();
+            let complete = result.is_ok();
+            let error = result.as_ref().err().cloned();
+            match (session.finish(generation, result), error) {
+                (Some(growth), _) => {
+                    window.report("history-grew", &growth);
+                    if complete {
+                        // The same line on standard error, so that a script driving the
+                        // application, scripts/measure-memory.sh among them, can tell that the
+                        // history has loaded.
+                        eprintln!("{}", growth.status);
+                    }
+                    window.report("set-status", growth.status);
+                }
+                (None, Some(e)) if session.is_current(generation) => {
+                    window.report("set-status", format!("Error: {e}"));
+                }
+                (None, _) => {}
+            }
+            false
         }
     });
+}
 
-    Ok(())
+/// Hands the memory the load has freed back to the system. The walk and the layout free most of
+/// what they allocate once the load ends, but glibc keeps freed memory with the process, where Q-3
+/// counts it; other allocators hand it back on their own.
+#[allow(unsafe_code)]
+fn release_freed_memory() {
+    #[cfg(all(target_os = "linux", target_env = "gnu"))]
+    {
+        unsafe extern "C" {
+            fn malloc_trim(pad: usize) -> std::ffi::c_int;
+        }
+        // SAFETY: malloc_trim takes no pointer and only returns free pages of glibc's own heaps
+        // to the system; it is safe to call from any thread at any time.
+        unsafe {
+            malloc_trim(0);
+        }
+    }
+}
+
+/// Rows `top..top + rows` of the history, with the edges crossing them and, while a commit is
+/// selected, which of them belong to its lineage.
+#[tauri::command(async)]
+pub fn read_window(top: usize, rows: usize, state: State<'_, AppState>) -> WindowJson {
+    state.session.window(top, rows)
+}
+
+/// Selects the commit in `row`: its lineage lights up in the windows read after.
+#[tauri::command(async)]
+pub fn select_row(row: usize, state: State<'_, AppState>) -> Option<Selected> {
+    state.session.select(row)
+}
+
+/// The selected commit again, its relatives as far as they have loaded by now.
+#[tauri::command(async)]
+pub fn selection(state: State<'_, AppState>) -> Option<Selected> {
+    state.session.selection()
+}
+
+#[tauri::command(async)]
+pub fn deselect(state: State<'_, AppState>) {
+    state.session.deselect()
+}
+
+/// The rows matching `query`, newest first, with the nodes of the first ones the results panel
+/// lists.
+#[tauri::command(async)]
+pub fn search_history(query: String, state: State<'_, AppState>) -> Found {
+    state.session.search(&query, SEARCH_HITS)
+}
+
+/// The most matches the results panel lists; every match is reachable by cycling through them.
+const SEARCH_HITS: usize = 200;
+
+/// The row of each SHA, null for one not laid out yet.
+#[tauri::command(async)]
+pub fn rows_of(shas: Vec<String>, state: State<'_, AppState>) -> Vec<Option<usize>> {
+    state.session.rows_of(&shas)
 }
 
 /// Opens the native folder picker and returns the chosen path.
@@ -146,74 +252,203 @@ pub async fn get_file_diff(
     serde_json::to_string(&lines).map_err(|e| e.to_string())
 }
 
-/// Loads a repository, builds the graph layout, and reads the refs the sidebar
-/// lists (ADR-0026). Returns both as JSON: the graph and the refs describe one
-/// and the same read of the repository.
-/// Runs git2 operations on a blocking thread pool.
-async fn load_and_layout(
-    path: PathBuf,
-    progress_tx: tokio::sync::mpsc::Sender<String>,
-) -> Result<(String, String), anyhow::Error> {
-    // git2 is not async-safe so run on blocking thread pool
-    let refs_path = path.clone();
-    let commits = tokio::task::spawn_blocking(move || {
-        // Runs on a blocking thread, so the progress channel may block too.
-        let mut progress = |msg: String| {
-            let _ = progress_tx.blocking_send(msg);
-        };
-        GitReader.load_commits(&path, &mut progress)
-    })
-    .await??;
-
-    let repo_refs = tokio::task::spawn_blocking(move || GitReader.load_refs(&refs_path)).await??;
-
-    let graph = graph::build_graph(commits);
-    let graph_json = serde_json::to_string(&graph)?;
-    let refs_json = serde_json::to_string(&repo_refs)?;
-    Ok((graph_json, refs_json))
-}
-
-/// The status line after a load. At the commit limit the load was (or may have been) truncated, so
-/// it says so instead of presenting the cut-off as the whole history. It starts with the number of
-/// commits and ` commits`, the shape `scripts/measure-memory.sh` reads from standard error to tell
-/// that the graph has loaded.
-fn loaded_status(node_count: usize) -> String {
-    if node_count >= MAX_COMMITS {
-        format!(
-            "{} commits — commit limit reached, older history not shown",
-            node_count
-        )
-    } else {
-        format!("{} commits", node_count)
-    }
-}
-
-/// Counts nodes in a serialized JSON graph (for status message).
-fn count_nodes_from_json(json: &str) -> usize {
-    if let Ok(val) = serde_json::from_str::<serde_json::Value>(json)
-        && let Some(nodes) = val.get("nodes").and_then(|n| n.as_array())
-    {
-        return nodes.len();
-    }
-    0
-}
-
 #[cfg(test)]
 mod tests {
-    use super::loaded_status;
-    use ocelli_core::model::MAX_COMMITS;
+    use super::*;
+    use crate::session::tests::three;
+    use ocelli_core::model::{CommitData, DiffLine, FileChange, RepoRefs};
+    use std::cell::RefCell;
 
-    #[test]
-    fn the_status_below_the_limit_names_the_commits() {
-        assert_eq!(loaded_status(42), "42 commits");
+    /// Records what a load reports, one line per event.
+    #[derive(Default)]
+    struct Recorder(RefCell<Vec<String>>);
+
+    impl Report for Recorder {
+        fn report<S: Serialize + Clone>(&self, event: &str, payload: S) {
+            let value = serde_json::to_value(payload).unwrap();
+            let line = match event {
+                "history-grew" => format!(
+                    "grew {} rows{}",
+                    value["rows"],
+                    if value["loading"] == true {
+                        ", loading"
+                    } else {
+                        ""
+                    }
+                ),
+                "load-refs" => "refs".to_string(),
+                _ => format!("{event} {}", value.as_str().unwrap_or_default()),
+            };
+            self.0.borrow_mut().push(line);
+        }
+    }
+
+    /// A repository whose walk yields `chunks` and then fails if `walk_fails`, whose refs fail if
+    /// `refs_fail`, and which begins a newer load on the session before the chunk `newer_at`.
+    #[derive(Default)]
+    struct Fake {
+        chunks: Vec<Vec<CommitData>>,
+        walk_fails: bool,
+        refs_fail: bool,
+        newer_at: Option<(usize, Arc<Session>)>,
+    }
+
+    impl RepositoryReader for Fake {
+        fn load_chunks(
+            &self,
+            _: &Path,
+            progress: &mut dyn FnMut(String),
+            on_chunk: &mut dyn FnMut(Vec<CommitData>) -> bool,
+        ) -> anyhow::Result<()> {
+            progress("walking".into());
+            for (i, chunk) in self.chunks.iter().enumerate() {
+                if let Some((at, session)) = &self.newer_at
+                    && i == *at
+                {
+                    session.begin();
+                }
+                if !on_chunk(chunk.clone()) {
+                    return Ok(());
+                }
+                progress("walking on".into());
+            }
+            if self.walk_fails {
+                anyhow::bail!("walk failed");
+            }
+            Ok(())
+        }
+
+        fn load_main_tip(&self, _: &Path) -> anyhow::Result<Option<String>> {
+            Ok(None)
+        }
+
+        fn load_refs(&self, _: &Path) -> anyhow::Result<RepoRefs> {
+            if self.refs_fail {
+                anyhow::bail!("refs failed");
+            }
+            Ok(RepoRefs::default())
+        }
+
+        fn load_commit_files(&self, _: &Path, _: &str) -> anyhow::Result<Vec<FileChange>> {
+            unimplemented!()
+        }
+
+        fn load_file_diff(&self, _: &Path, _: &str, _: &str) -> anyhow::Result<Vec<DiffLine>> {
+            unimplemented!()
+        }
+    }
+
+    fn run(fake: &Fake, session: &Session) -> Vec<String> {
+        let recorder = Recorder::default();
+        load(
+            fake,
+            Path::new("/repo"),
+            session,
+            session.begin(),
+            &recorder,
+        );
+        recorder.0.into_inner()
     }
 
     #[test]
-    fn the_status_at_the_limit_says_older_history_is_cut_and_keeps_the_shape() {
-        let line = loaded_status(MAX_COMMITS);
+    // Verifies: ADR-0016, ADR-0031, G-13
+    fn a_load_reports_each_chunk_the_refs_after_the_first_and_the_end() {
+        let fake = Fake {
+            chunks: vec![three(9), three(6)],
+            ..Fake::default()
+        };
         assert_eq!(
-            line,
-            format!("{MAX_COMMITS} commits — commit limit reached, older history not shown")
+            run(&fake, &Session::default()),
+            [
+                "set-status walking",
+                "grew 3 rows, loading",
+                "set-status 3 commits in 1 chunk — loading older history…",
+                "refs",
+                "grew 6 rows, loading",
+                "set-status 6 commits in 2 chunks — loading older history…",
+                "grew 6 rows",
+                "set-status 6 commits",
+            ]
+        );
+    }
+
+    #[test]
+    // Verifies: ADR-0016, G-13
+    fn a_walk_failing_after_the_first_chunk_keeps_it_and_says_so() {
+        let fake = Fake {
+            chunks: vec![three(9)],
+            walk_fails: true,
+            ..Fake::default()
+        };
+        let reported = run(&fake, &Session::default());
+        assert_eq!(
+            reported.last().unwrap(),
+            "set-status 3 commits — loading stopped: walk failed"
+        );
+    }
+
+    #[test]
+    // Verifies: ADR-0016, G-13
+    fn a_walk_failing_before_the_first_chunk_is_an_error() {
+        let fake = Fake {
+            walk_fails: true,
+            ..Fake::default()
+        };
+        assert_eq!(
+            run(&fake, &Session::default()),
+            ["set-status walking", "set-status Error: walk failed"]
+        );
+    }
+
+    #[test]
+    // Verifies: ADR-0016
+    fn refs_failing_stop_the_load_and_say_so_last() {
+        let fake = Fake {
+            chunks: vec![three(9), three(6)],
+            refs_fail: true,
+            ..Fake::default()
+        };
+        let reported = run(&fake, &Session::default());
+        assert_eq!(
+            reported.last().unwrap(),
+            "set-status 3 commits — loading stopped: refs failed"
+        );
+        assert!(
+            !reported.iter().any(|r| r.starts_with("grew 6")),
+            "{reported:?}"
+        );
+    }
+
+    #[test]
+    // Verifies: ADR-0016
+    fn a_load_superseded_before_its_first_chunk_reports_nothing() {
+        let session = Session::default();
+        let older = session.begin();
+        session.begin();
+        let fake = Fake {
+            chunks: vec![three(9)],
+            walk_fails: true,
+            ..Fake::default()
+        };
+        let recorder = Recorder::default();
+        load(&fake, Path::new("/repo"), &session, older, &recorder);
+        assert_eq!(recorder.0.into_inner(), Vec::<String>::new());
+    }
+
+    #[test]
+    // Verifies: ADR-0016
+    fn a_newer_load_stops_the_walk_of_the_older() {
+        let session = Arc::new(Session::default());
+        let fake = Fake {
+            chunks: vec![three(9), three(6), three(3)],
+            newer_at: Some((1, Arc::clone(&session))),
+            ..Fake::default()
+        };
+        let reported = run(&fake, &session);
+        assert_eq!(
+            reported.last().unwrap(),
+            "refs",
+            "nothing after the newer load began"
         );
     }
 }

@@ -17,12 +17,16 @@ skimmed. The design revision drops what prevented nothing
   implementation's own output, captured before the move; a test written after the move only
   restates the new code.
 - **Logic lives in a pure helper beside the component, not inside it.** Grouping refs into
-  folders, computing a lineage, filtering a history, deriving a file tree, and pairing diff lines
-  are each a function over plain data in a module of its own (`refTree.ts`, `ancestry.ts`,
-  `search.ts`, `fileTree.ts`, `diffSplit.ts`), and the component only draws what it returns. A
+  folders, choosing the rows to ask the host for, rounding an edge's path through its corners,
+  deriving a file tree, and pairing diff lines are each a function over plain data in a module of
+  its own (`refTree.ts`, `rowWindow.ts`, `edgePath.ts`, `fileTree.ts`, `diffSplit.ts`), and the
+  component only draws what it returns; so is ordering a host's answers, which drops one from an
+  older load or overtaken by a newer request (`hostAnswers.ts`). A
   component needs a browser to test and a pane a terminal; a function needs neither.
-- **A behaviour both front ends offer is ported, not reinvented.** The terminal application's
-  search, lineage, file tree, and diff split follow the web interface's helpers module for module,
+- **A behaviour both front ends offer lives once in the core; only drawing is ported.** Search,
+  lineage, and a load's bookkeeping, its chunks, status, and growing search and selection, belong
+  in the core for both front ends; the terminal application's file tree and diff split, which only
+  draw, follow the web interface's helpers module for module,
   and the desktop host takes the path on its command line as `ocelli-cli` takes its own, so that
   a change to what a behaviour is touches both and the two cannot drift into two products,
   for the reason the shared core exists ([ADR-0009](adr/0009-ports-and-adapters.md)).
@@ -39,13 +43,19 @@ skimmed. The design revision drops what prevented nothing
   the core's layout or git's output is tested on layouts `build_graph` lays out, on graphs git
   drew, or on hand-made ones only in shapes the governing ADR allows, the synthetic nodes of
   [ADR-0024](adr/0024-synthetic-nodes-in-the-first-chunk.md) included where they reach the code;
-  a fixture nothing produces tests a case that cannot occur. A script that reports a verdict is
+  a fixture nothing produces tests a case that cannot occur. A generator yields every shape its
+  producer can make, the rare ones its ADR names included, such as a date running backwards or a
+  parent in a later chunk. A script that reports a verdict is
   tested on each verdict and at its boundary, since a flipped or truncated comparison passes a
-  test that sees one side only.
+  test that sees one side only. A test of a computed size or count uses an input past every floor
+  or clamp applied to it, so a wrong count changes the outcome.
+- **A property test excepts a case only where the specification or an ADR names the exception.**
+  The exception cites that clause where it is made and counts that the excepted case occurs; an
+  exception no clause names weakens the suite.
 - **A failure is reported, never dropped or read as a value.** In the web interface a failed
-  command sets the status bar; in a script a failure exits non-zero and says what failed. A count
-  that cannot be read, or a measurement taken before the state it measures was reached, is a
-  failure, not a zero or a pass.
+  command sets the status bar, and ESLint rejects a `.catch` whose handler takes no error; in a
+  script a failure exits non-zero and says what failed. A count that cannot be read, or a
+  measurement taken before the state it measures was reached, is a failure, not a zero or a pass.
 - **Configuration that grants a capability carries a test that reads it.** The WebView's content
   security policy and the lockfile set are asserted against the files that ship
   (`src-web/src/hardening.test.ts`), because a regression in a JSON file is silent.

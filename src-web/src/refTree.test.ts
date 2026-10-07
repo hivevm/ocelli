@@ -1,6 +1,6 @@
 // Verifies: ADR-0026, ADR-0027
 import { describe, expect, test } from 'bun:test';
-import { anyLeaf, countLeaves, filterByName, groupByFolder } from './refTree.ts';
+import { anyLeaf, countLeaves, filterByName, groupByFolder, refShas } from './refTree.ts';
 
 interface Ref {
   name: string;
@@ -105,5 +105,17 @@ describe('anyLeaf', () => {
 
   test('no match anywhere is false', () => {
     expect(anyLeaf(tree, r => r.name === 'nope')).toBe(false);
+  });
+});
+
+describe('refShas', () => {
+  test('lists each commit a branch, remote branch, working tree, or tag points at, once', () => {
+    const shas = refShas({
+      locals: [{ sha: 'a' }, { sha: 'b' }],
+      remotes: [{ branches: [{ sha: 'a' }, { sha: 'c' }] }],
+      worktrees: [{ sha: 'd' }, { sha: '' }],
+      tags: [{ sha: 'e' }],
+    });
+    expect(shas).toEqual(['a', 'b', 'c', 'd', 'e']);
   });
 });

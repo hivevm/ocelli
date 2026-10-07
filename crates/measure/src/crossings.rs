@@ -2,12 +2,15 @@
 //!
 //! An edge is drawn as an orthogonal L-shape whose bend follows its type (ADR-0030): a branch edge
 //! runs along the parent's row and then up the child's lane, a merge edge up the parent's lane and
-//! then along the child's row, and an edge within one lane is a single vertical line. No commit can
-//! sit where two segments meet strictly inside both: every row holds one commit, at an end of each
+//! then along the child's row, a merge out of the main line along the parent's row to its track, up
+//! the track, and along the child's row, and an edge within one lane is a single vertical line. No
+//! commit can sit where two segments meet strictly inside both: every row holds one commit, at an end of each
 //! horizontal run on it. Edges to one parent overlap where git draws a single line, which is why a
 //! point counts once.
 
-use ocelli_core::model::{Edge, Graph};
+#[cfg(test)]
+use ocelli_core::model::Graph;
+use ocelli_core::model::{Edge, Run};
 use std::collections::HashSet;
 
 /// A horizontal segment on `row`, from lane `from` to lane `to` (`from < to`).
@@ -26,41 +29,21 @@ struct Vertical {
     to: i32,
 }
 
-/// The straight segments an edge is drawn with (ADR-0030).
-fn segments(e: &Edge) -> (Option<Horizontal>, Option<Vertical>) {
-    let (low, high) = (
-        e.target_row.min(e.source_row),
-        e.target_row.max(e.source_row),
-    );
-    if e.source_col == e.target_col {
-        return (None, vertical(e.source_col, low, high));
+/// The straight segments an edge is drawn with, as the core routes it (ADR-0030).
+fn segments(e: &Edge) -> (Vec<Horizontal>, Option<Vertical>) {
+    let mut horizontals = Vec::new();
+    let mut vertical = None;
+    for run in e.route() {
+        match run {
+            Run::Along { row, from, to } => horizontals.push(Horizontal { row, from, to }),
+            Run::Down { lane, from, to } => vertical = Some(Vertical { lane, from, to }),
+        }
     }
-    let (from, to) = (
-        e.source_col.min(e.target_col),
-        e.source_col.max(e.target_col),
-    );
-    if e.is_branch {
-        let along = Horizontal {
-            row: e.source_row,
-            from,
-            to,
-        };
-        (Some(along), vertical(e.target_col, low, high))
-    } else {
-        let along = Horizontal {
-            row: e.target_row,
-            from,
-            to,
-        };
-        (Some(along), vertical(e.source_col, low, high))
-    }
-}
-
-fn vertical(lane: i32, from: i32, to: i32) -> Option<Vertical> {
-    (from < to).then_some(Vertical { lane, from, to })
+    (horizontals, vertical)
 }
 
 /// The number of edge crossings in a laid-out commit graph.
+#[cfg(test)]
 pub fn count(graph: &Graph) -> usize {
     count_edges(&graph.edges)
 }
@@ -69,12 +52,13 @@ pub fn count(graph: &Graph) -> usize {
 pub fn count_edges(edges: &[Edge]) -> usize {
     let parts: Vec<_> = edges.iter().map(segments).collect();
     let mut crossings = HashSet::new();
-    for (i, (horizontal, _)) in parts.iter().enumerate() {
-        let Some(h) = horizontal else { continue };
-        for (j, (_, vertical)) in parts.iter().enumerate() {
-            let Some(v) = vertical else { continue };
-            if i != j && h.from < v.lane && v.lane < h.to && v.from < h.row && h.row < v.to {
-                crossings.insert((h.row, v.lane));
+    for (i, (horizontals, _)) in parts.iter().enumerate() {
+        for h in horizontals {
+            for (j, (_, vertical)) in parts.iter().enumerate() {
+                let Some(v) = vertical else { continue };
+                if i != j && h.from < v.lane && v.lane < h.to && v.from < h.row && h.row < v.to {
+                    crossings.insert((h.row, v.lane));
+                }
             }
         }
     }
@@ -94,6 +78,7 @@ mod tests {
             is_branch,
             min_row: source.0.min(target.0),
             max_row: source.0.max(target.0),
+            track: None,
         }
     }
 

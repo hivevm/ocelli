@@ -1,24 +1,48 @@
 use anyhow::Result;
-use git2::{DiffOptions, ObjectType, Repository, Sort, Status, StatusOptions};
+use git2::{DiffOptions, Repository, Sort, Status, StatusOptions};
 use ocelli_core::model::{
-    CommitData, CommitKind, DiffLine, DiffLineKind, FileChange, FileStatus, MAX_COMMITS,
+    CHUNK_COMMITS, CommitData, CommitKind, DiffLine, DiffLineKind, FileChange, FileStatus,
     WORKDIR_SHA,
 };
 use std::collections::HashMap;
 use std::path::Path;
 
-/// Loads commits from a git repository and returns them as CommitData.
+/// Loads the first chunk of a repository's history: the newest commits of the walk with the
+/// stash and working-directory nodes, at most [`CHUNK_COMMITS`] together (ADR-0016).
 /// Reports progress through `progress`, one message per step.
-pub fn load_repository(
+pub fn load_first_chunk(
     repo_path: &Path,
     progress: &mut dyn FnMut(String),
 ) -> Result<Vec<CommitData>> {
+    let mut first = Vec::new();
+    load_chunks(repo_path, progress, &mut |chunk| {
+        first = chunk;
+        false
+    })?;
+    Ok(first)
+}
+
+/// Loads a repository's whole history in chunks of [`CHUNK_COMMITS`] in the commit-date order of
+/// the walk over every ref, handing each to `on_chunk` as it is read; `on_chunk`
+/// returns whether to go on (ADR-0016). The first chunk carries the stash and working-directory
+/// nodes and makes room for them by moving its oldest walked commits on to the second chunk.
+/// Reports progress through `progress`, one message per step.
+pub fn load_chunks(
+    repo_path: &Path,
+    progress: &mut dyn FnMut(String),
+    on_chunk: &mut dyn FnMut(Vec<CommitData>) -> bool,
+) -> Result<()> {
+    // The walk parses every commit of the history once and never again; libgit2's object cache
+    // would keep them all, and the memory it frees afterwards stays with the process (Q-3). The
+    // setting holds for the whole process: the per-commit reads after it read a commit at a time
+    // and gain little from the cache.
+    git2::opts::enable_caching(false);
     // 1. Open repo (walks up to find .git, supports bare repos)
-    let mut repo = Repository::discover(repo_path)?;
+    let repo = Repository::discover(repo_path)?;
 
     // 2. Collect all refs and map peeled SHA -> Vec<String> ref names
     let mut refs_by_sha: HashMap<String, Vec<String>> = HashMap::new();
-    let mut start_oids: Vec<git2::Oid> = Vec::new();
+    let mut starts: Vec<(i64, git2::Oid)> = Vec::new();
 
     for reference in repo.references()? {
         let reference = reference?;
@@ -31,39 +55,40 @@ pub fn load_repository(
         }
         let pretty = pretty_ref_name(&name);
 
-        // Peel to commit OID
-        let target_oid = match reference.peel(ObjectType::Commit) {
-            Ok(obj) => obj.id(),
+        // Peel to the commit, whose date orders the start of the walk
+        let target = match reference.peel_to_commit() {
+            Ok(commit) => commit,
             Err(_) => continue, // skip blobs/trees/non-commit tags
         };
+        let target_oid = target.id();
 
         refs_by_sha
             .entry(target_oid.to_string())
             .or_default()
             .push(pretty);
 
-        // Also try unpeeled for markStart
-        if let Some(oid) = reference.target() {
-            start_oids.push(oid);
-        }
+        starts.push((target.time().seconds(), target_oid));
     }
 
-    // 3. Set up revwalk (all commits, topological + time sort)
+    // 3. Set up the walk in commit-date order (ADR-0016). Any sorting libgit2 offers reads the
+    //    whole history before the first commit; unsorted, it keeps the commits it has reached
+    //    ordered by date and yields each after one of its children. It takes the starts in the
+    //    reverse of the order they are pushed, so the oldest is pushed first and the newest is
+    //    where the walk begins.
     let mut revwalk = repo.revwalk()?;
-    revwalk.set_sorting(Sort::TOPOLOGICAL | Sort::TIME)?;
-
-    for oid in &start_oids {
-        let _ = revwalk.push(*oid); // ignore non-commit oids
+    revwalk.set_sorting(Sort::NONE)?;
+    starts.sort_unstable();
+    starts.dedup_by_key(|(_, oid)| *oid);
+    for (_, oid) in &starts {
+        revwalk.push(*oid)?;
     }
 
-    // 4. Walk commits, build CommitData list
-    let mut commits: Vec<CommitData> = Vec::with_capacity(MAX_COMMITS);
+    // 4. Walk commits, build CommitData chunks
+    let mut commits: Vec<CommitData> = Vec::with_capacity(CHUNK_COMMITS);
     let mut count = 0usize;
+    let mut first = true;
 
     for oid_result in revwalk {
-        if count >= MAX_COMMITS {
-            break;
-        }
         let oid = oid_result?;
         let commit = repo.find_commit(oid)?;
 
@@ -90,38 +115,67 @@ pub fn load_repository(
         if count.is_multiple_of(500) {
             progress(format!("Loaded {} commits...", count));
         }
+
+        if commits.len() == CHUNK_COMMITS {
+            let next = if first {
+                first = false;
+                with_synthetic_nodes(repo_path, &mut commits)?
+            } else {
+                Vec::with_capacity(CHUNK_COMMITS)
+            };
+            if !on_chunk(std::mem::replace(&mut commits, next)) {
+                return Ok(());
+            }
+        }
     }
 
-    // 5. Append stash entries (each becomes a node hanging off its base commit)
-    let walked = commits.len();
-    load_stashes(&mut repo, &mut commits);
+    // The walk has ended: hand over what is left.
+    if first {
+        let rest = with_synthetic_nodes(repo_path, &mut commits)?;
+        let _ = on_chunk(commits) && !rest.is_empty() && on_chunk(rest);
+    } else if !commits.is_empty() {
+        on_chunk(commits);
+    }
+    Ok(())
+}
 
-    // 6. Append a synthetic "uncommitted changes" node when the worktree is dirty.
-    //    Its timestamp is "now", so the temporal sort places it at row 0.
+/// Completes the first chunk with the stash and working-directory nodes (ADR-0024) and returns
+/// the walked commits it moves on to the second chunk to stay within [`CHUNK_COMMITS`]. It opens
+/// the repository a second time: the walk holds the first handle, and reading the stash needs one
+/// of its own.
+fn with_synthetic_nodes(
+    repo_path: &Path,
+    commits: &mut Vec<CommitData>,
+) -> Result<Vec<CommitData>> {
+    let mut repo = Repository::discover(repo_path)?;
+    // Stash entries, each a node hanging off its base commit.
+    let walked = commits.len();
+    load_stashes(&mut repo, commits);
+
+    // A synthetic "uncommitted changes" node when the worktree is dirty.
+    // Its timestamp is "now", so the temporal sort places it at row 0.
     if let Some(wip) = working_dir_node(&repo) {
         commits.push(wip);
     }
 
-    // 7. Bound the whole graph, synthetic nodes included.
-    apply_commit_limit(&mut commits, walked);
-
-    Ok(commits)
+    Ok(fit_first_chunk(commits, walked))
 }
 
-/// Enforces the commit limit over the *whole* graph, synthetic nodes included.
+/// Fits the first chunk, synthetic nodes included, within [`CHUNK_COMMITS`].
 ///
-/// `walked` is how many entries at the front came from the revwalk. Room is made
-/// by dropping the oldest walked commits rather than the stash and
-/// working-directory nodes, which are the rows a reader cares about most.
-fn apply_commit_limit(commits: &mut Vec<CommitData>, walked: usize) {
-    if commits.len() <= MAX_COMMITS {
-        return;
+/// `walked` is how many entries at the front came from the revwalk. Room is made by moving the
+/// oldest walked commits on to the next chunk rather than the stash and working-directory nodes,
+/// which are the rows a reader cares about most; the moved commits are returned in walk order.
+fn fit_first_chunk(commits: &mut Vec<CommitData>, walked: usize) -> Vec<CommitData> {
+    if commits.len() <= CHUNK_COMMITS {
+        return Vec::new();
     }
-    let overflow = commits.len() - MAX_COMMITS;
+    let overflow = commits.len() - CHUNK_COMMITS;
     let cut_from = walked.saturating_sub(overflow);
-    commits.drain(cut_from..walked.min(commits.len()));
-    // Backstop for the degenerate case of more synthetic nodes than the limit.
-    commits.truncate(MAX_COMMITS);
+    let moved: Vec<CommitData> = commits.drain(cut_from..walked.min(commits.len())).collect();
+    // Backstop for the degenerate case of more synthetic nodes than a chunk holds.
+    commits.truncate(CHUNK_COMMITS);
+    moved
 }
 
 /// Collects stash entries via the stash reflog and appends one node per stash.
@@ -456,34 +510,42 @@ mod tests {
     /// Under the limit nothing is touched.
     #[test]
     // Verifies: ADR-0016
-    fn commit_limit_leaves_a_small_graph_alone() {
+    fn the_first_chunk_leaves_a_small_graph_alone() {
         let mut commits: Vec<CommitData> = (0..10)
             .map(|i| entry(&format!("c{i}"), CommitKind::Commit))
             .collect();
         let walked = commits.len();
-        apply_commit_limit(&mut commits, walked);
+        assert!(fit_first_chunk(&mut commits, walked).is_empty());
         assert_eq!(commits.len(), 10);
     }
 
-    /// The limit bounds the *whole* graph, and the synthetic nodes survive it:
-    /// room is made by dropping the oldest walked commits instead.
-    /// This is the regression guard for synthetic nodes being appended past the cap.
+    /// The first chunk bounds the *whole* graph, and the synthetic nodes survive it:
+    /// room is made by moving the oldest walked commits on to the next chunk instead.
+    /// This is the regression guard for synthetic nodes being appended past the chunk.
     #[test]
     // Verifies: ADR-0016, ADR-0024
-    fn commit_limit_bounds_the_whole_graph_and_keeps_synthetic_nodes() {
-        let mut commits: Vec<CommitData> = (0..MAX_COMMITS)
+    fn the_first_chunk_bounds_the_whole_graph_and_keeps_synthetic_nodes() {
+        let mut commits: Vec<CommitData> = (0..CHUNK_COMMITS)
             .map(|i| entry(&format!("c{i}"), CommitKind::Commit))
             .collect();
         let walked = commits.len();
         commits.push(entry("stash0", CommitKind::Stash));
         commits.push(entry("WORKING_DIRECTORY", CommitKind::Working));
 
-        apply_commit_limit(&mut commits, walked);
+        let moved = fit_first_chunk(&mut commits, walked);
 
         assert_eq!(
             commits.len(),
-            MAX_COMMITS,
-            "the cap covers synthetic nodes too"
+            CHUNK_COMMITS,
+            "the chunk covers synthetic nodes too"
+        );
+        let moved: Vec<&str> = moved.iter().map(|c| c.sha.as_str()).collect();
+        let last = format!("c{}", CHUNK_COMMITS - 1);
+        let before_last = format!("c{}", CHUNK_COMMITS - 2);
+        assert_eq!(
+            moved,
+            [before_last.as_str(), last.as_str()],
+            "moved on, in walk order"
         );
         assert!(
             commits.iter().any(|c| c.kind == CommitKind::Working),
@@ -494,23 +556,23 @@ mod tests {
         assert!(
             !commits
                 .iter()
-                .any(|c| c.sha == format!("c{}", MAX_COMMITS - 1)),
-            "the oldest walked commits are the ones dropped",
+                .any(|c| c.sha == format!("c{}", CHUNK_COMMITS - 1)),
+            "the oldest walked commits are the ones moved",
         );
     }
 
-    /// Degenerate case: more synthetic nodes than the limit allows.
+    /// Degenerate case: more synthetic nodes than a chunk holds.
     #[test]
     // Verifies: ADR-0016
-    fn commit_limit_holds_even_with_absurdly_many_synthetic_nodes() {
+    fn the_first_chunk_holds_even_with_absurdly_many_synthetic_nodes() {
         let mut commits: Vec<CommitData> = vec![entry("c0", CommitKind::Commit)];
         let walked = commits.len();
-        for i in 0..(MAX_COMMITS + 5) {
+        for i in 0..(CHUNK_COMMITS + 5) {
             commits.push(entry(&format!("stash{i}"), CommitKind::Stash));
         }
 
-        apply_commit_limit(&mut commits, walked);
+        fit_first_chunk(&mut commits, walked);
 
-        assert_eq!(commits.len(), MAX_COMMITS);
+        assert_eq!(commits.len(), CHUNK_COMMITS);
     }
 }

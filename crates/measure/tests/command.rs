@@ -108,7 +108,7 @@ fn assert_measured(out: &Output) {
     );
 }
 
-const LIMIT: usize = ocelli_core::model::MAX_COMMITS;
+const LIMIT: usize = ocelli_core::model::CHUNK_COMMITS;
 
 #[test]
 // Verifies: ADR-0024
@@ -284,4 +284,89 @@ fn measuring_a_repository_starts_none_of_the_programs_its_configuration_names() 
         .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
         .collect();
     assert!(ran.is_empty(), "measuring ran {ran:?}");
+}
+
+#[test]
+// Verifies: Q-2, ADR-0016
+fn the_windows_measurement_loads_every_chunk_and_reports_each_wait() {
+    let scratch = Scratch::new("windows");
+    let repo = scratch.0.join("repo.git");
+    let mut stream = String::new();
+    for mark in 1..=3100 {
+        let parents: Vec<usize> = if mark > 1 { vec![mark - 1] } else { vec![] };
+        commit(
+            &mut stream,
+            "main",
+            mark,
+            1_700_000_000 + mark as u64,
+            &parents,
+        );
+    }
+    fast_import(&repo, &stream);
+    let out = Command::new(env!("CARGO_BIN_EXE_ocelli-measure"))
+        .args(["windows"])
+        .arg(&repo)
+        .output()
+        .unwrap();
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let text = String::from_utf8(out.stdout).unwrap();
+    assert!(
+        text.contains("commits: 3100\n"),
+        "both chunks loaded: {text}"
+    );
+    assert!(
+        text.contains("windows: 52\n"),
+        "60 rows to a window: {text}"
+    );
+    for key in [
+        "first window ms",
+        "load ms",
+        "slowest while loading ms",
+        "slowest window ms",
+        "lineage ms",
+        "search ms",
+    ] {
+        assert!(
+            text.lines().any(|l| l
+                .strip_prefix(key)
+                .and_then(|v| v.strip_prefix(": "))
+                .is_some_and(|v| v.parse::<f64>().is_ok())),
+            "{key} in {text}"
+        );
+    }
+}
+
+/// The main line the command reports it laid out with.
+fn main_line(out: &Output) -> String {
+    String::from_utf8_lossy(&out.stdout)
+        .lines()
+        .find_map(|l| l.strip_prefix("main line: "))
+        .unwrap_or_else(|| panic!("no main line in {out:?}"))
+        .to_string()
+}
+
+#[test]
+// Verifies: ADR-0032, Q-1
+fn crossings_are_measured_on_the_layout_with_the_main_line() {
+    let scratch = Scratch::new("main-line");
+    let repo = scratch.0.join("repo.git");
+    let mut stream = String::new();
+    commit(&mut stream, "main", 1, 1_700_000_001, &[]);
+    commit(&mut stream, "main", 2, 1_700_000_002, &[1]);
+    fast_import(&repo, &stream);
+    let tip = git(&repo, &["rev-parse", "main"]);
+    let out = measure(&repo);
+    assert_measured(&out);
+    assert_eq!(main_line(&out), tip.trim(), "the main branch's tip");
+
+    // A repository whose HEAD names no branch that exists, and with no main branch, has none.
+    git(&repo, &["branch", "-q", "-m", "main", "other"]);
+    git(&repo, &["symbolic-ref", "HEAD", "refs/heads/gone"]);
+    let out = measure(&repo);
+    assert_measured(&out);
+    assert_eq!(main_line(&out), "none");
 }

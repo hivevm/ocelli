@@ -1,18 +1,19 @@
 <script lang="ts">
   import FileTree from './FileTree.svelte';
   import { buildFileTree } from './fileTree.ts';
-  import type { NodeJson, FileChange } from './types.ts';
+  import type { NodeJson, FileChange, Relative } from './types.ts';
 
   interface Props {
     node: NodeJson | null;
-    nodeBySha: Map<string, NodeJson>;
+    /** The parents and children of `node`, by SHA, as the host describes them. */
+    relatives: Map<string, Relative>;
     showAvatars: boolean;
     changedFiles: FileChange[];
     diffFile: string | null;
     onSelectFile: (file: FileChange) => void;
-    onJumpToSha: (sha: string) => void;
+    onJumpToRow: (row: number) => void;
   }
-  let { node, nodeBySha, showAvatars, changedFiles, diffFile, onSelectFile, onJumpToSha }: Props =
+  let { node, relatives, showAvatars, changedFiles, diffFile, onSelectFile, onJumpToRow }: Props =
     $props();
 
   let fileViewMode = $state<'flat' | 'tree'>('tree');
@@ -39,13 +40,15 @@
     }
   }
 
-  /** Link label for a parent/child SHA. Synthetic nodes have no useful short
-      sha — the working-directory node's is empty — so they get a name instead. */
+  /** Link label for a parent/child SHA; the host names synthetic nodes, whose
+      short sha is of no use. */
   function relativeLabel(sha: string): string {
-    const n = nodeBySha.get(sha);
-    if (!n) return sha.slice(0, 7);
-    if (n.kind === 'working') return 'Uncommitted';
-    return n.shortSha;
+    return relatives.get(sha)?.label ?? sha.slice(0, 7);
+  }
+
+  /** The row of a parent/child, null while it has not loaded. */
+  function relativeRow(sha: string): number | null {
+    return relatives.get(sha)?.row ?? null;
   }
 </script>
 
@@ -126,12 +129,13 @@
       </div>
       <div class="detail-block detail-relatives">
         {#each node.parents as parentSha (parentSha)}
-          {#if nodeBySha.has(parentSha)}
-            <button class="sha-link" onclick={() => onJumpToSha(parentSha)}>
+          {@const row = relativeRow(parentSha)}
+          {#if row !== null}
+            <button class="sha-link" onclick={() => onJumpToRow(row)}>
               {relativeLabel(parentSha)}
             </button>
           {:else}
-            <span class="sha-link unloaded" title="Not loaded — outside the commit limit">
+            <span class="sha-link unloaded" title="Not loaded">
               {parentSha.slice(0, 7)}
             </span>
           {/if}
@@ -147,7 +151,7 @@
       </div>
       <div class="detail-block detail-relatives">
         {#each node.children as childSha (childSha)}
-          <button class="sha-link" onclick={() => onJumpToSha(childSha)}>
+          <button class="sha-link" onclick={() => { const row = relativeRow(childSha); if (row !== null) onJumpToRow(row); }}>
             {relativeLabel(childSha)}
           </button>
         {/each}

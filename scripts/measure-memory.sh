@@ -78,32 +78,6 @@ trap 'rm -rf "$work"' EXIT
 # A signal stops the application and its display with the script: they share its process group.
 trap 'trap - INT TERM; kill 0; exit 1' INT TERM
 
-# generate <dir> <commits> — a repository whose history is a main line with a feature branch of
-# five commits merged back every fifty, written through fast-import at fixed times.
-generate() {
-  git init --quiet --bare "$1"
-  awk -v n="$2" 'BEGIN {
-    t = 1700000000; mark = 0; main = 0
-    for (i = 1; i <= n; i++) {
-      if (i % 50 == 0 && main > 0 && i + 6 <= n) {
-        base = main
-        for (j = 1; j <= 5; j++) {
-          printf "commit refs/heads/feature\nmark :%d\ncommitter F <f@example.invalid> %d +0000\ndata 7\nfeature\nfrom :%d\n\n", ++mark, ++t, (j == 1 ? base : mark - 1)
-          i++
-        }
-        printf "commit refs/heads/main\nmark :%d\ncommitter F <f@example.invalid> %d +0000\ndata 5\nmerge\nfrom :%d\nmerge :%d\n\n", ++mark, ++t, main, mark - 1
-        main = mark
-        continue
-      }
-      printf "commit refs/heads/main\nmark :%d\ncommitter F <f@example.invalid> %d +0000\ndata 4\nmain\n", ++mark, ++t
-      if (main > 0) printf "from :%d\n", main
-      printf "\n"
-      main = mark
-    }
-  }' | git -C "$1" fast-import --quiet
-  git -C "$1" symbolic-ref HEAD refs/heads/main
-}
-
 # descendants <pid> — the pid and every process below it.
 descendants() {
   local pid="$1" child
@@ -177,7 +151,7 @@ measure() {
   return 1
 }
 
-generate "$work/repo.git" "$commits" || { echo "memory: cannot generate the repository" >&2; exit 1; }
+bash "$ROOT/scripts/generate-history.sh" "$work/repo.git" "$commits" || { echo "memory: cannot generate the repository" >&2; exit 1; }
 read -r _ empty1 < <(measure) && [[ -n "${empty1:-}" ]] || exit 1
 read -r _ empty2 < <(measure) && [[ -n "${empty2:-}" ]] || exit 1
 read -r loaded loaded1 < <(measure "$work/repo.git") && [[ -n "${loaded1:-}" ]] || exit 1

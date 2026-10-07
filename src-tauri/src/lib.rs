@@ -1,4 +1,5 @@
 mod commands;
+mod session;
 
 use commands::AppState;
 use std::sync::Mutex;
@@ -25,6 +26,7 @@ pub fn run() {
         .manage(AppState {
             current_repo: Mutex::new(None),
             startup_repo: Mutex::new(startup_path(std::env::args()).map(resolved)),
+            session: Default::default(),
         })
         .invoke_handler(tauri::generate_handler![
             commands::startup_repo,
@@ -32,6 +34,12 @@ pub fn run() {
             commands::browse_repo,
             commands::select_commit,
             commands::get_file_diff,
+            commands::read_window,
+            commands::select_row,
+            commands::selection,
+            commands::deselect,
+            commands::search_history,
+            commands::rows_of,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

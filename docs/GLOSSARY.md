@@ -12,6 +12,10 @@ to invent.
 - **Branch edge** — an edge that leaves the lane of a commit to reach a child in another lane,
   where a branch forks off.
   _Avoid:_ fork line.
+- **Chunk** — a run of up to 3 000 commits in the order the walk over a repository's refs yields
+  them, the unit in which a history is loaded and laid out; each chunk is laid out below the ones
+  before it.
+  _Avoid:_ page, batch, slice.
 - **Commit graph** — the commits of a repository drawn as nodes, each joined by an edge to its
   parents, with every branch and tag shown.
   _Avoid:_ tree, history graph, log graph.
@@ -31,11 +35,13 @@ to invent.
   interface, and the terminal application.
   _Avoid:_ client, UI, frontend.
 - **Lane** — the column of the commit graph in which a branch is drawn.
-  _Avoid:_ track, column, rail.
+  _Avoid:_ column, rail.
 - **Lane colour** — the colour a lane is drawn in, taken from one theme-independent list so a
   commit keeps its colour across a theme switch; deliberately not a theme token
   ([ADR-0021](adr/0021-themes-tokens-and-palettes.md)).
   _Avoid:_ branch colour, since a branch is a ref and a lane outlives it.
+- **Late child** — a commit the walk yields after its parent, because its committer date runs
+  backwards against it; it is laid out in its chunk, below its parent.
 - **Layout** — the rows, lanes, and edges the core computes for a loaded repository. A front end
   draws a layout and never computes one.
 - **Lineage** — the commits a commit descends from and those that descend from it.
@@ -45,6 +51,9 @@ to invent.
 - **Main branch** — the branch a repository treats as its line of record, usually `main` or
   `master`.
   _Avoid:_ trunk, default branch, master branch.
+- **Main line** — the main branch's tip and each first parent down from it until one laid out
+  before its child, drawn straight in the leftmost lane; where no main branch exists, the
+  checked-out commit's.
 - **Merge edge** — an edge that joins a parent in another lane to a merge commit, where a branch
   is merged.
   _Avoid:_ merge line.
@@ -64,10 +73,13 @@ to invent.
 - **Submodule state** — what the sidebar says about a configured submodule: on the pinned commit,
   modified when its working copy has drifted from it, or not initialized when it was never checked
   out; determined without cloning or fetching.
+- **Track** — the lane a merge out of the main line runs up between its parent's row and its
+  child's, which the layout keeps free over those rows.
 - **View state** — what a front end remembers between sessions: the theme, the sidebar's width or
   minimised rail, and the diff layout; never anything read from a repository.
 - **Window** — the range of rows a front end is drawing, the same term in both front ends since
-  the terminal has no viewport in the browser's sense.
+  the terminal has no viewport in the browser's sense; the core answers it with those rows and the
+  edges crossing them.
   _Avoid:_ viewport.
 - **Working-directory node** — the node at the top of the commit graph that stands for the
   uncommitted changes of the working directory.

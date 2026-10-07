@@ -7,7 +7,6 @@
 mod app;
 mod chips;
 mod diffsplit;
-mod explore;
 mod files;
 mod loader;
 mod raster;
