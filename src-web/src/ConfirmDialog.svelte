@@ -3,7 +3,7 @@
   // default button, the one Enter presses, keeps the work. Escape keeps it too.
 
   interface Props {
-    /** What the write discards, as `deletionLoss` names it. */
+    /** What the write discards, in the core's words. */
     lost: string;
     /** The label of the button that goes ahead, such as "Delete tag". */
     action: string;
@@ -35,11 +35,11 @@
     background: var(--bg-panel);
     border: 1px solid var(--border-strong);
     border-radius: var(--radius-lg);
-    box-shadow: var(--shadow);
+    box-shadow: 0 8px 24px var(--shadow);
   }
 
   .confirm::backdrop {
-    background: rgb(0 0 0 / 40%);
+    background: var(--shadow);
   }
 
   .question {

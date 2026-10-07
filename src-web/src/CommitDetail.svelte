@@ -1,7 +1,7 @@
 <script lang="ts">
   import FileTree from './FileTree.svelte';
   import { buildFileTree } from './fileTree.ts';
-  import { tagRequest, type TagRequest } from './writes.ts';
+  import { stashIndex, tagRequest, type Write } from './writes.ts';
   import type { NodeJson, FileChange, Relative, Tag } from './types.ts';
 
   interface Props {
@@ -13,17 +13,45 @@
     diffFile: string | null;
     onSelectFile: (file: FileChange) => void;
     onJumpToRow: (row: number) => void;
-    /** Asks the host for the tag (G-7); resolves with why it was refused, or null once written. */
-    onCreateTag: (request: TagRequest) => Promise<string | null>;
     /** The tags on `node`, as the refs read them. */
     tags: Tag[];
-    /** Deletes a tag, once the developer has confirmed it (ADR-0034). */
-    onDeleteTag: (tag: Tag) => void;
+    /** Performs a write on `node` (G-7), asking first where it discards work (ADR-0034);
+        resolves with why it was refused, or null. */
+    onWrite: (write: Write) => Promise<string | null>;
   }
   let {
-    node, relatives, showAvatars, changedFiles, diffFile, onSelectFile, onJumpToRow, onCreateTag,
-    tags, onDeleteTag,
+    node, relatives, showAvatars, changedFiles, diffFile, onSelectFile, onJumpToRow, tags, onWrite,
   }: Props = $props();
+
+  /** The place of `node` in the stash, when it is a stash node. */
+  const stash = $derived(node?.kind === 'stash' ? stashIndex(node.refs) : null);
+
+  // A write the buttons asked for, running, and why the last was refused, with the commit it
+  // was asked for.
+  let writing = $state(false);
+  let writeError = $state<string | null>(null);
+
+  async function write(request: Write): Promise<void> {
+    if (writing) return;
+    const asked = node?.sha;
+    writing = true;
+    const error = await onWrite(request);
+    if (node?.sha !== asked) return;
+    writing = false;
+    writeError = error;
+  }
+
+  function onStash(drop: boolean | 'only'): void {
+    if (!node || stash === null) return;
+    const commit = node.sha;
+    void write(drop === 'only'
+      ? { kind: 'dropStash', index: stash, commit }
+      : { kind: 'applyStash', index: stash, commit, drop });
+  }
+
+  function deleteTag(tag: Tag): void {
+    void write({ kind: 'deleteTag', name: tag.name, commit: tag.sha, annotated: tag.annotated });
+  }
 
   /** The tag a `🏷 name` chip shows, when the refs have read it. */
   function tagOf(ref: string): Tag | undefined {
@@ -53,6 +81,8 @@
     tagMessage = '';
     tagError = null;
     tagBusy = false;
+    writing = false;
+    writeError = null;
   });
 
   async function submitTag(e: SubmitEvent): Promise<void> {
@@ -60,7 +90,7 @@
     if (!tag || tagBusy) return;
     const asked = node?.sha;
     tagBusy = true;
-    const error = await onCreateTag(tag);
+    const error = await onWrite(tag);
     // The answer belongs to the commit it was asked for, not one selected meanwhile.
     if (node?.sha !== asked) return;
     tagBusy = false;
@@ -114,7 +144,7 @@
               {ref}
               {#if tag}
                 <button class="chip-delete" title="Delete the tag {tag.name}"
-                        aria-label="Delete the tag {tag.name}" onclick={() => onDeleteTag(tag)}>×</button>
+                        aria-label="Delete the tag {tag.name}" onclick={() => deleteTag(tag)}>×</button>
               {/if}
             </span>
           {/each}
@@ -122,6 +152,15 @@
       {/if}
 
       <div class="detail-message">{node.message}</div>
+
+      {#if stash !== null}
+        <div class="tag-actions stash-actions">
+          <button class="tag-btn" disabled={writing} onclick={() => onStash(false)}>Apply</button>
+          <button class="tag-btn" disabled={writing} onclick={() => onStash(true)}>Pop…</button>
+          <button class="tag-btn" disabled={writing} onclick={() => onStash('only')}>Drop…</button>
+        </div>
+      {/if}
+      {#if writeError}<div class="tag-error">{writeError}</div>{/if}
 
       {#if node.kind === 'commit'}
         {#if tagging}
@@ -467,6 +506,11 @@
 
   .tag-actions .tag-btn {
     margin-top: 0;
+  }
+
+  .stash-actions {
+    justify-content: flex-start;
+    margin-top: 8px;
   }
 
   .tag-btn:hover:not(:disabled) {

@@ -75,6 +75,9 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
     if app.tag_prompt.is_some() {
         draw_tag_prompt(frame, app, p, main);
     }
+    if app.stash_prompt.is_some() {
+        draw_stash_prompt(frame, app, p, main);
+    }
     if app.confirm.is_some() {
         draw_confirm(frame, app, p, main);
     }
@@ -779,12 +782,36 @@ fn draw_confirm(frame: &mut Frame, app: &App, p: &Palette, main: Rect) {
         Line::from(vec![
             Span::styled("y", Style::new().fg(p.accent)),
             Span::styled(
-                " delete · any other key keeps it",
+                " go ahead · any other key keeps it",
                 Style::new().fg(p.text_dim),
             ),
         ]),
     ];
-    draw_dialog(frame, p, main, " Delete? ".to_string(), lines);
+    draw_dialog(frame, p, main, " Discard? ".to_string(), lines);
+}
+
+/// The stash prompt (G-7): the message, and whether the untracked files go
+/// with the changes.
+fn draw_stash_prompt(frame: &mut Frame, app: &App, p: &Palette, main: Rect) {
+    let Some(stash) = &app.stash_prompt else {
+        return;
+    };
+    let untracked = if stash.untracked { "[x]" } else { "[ ]" };
+    let lines = vec![
+        input_line(p, "Message    ", &stash.message, true),
+        Line::from(vec![
+            Span::styled("Untracked  ", Style::new().fg(p.text_muted)),
+            Span::styled(
+                format!("{untracked} include untracked files"),
+                Style::new().fg(p.text_bright),
+            ),
+        ]),
+        Line::styled(
+            "Enter stash · Tab untracked · Esc cancel",
+            Style::new().fg(p.text_dim),
+        ),
+    ];
+    draw_dialog(frame, p, main, " Stash changes ".to_string(), lines);
 }
 
 fn input_line<'a>(p: &Palette, label: &'a str, text: &str, cursor: bool) -> Line<'a> {
@@ -815,7 +842,10 @@ fn hints(app: &App) -> &'static str {
         return "type a path";
     }
     if app.confirm.is_some() {
-        return "y deletes · any other key keeps it";
+        return "y goes ahead · any other key keeps it";
+    }
+    if app.stash_prompt.is_some() {
+        return "type a message, or none";
     }
     if let Some(tag) = &app.tag_prompt {
         return if tag.message.is_none() {
@@ -837,9 +867,10 @@ fn hints(app: &App) -> &'static str {
         Focus::Sidebar if app.side.minimised => "j/k move · Enter expand · 1 expand",
         Focus::Sidebar => "j/k move · Enter open/toggle · / filter · d delete tag · 1 minimise",
         Focus::Graph => {
-            "j/k move · ]/[ parent/child · }/{ refs · / search · y copy · t tag · Esc deselect"
+            "j/k move · ]/[ parent/child · }/{ refs · / search · y copy · t tag · s stash · \
+             a/p/d apply/pop/drop · Esc deselect"
         }
-        Focus::Detail => "j/k link · Enter jump · y copy · t tag",
+        Focus::Detail => "j/k link · Enter jump · y copy · t tag · a/p/d apply/pop/drop",
         Focus::Files => "j/k move · Enter diff/fold · t tree/flat",
     }
 }
@@ -1144,7 +1175,22 @@ mod tests {
         let text = screen(&mut app, 160, 20).join("\n");
         assert!(
             text.contains("This discards the tag v1 and its message")
-                && text.contains("y delete · any other key keeps it"),
+                && text.contains("y go ahead · any other key keeps it"),
+            "{text}"
+        );
+    }
+
+    #[test]
+    fn the_stash_prompt_shows_the_message_and_the_untracked_switch() {
+        let mut app = loaded_app();
+        press(&mut app, KeyCode::Char('s'));
+        press(&mut app, KeyCode::Char('w'));
+        press(&mut app, KeyCode::Tab);
+        let text = screen(&mut app, 160, 20).join("\n");
+        assert!(
+            text.contains("Stash changes")
+                && text.contains("Message    w▏")
+                && text.contains("[x] include untracked files"),
             "{text}"
         );
     }

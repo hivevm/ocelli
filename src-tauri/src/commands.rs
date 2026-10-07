@@ -231,40 +231,23 @@ pub async fn select_commit(
     Ok(())
 }
 
-/// Tags `sha` with `name` (G-7): annotated with `message` where one is given, lightweight where
-/// none is. A tag refused changes nothing and says why; the web interface reloads after a tag
-/// written, the commit selected again (ADR-0033).
+/// What `write` discards, in the core's words for the question the web interface puts before it,
+/// or null for a write that discards nothing (ADR-0034).
 #[tauri::command]
-pub async fn create_tag(
-    name: String,
-    message: Option<String>,
-    sha: String,
-    state: State<'_, AppState>,
-) -> Result<(), String> {
-    let write = Write::CreateTag {
-        name,
-        commit: sha,
-        message,
-    };
-    perform(write, Confirmation::Absent, &state).await
+pub fn write_discards(write: Write) -> Option<String> {
+    write.discards()
 }
 
-/// Deletes the tag `name`, expected on `sha` and annotated as `annotated` says. It discards work,
-/// so the core refuses it unless the developer `confirmed` it in the web interface's dialog
-/// (ADR-0034).
+/// Performs `write` (G-7): a write that discards work only where the developer `confirmed` it in
+/// the web interface's dialog, which the core decides (ADR-0034). A write refused changes nothing
+/// and says why; the web interface reloads after a write done, the commit selected again
+/// (ADR-0033).
 #[tauri::command]
-pub async fn delete_tag(
-    name: String,
-    sha: String,
-    annotated: bool,
+pub async fn perform_write(
+    write: Write,
     confirmed: bool,
     state: State<'_, AppState>,
 ) -> Result<(), String> {
-    let write = Write::DeleteTag {
-        name,
-        commit: sha,
-        annotated,
-    };
     let confirmation = if confirmed {
         Confirmation::Given
     } else {

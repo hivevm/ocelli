@@ -134,8 +134,10 @@ lives between them. Only what a newcomer would otherwise reconstruct from code.
 - **Writing.** The front end hands the core's `Write` to `port::perform` off the thread that
   draws, which passes it to `GitWriter`; a write that discards work, as `Write::discards` names
   it, passes only with the developer's confirmation, which the front end asked for in words that
-  name what is lost ([ADR-0034](adr/0034-discarding-work-only-after-confirmation.md)). A write
-  refused changes nothing and its reason goes to the developer. A write done starts a new
+  name what is lost ([ADR-0034](adr/0034-discarding-work-only-after-confirmation.md)); the web
+  interface sends every write as the core's `Write` in JSON, asking the desktop host's
+  `write_discards` what it discards and handing it to `perform_write`. A write refused changes
+  nothing and its reason goes to the developer. A write done starts a new
   load session of the same repository, and the front end selects the commit selected before once
   the reload has laid it out
   ([ADR-0033](adr/0033-writes-what-git-writes.md)).
