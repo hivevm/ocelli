@@ -1,13 +1,17 @@
 // Verifies: ADR-0033, ADR-0034, G-7, Q-6
 import { describe, expect, test } from 'bun:test';
-import { Reselect, deleteTag, deletionLoss, tagRequest, type ShownTag } from './writes.ts';
+import {
+  Reselect, actionLabel, confirmedWrite, stashIndex, stashRequest, tagRequest, type Write,
+} from './writes.ts';
 
 describe('tagRequest', () => {
   test('a message makes an annotated tag, a blank one a lightweight tag', () => {
     expect(tagRequest('abc', ' v1 ', 'The first release')).toEqual({
-      sha: 'abc', name: 'v1', message: 'The first release',
+      kind: 'createTag', name: 'v1', commit: 'abc', message: 'The first release',
     });
-    expect(tagRequest('abc', 'mark', '  \n')).toEqual({ sha: 'abc', name: 'mark', message: null });
+    expect(tagRequest('abc', 'mark', '  \n')).toEqual({
+      kind: 'createTag', name: 'mark', commit: 'abc', message: null,
+    });
   });
 
   test('a tag without a name is no tag', () => {
@@ -45,24 +49,40 @@ describe('Reselect', () => {
   });
 });
 
-describe('deleteTag', () => {
-  const v1: ShownTag = { name: 'v1', sha: 'abc', annotated: true };
-
-  test('names what is lost, the message of an annotated tag with it', () => {
-    expect(deletionLoss(v1)).toBe('the tag v1 and its message');
-    expect(deletionLoss({ ...v1, annotated: false })).toBe('the tag v1');
+describe('stashes', () => {
+  test('a blank message is none, the untracked switch as set', () => {
+    expect(stashRequest(' ', true)).toEqual({ kind: 'createStash', message: null, untracked: true });
+    expect(stashRequest('wip', false)).toEqual({ kind: 'createStash', message: 'wip', untracked: false });
   });
 
-  test('calls the host, confirmed, only once the developer says yes', async () => {
+  test("a stash node's place is read from its ref", () => {
+    expect(stashIndex(['📦 stash@{2}'])).toBe(2);
+    expect(stashIndex(['main', '🏷 v1'])).toBeNull();
+  });
+});
+
+describe('confirmedWrite', () => {
+  const drop: Write = { kind: 'dropStash', index: 0, commit: 's' };
+  const tag: Write = { kind: 'createTag', name: 'v1', commit: 'c', message: null };
+  const discards = async (w: Write) => (w.kind === 'dropStash' ? 'the stash stash@{0}' : null);
+
+  test('asks in the core\'s words, and writes confirmed only on a yes', async () => {
     const asked: string[] = [];
-    const calls: [ShownTag, boolean][] = [];
-    const call = async (tag: ShownTag, confirmed: boolean) => { calls.push([tag, confirmed]); };
-    const no = await deleteTag(v1, async (lost) => { asked.push(lost); return false; }, call);
+    const calls: [Write, boolean][] = [];
+    const call = async (w: Write, confirmed: boolean) => { calls.push([w, confirmed]); };
+    const no = await confirmedWrite(drop, discards, async (lost) => { asked.push(lost); return false; }, call);
     expect(no).toBe('kept');
     expect(calls).toEqual([]);
-    const yes = await deleteTag(v1, async () => true, call);
-    expect(yes).toBe('deleted');
-    expect(calls).toEqual([[v1, true]]);
-    expect(asked).toEqual(['the tag v1 and its message']);
+    expect(await confirmedWrite(drop, discards, async () => true, call)).toBe('written');
+    expect(calls).toEqual([[drop, true]]);
+    expect(asked).toEqual(['the stash stash@{0}']);
+    expect(actionLabel(drop)).toBe('Drop stash');
+  });
+
+  test('a write that discards nothing asks nothing and goes unconfirmed', async () => {
+    const calls: [Write, boolean][] = [];
+    const never = async () => { throw new Error('asked'); };
+    await confirmedWrite(tag, discards, never, async (w, c) => { calls.push([w, c]); });
+    expect(calls).toEqual([[tag, false]]);
   });
 });

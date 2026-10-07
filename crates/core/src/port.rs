@@ -3,6 +3,7 @@
 
 use crate::model::{CommitData, DiffLine, FileChange, RepoRefs};
 use anyhow::{Result, bail};
+use serde::{Deserialize, Serialize};
 use std::path::Path;
 
 /// Reads a repository's history and state.
@@ -36,8 +37,10 @@ pub trait RepositoryReader {
 }
 
 /// A write to a repository (ADR-0033), naming the state it expects to find: a write whose expected
-/// state the repository no longer holds is refused with nothing changed.
-#[derive(Debug, Clone, PartialEq, Eq)]
+/// state the repository no longer holds is refused with nothing changed. A front end out of process
+/// hands it over as JSON, its kind in `kind`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "camelCase")]
 pub enum Write {
     /// Tags `commit` with `name`, which is expected to be free: annotated by the configured
     /// identity with `message` where one is given, lightweight where none is.
@@ -53,6 +56,21 @@ pub enum Write {
         commit: String,
         annotated: bool,
     },
+    /// Puts the uncommitted changes aside as a stash with `message`, the untracked files with
+    /// them where `untracked` says so; ignored files never.
+    CreateStash {
+        message: Option<String>,
+        untracked: bool,
+    },
+    /// Applies the stash at `index`, expected to be `commit`, to the working directory, and drops
+    /// it after where `drop` says so. A stash that would not apply cleanly is refused.
+    ApplyStash {
+        index: usize,
+        commit: String,
+        drop: bool,
+    },
+    /// Drops the stash at `index`, expected to be `commit`.
+    DropStash { index: usize, commit: String },
 }
 
 impl Write {
@@ -60,13 +78,21 @@ impl Write {
     /// that discards nothing (ADR-0034).
     pub fn discards(&self) -> Option<String> {
         match self {
-            Write::CreateTag { .. } => None,
+            Write::CreateTag { .. }
+            | Write::CreateStash { .. }
+            | Write::ApplyStash { drop: false, .. } => None,
             Write::DeleteTag {
                 name,
                 annotated: true,
                 ..
             } => Some(format!("the tag {name} and its message")),
             Write::DeleteTag { name, .. } => Some(format!("the tag {name}")),
+            Write::ApplyStash { index, .. } => Some(format!(
+                "the stash stash@{{{index}}}, its changes kept only in the working directory"
+            )),
+            Write::DropStash { index, .. } => {
+                Some(format!("the stash stash@{{{index}}} and the changes in it"))
+            }
         }
     }
 }
@@ -135,15 +161,48 @@ mod tests {
         }
     }
 
+    fn apply(drop: bool) -> Write {
+        Write::ApplyStash {
+            index: 1,
+            commit: "s".into(),
+            drop,
+        }
+    }
+
     #[test]
     // Verifies: ADR-0034, Q-6
     fn each_write_that_discards_work_names_what_it_discards() {
         assert_eq!(create().discards(), None);
+        let stash = Write::CreateStash {
+            message: None,
+            untracked: true,
+        };
+        assert_eq!(stash.discards(), None);
+        assert_eq!(apply(false).discards(), None);
+        assert_eq!(
+            apply(true).discards().as_deref(),
+            Some("the stash stash@{1}, its changes kept only in the working directory")
+        );
+        let drop = Write::DropStash {
+            index: 1,
+            commit: "s".into(),
+        };
+        assert_eq!(
+            drop.discards().as_deref(),
+            Some("the stash stash@{1} and the changes in it")
+        );
         assert_eq!(delete(false).discards().as_deref(), Some("the tag v1"));
         assert_eq!(
             delete(true).discards().as_deref(),
             Some("the tag v1 and its message")
         );
+    }
+
+    #[test]
+    fn a_write_crosses_to_a_front_end_as_json_named_by_its_kind() {
+        let json = r#"{"kind":"applyStash","index":1,"commit":"s","drop":true}"#;
+        assert_eq!(serde_json::from_str::<Write>(json).unwrap(), apply(true));
+        assert_eq!(serde_json::to_string(&apply(true)).unwrap(), json);
     }
 
     #[test]

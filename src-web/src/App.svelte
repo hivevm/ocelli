@@ -12,9 +12,10 @@
   import { refShas } from './refTree.ts';
   import type { RowRange } from './rowWindow.ts';
   import { Newest } from './hostAnswers.ts';
-  import { Reselect, deleteTag, type TagRequest } from './writes.ts';
+  import { Reselect, actionLabel, confirmedWrite, type Write } from './writes.ts';
+  import StashDialog from './StashDialog.svelte';
   import type {
-    NodeJson, FileChange, DiffLine, RepoRefs, Growth, RowWindow, Relative, Selected, Found, Tag,
+    NodeJson, FileChange, DiffLine, RepoRefs, Growth, RowWindow, Relative, Selected, Found,
   } from './types.ts';
   import { applyTheme, storedTheme, type Theme } from './theme/palette.ts';
 
@@ -78,7 +79,11 @@
   // The commit to select again in the reload after a write (ADR-0033).
   const reselect = new Reselect();
   // The question open before a write that discards work, and how it is answered (ADR-0034).
-  let question = $state<{ lost: string; answer: (confirmed: boolean) => void } | null>(null);
+  let question = $state<
+    { lost: string; action: string; answer: (confirmed: boolean) => void } | null
+  >(null);
+  // Whether the dialog that describes a new stash is open.
+  let stashing = $state(false);
   const selectedTags = $derived(
     selectedNode ? (repoRefs?.tags ?? []).filter(t => t.sha === selectedNode?.sha) : [],
   );
@@ -307,43 +312,39 @@
     await invoke('open_repo', { path }).catch((e: unknown) => { status = 'Error: ' + e; });
   }
 
-  /** Tags a commit (G-7): the reload after it shows the tag, the commit selected again. Resolves
-      with why the host refused it, or null. */
-  async function createTag(tag: TagRequest): Promise<string | null> {
+  /** Performs a write (G-7), asking first where the core says it discards work: the reload
+      after it shows the result, the commit selected again. Resolves with why the host refused
+      it, or null once written or kept. */
+  async function performWrite(write: Write): Promise<string | null> {
+    let done: 'kept' | 'written';
     try {
-      await invoke('create_tag', { ...tag });
+      done = await confirmedWrite(
+        write,
+        (w) => invoke<string | null>('write_discards', { write: w }),
+        ask,
+        async (w, confirmed) => { await invoke('perform_write', { write: w, confirmed }); },
+      );
     } catch (e) {
       return String(e);
     }
-    await reloadAfterWrite();
+    if (done === 'written') await reloadAfterWrite();
     return null;
   }
 
   /** Puts the question before a write that discards work; resolves with the answer. */
-  function ask(lost: string): Promise<boolean> {
+  function ask(lost: string, write: Write): Promise<boolean> {
+    // A question still open is answered no: only one stands at a time.
+    question?.answer(false);
     return new Promise(resolve => {
       question = {
         lost,
+        action: actionLabel(write),
         answer: (confirmed) => {
           question = null;
           resolve(confirmed);
         },
       };
     });
-  }
-
-  /** Deletes a tag once the developer confirms it; the reload after shows it gone. */
-  async function removeTag(tag: Tag): Promise<void> {
-    try {
-      const done = await deleteTag(tag, ask, async (t, confirmed) => {
-        await invoke('delete_tag', { name: t.name, sha: t.sha, annotated: t.annotated, confirmed });
-      });
-      if (done === 'kept') return;
-    } catch (e) {
-      report(e);
-      return;
-    }
-    await reloadAfterWrite();
   }
 
   /** Selects the commit in `row`: the host computes its lineage, which the window read after
@@ -435,6 +436,10 @@
       </svg>
       Refresh
     </button>
+    <button class="tb-btn" onclick={() => (stashing = true)} disabled={!currentRepoPath}
+            title="Put the uncommitted changes aside as a stash">
+      Stash…
+    </button>
 
     <div class="repo-breadcrumb">
       <svg viewBox="0 0 16 16" fill="#4caf7d" class="repo-icon">
@@ -507,15 +512,18 @@
       {diffFile}
       {onSelectFile}
       onJumpToRow={jumpToRow}
-      onCreateTag={createTag}
       tags={selectedTags}
-      onDeleteTag={removeTag}
+      onWrite={performWrite}
     />
   </div><!-- end #top-pane -->
 </div><!-- end #main -->
 
+{#if stashing}
+  <StashDialog onStash={performWrite} onClose={() => (stashing = false)} />
+{/if}
+
 {#if question}
-  <ConfirmDialog lost={question.lost} action="Delete tag" onAnswer={question.answer} />
+  <ConfirmDialog lost={question.lost} action={question.action} onAnswer={question.answer} />
 {/if}
 
 <StatusBar

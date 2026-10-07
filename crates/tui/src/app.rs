@@ -3,9 +3,10 @@
 //! sidebar, graph with lineage highlight, search, commit detail with
 //! parent/child links, flat or tree file list, unified or side-by-side diff,
 //! theme switch, open and refresh — with guitar-style keys (ADR-0028). Every
-//! key reads but `t`, which tags the selected commit, and `d` on a tag in the
-//! sidebar, which deletes it once the developer has answered `y` (ADR-0033,
-//! ADR-0034).
+//! key reads but the writes (ADR-0033): `t` tags the selected commit, `s`
+//! stashes the uncommitted changes, `a` applies the selected stash, and `p`
+//! and `d` on it pop and drop it, as `d` on a tag in the sidebar deletes it,
+//! once the developer has answered `y` (ADR-0034).
 
 use crate::chips::RefContext;
 use crate::files::{self, FileRow, FileView};
@@ -17,7 +18,7 @@ use crate::theme::Theme;
 use ocelli_core::graph::LaidChunk;
 use ocelli_core::history::{History, Lineage};
 use ocelli_core::load::{Event, LoadSession};
-use ocelli_core::model::{CommitKind, DiffLine, FileChange, NodeJson, RepoRefs, Tag};
+use ocelli_core::model::{CommitKind, DiffLine, FileChange, NodeJson, RepoRefs, Tag, stash_index};
 use ocelli_core::port::{Confirmation, Write};
 use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use std::collections::HashSet;
@@ -146,6 +147,14 @@ pub struct TagPrompt {
     pub message: Option<String>,
 }
 
+/// The stash asked for after `s` (G-7): its message, and whether the untracked
+/// files go with it.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct StashPrompt {
+    pub message: String,
+    pub untracked: bool,
+}
+
 pub struct App {
     pub repo: PathBuf,
     pub status: String,
@@ -178,6 +187,8 @@ pub struct App {
     pub prompt: Option<String>,
     /// The tag being typed after `t`; `None` when no tag prompt is open.
     pub tag_prompt: Option<TagPrompt>,
+    /// The stash being described after `s`; `None` when no stash prompt is open.
+    pub stash_prompt: Option<StashPrompt>,
     pub quit: bool,
     /// Reads for the worker, drained by the event loop after every key.
     pub requests: Vec<Request>,
@@ -218,6 +229,7 @@ impl App {
             search: Search::default(),
             prompt: None,
             tag_prompt: None,
+            stash_prompt: None,
             quit: false,
             requests: Vec::new(),
             reload: None,
@@ -430,6 +442,9 @@ impl App {
         if self.tag_prompt.is_some() {
             return self.tag_key(key);
         }
+        if self.stash_prompt.is_some() {
+            return self.stash_key(key);
+        }
         if let Some(write) = self.confirm.take() {
             return self.answer(write, key);
         }
@@ -524,7 +539,7 @@ impl App {
         };
         let text = tag.message.as_mut().unwrap_or(&mut tag.name);
         match key.code {
-            KeyCode::Char(c) => text.push(c),
+            KeyCode::Char(c) if !key.modifiers.contains(KeyModifiers::CONTROL) => text.push(c),
             KeyCode::Backspace => {
                 text.pop();
             }
@@ -556,10 +571,66 @@ impl App {
     /// key keeps the work (ADR-0034).
     fn answer(&mut self, write: Write, key: KeyEvent) {
         if key.code == KeyCode::Char('y') {
-            self.status = "Deleting…".to_string();
+            self.status = "Writing…".to_string();
             self.write = Some((write, Confirmation::Given));
         } else {
-            self.status = "Nothing deleted".to_string();
+            self.status = "Nothing discarded".to_string();
+        }
+    }
+
+    fn stash_key(&mut self, key: KeyEvent) {
+        let Some(stash) = &mut self.stash_prompt else {
+            return;
+        };
+        match key.code {
+            KeyCode::Char(c) if !key.modifiers.contains(KeyModifiers::CONTROL) => {
+                stash.message.push(c)
+            }
+            KeyCode::Backspace => {
+                stash.message.pop();
+            }
+            KeyCode::Tab => stash.untracked = !stash.untracked,
+            KeyCode::Esc => self.stash_prompt = None,
+            KeyCode::Enter => {
+                let Some(stash) = self.stash_prompt.take() else {
+                    return;
+                };
+                self.status = "Stashing…".to_string();
+                let message = Some(stash.message).filter(|m| !m.trim().is_empty());
+                let write = Write::CreateStash {
+                    message,
+                    untracked: stash.untracked,
+                };
+                self.write = Some((write, Confirmation::Absent));
+            }
+            _ => {}
+        }
+    }
+
+    /// `a`, `p`, `d` on a selected stash node: applies it, and pops or drops it
+    /// once the developer has confirmed it.
+    fn on_stash(&mut self, key: KeyCode) {
+        let Some(node) = self.selected_node() else {
+            return;
+        };
+        let Some(index) = stash_index(&node.refs).filter(|_| node.kind == CommitKind::Stash) else {
+            return;
+        };
+        let commit = node.sha.clone();
+        let write = match key {
+            KeyCode::Char('d') => Write::DropStash { index, commit },
+            KeyCode::Char(c) => Write::ApplyStash {
+                index,
+                commit,
+                drop: c == 'p',
+            },
+            _ => return,
+        };
+        if write.discards().is_some() {
+            self.confirm = Some(write);
+        } else {
+            self.status = format!("Applying stash@{{{index}}}…");
+            self.write = Some((write, Confirmation::Absent));
         }
     }
 
@@ -731,6 +802,14 @@ impl App {
                 self.start_tag();
                 None
             }
+            KeyCode::Char('s') if !ctrl => {
+                self.stash_prompt = Some(StashPrompt::default());
+                None
+            }
+            KeyCode::Char(c @ ('a' | 'p' | 'd')) if !ctrl => {
+                self.on_stash(KeyCode::Char(c));
+                None
+            }
             KeyCode::Enter => {
                 if !self.active {
                     self.select(row);
@@ -776,6 +855,11 @@ impl App {
             KeyCode::Char('k') | KeyCode::Up => self.link = self.link.saturating_sub(1),
             KeyCode::Char('y') => self.copy_sha(),
             KeyCode::Char('t') => self.start_tag(),
+            KeyCode::Char(c @ ('a' | 'p' | 'd'))
+                if !key.modifiers.contains(KeyModifiers::CONTROL) =>
+            {
+                self.on_stash(KeyCode::Char(c))
+            }
             KeyCode::Enter => {
                 let Some(sha) = links.get(self.link) else {
                     return;
@@ -1367,7 +1451,7 @@ pub(crate) mod tests {
             press(&mut app, answer);
             assert_eq!(app.confirm, None);
             assert_eq!(app.write, None, "{answer:?}");
-            assert_eq!(app.status, "Nothing deleted");
+            assert_eq!(app.status, "Nothing discarded");
         }
     }
 
@@ -1378,6 +1462,96 @@ pub(crate) mod tests {
         app.side.selected = 0;
         press(&mut app, KeyCode::Char('d'));
         assert_eq!(app.confirm, None);
+    }
+
+    #[test]
+    // Verifies: ADR-0033, G-7
+    fn s_asks_for_a_message_and_the_untracked_switch_and_stashes() {
+        let mut app = loaded_app();
+        press(&mut app, KeyCode::Char('s'));
+        type_text(&mut app, "wip");
+        press(&mut app, KeyCode::Tab);
+        press(&mut app, KeyCode::Enter);
+        assert_eq!(app.stash_prompt, None);
+        let stash = Write::CreateStash {
+            message: Some("wip".into()),
+            untracked: true,
+        };
+        assert_eq!(app.write, Some((stash, Confirmation::Absent)));
+
+        let mut app = loaded_app();
+        press(&mut app, KeyCode::Char('s'));
+        press(&mut app, KeyCode::Enter);
+        let stash = Write::CreateStash {
+            message: None,
+            untracked: false,
+        };
+        assert_eq!(
+            app.write,
+            Some((stash, Confirmation::Absent)),
+            "untracked off by default"
+        );
+    }
+
+    /// A history whose newest node is the stash entry `stash@{1}` on `a`, selected.
+    fn on_a_stash() -> App {
+        let mut stash = commit("s", 9, &["a"], &["📦 stash@{1}"]);
+        stash.kind = CommitKind::Stash;
+        let mut app = App::new("/repo".into(), Glyphs::Unicode);
+        let chunk = Layout::new().lay_out(vec![stash, commit("a", 1, &[], &[])]);
+        first_chunk(&mut app, chunk, RepoRefs::default());
+        assert_eq!(sha(&app), "s");
+        app
+    }
+
+    #[test]
+    // Verifies: ADR-0034, G-7
+    fn a_applies_the_selected_stash_and_p_and_d_ask_first() {
+        let mut app = on_a_stash();
+        press(&mut app, KeyCode::Char('a'));
+        let apply = |drop| Write::ApplyStash {
+            index: 1,
+            commit: "s".into(),
+            drop,
+        };
+        assert_eq!(app.confirm, None, "applying keeps the stash");
+        assert_eq!(app.write.take(), Some((apply(false), Confirmation::Absent)));
+
+        press(&mut app, KeyCode::Char('p'));
+        assert_eq!(app.confirm, Some(apply(true)));
+        press(&mut app, KeyCode::Char('y'));
+        assert_eq!(app.write.take(), Some((apply(true), Confirmation::Given)));
+
+        let drop = Write::DropStash {
+            index: 1,
+            commit: "s".into(),
+        };
+        press(&mut app, KeyCode::Char('d'));
+        assert_eq!(app.confirm, Some(drop));
+        press(&mut app, KeyCode::Char('n'));
+        assert_eq!(app.write, None, "declined, nothing written");
+        assert_eq!(app.status, "Nothing discarded");
+    }
+
+    #[test]
+    fn a_stash_key_held_with_ctrl_writes_nothing() {
+        let mut app = on_a_stash();
+        let ctrl = |code| KeyEvent::new(code, KeyModifiers::CONTROL);
+        app.on_key(ctrl(KeyCode::Char('s')));
+        assert_eq!(app.stash_prompt, None);
+        app.focus = Focus::Detail;
+        app.on_key(ctrl(KeyCode::Char('d')));
+        assert_eq!(app.confirm, None);
+    }
+
+    #[test]
+    fn stash_keys_on_a_commit_do_nothing() {
+        let mut app = loaded_app();
+        for key in ['a', 'p', 'd'] {
+            press(&mut app, KeyCode::Char(key));
+        }
+        assert_eq!(app.confirm, None);
+        assert_eq!(app.write, None);
     }
 
     #[test]
