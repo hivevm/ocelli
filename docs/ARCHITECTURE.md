@@ -25,7 +25,7 @@ than anywhere else, and none beats one that has stopped being true.
 ```
 
 Ocelli reads repositories on the local file system through git2, and writes to them through git2
-only what the developer asks for, a tag or a stash
+only what the developer asks for, a tag, a stash, or a commit
 ([ADR-0033](adr/0033-writes-what-git-writes.md)). It
 makes no network request: the one exception, Gravatar avatars in the desktop application, is off
 until the developer turns it on ([ADR-0023](adr/0023-no-egress-hardened-webview.md)). The web
@@ -97,14 +97,13 @@ golden path and the test pattern an agent copies from are named here.
   [ADR-0031](adr/0031-front-ends-read-row-windows.md)). Once a load ends it hands the memory the
   load freed back to the system through glibc's `malloc_trim`, the workspace's one `unsafe` block
   outside its tests.
-- **Web interface** (`src-web`) — Svelte and TypeScript: the canvas, which holds only the window
-  of rows it draws, the sidebar, the commit detail with its tag form and stash actions, the diff
-  overlay, the search field, the dialogs that describe a stash and confirm a write that discards
-  work, and themes; `writes.ts` holds the writes it hands the host, one at a time
-  ([ADR-0022](adr/0022-svelte-web-interface.md),
+- **Web interface** (`src-web`) — Svelte and TypeScript: the canvas, which holds only the window of
+  rows it draws, the sidebar, the commit detail with its tag form, its stash actions, and the
+  working-directory node's stage toggles and commit form, the diff overlay, the search field, the
+  dialogs that describe a stash and confirm a write that discards work, and themes; `writes.ts`
+  holds the writes it hands the host, one at a time ([ADR-0022](adr/0022-svelte-web-interface.md),
   [ADR-0017](adr/0017-virtual-rendering.md), [ADR-0020](adr/0020-diff-overlay-and-file-list.md),
-  [ADR-0021](adr/0021-themes-tokens-and-palettes.md),
-  [ADR-0026](adr/0026-repository-sidebar.md)).
+  [ADR-0021](adr/0021-themes-tokens-and-palettes.md), [ADR-0026](adr/0026-repository-sidebar.md)).
 
 **The golden path** is the core's chunked layout and its `History` behind the git adapter's
 chunked load: `crates/core/src/graph.rs` and `crates/core/src/history.rs`, fed by `load_chunks`

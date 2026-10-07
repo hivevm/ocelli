@@ -118,10 +118,28 @@ fn a_fixed_repository_loads_as_the_reference_did() {
         }
     }
     assert_eq!(graph, expected("repo-graph-dirty.json"));
-    assert_eq!(
-        json(&reader.load_commit_files(&dir, WORKDIR_SHA).unwrap()),
-        expected("repo-files-workdir.json")
+    // How much of each change is staged, and the content shown, came after the reference
+    // implementation (G-4).
+    let mut files = json(&reader.load_commit_files(&dir, WORKDIR_SHA).unwrap());
+    let staged: Vec<_> = files
+        .as_array_mut()
+        .unwrap()
+        .iter_mut()
+        .map(|f| {
+            let f = f.as_object_mut().unwrap();
+            let shown = f.remove("shown").unwrap();
+            assert!(
+                shown["workdir"].is_string(),
+                "both files are in the working directory"
+            );
+            f.remove("staged").unwrap()
+        })
+        .collect();
+    assert!(
+        staged.iter().all(|s| s == "no"),
+        "nothing is staged: {staged:?}"
     );
+    assert_eq!(files, expected("repo-files-workdir.json"));
     assert_eq!(
         json(&reader.load_file_diff(&dir, WORKDIR_SHA, "a.txt").unwrap()),
         expected("repo-diff-workdir.json")

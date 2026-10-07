@@ -154,6 +154,14 @@ fn writing_a_repository_runs_none_of_its_programs() {
     // Outside the repository, so that stashing the untracked files leaves them be.
     let tools = Scratch::new("programs-ran");
     let markers = programs::set_everywhere(&scratch.0, &tools.0);
+    // Ocelli refuses what these would have git sign (ADR-0033); the writes here go through.
+    let mut config = git2::Repository::open(&scratch.0)
+        .unwrap()
+        .config()
+        .unwrap();
+    for (key, _) in programs::SWITCHES {
+        config.remove(key).unwrap();
+    }
 
     GitWriter
         .write(&scratch.0, &tag("v1", &one, Some("release")))
@@ -174,6 +182,18 @@ fn writing_a_repository_runs_none_of_its_programs() {
         .unwrap();
     GitWriter
         .write(&scratch.0, &apply(0, &stash, true))
+        .unwrap();
+    GitWriter
+        .write(&scratch.0, &stage_in(&scratch.0, "f"))
+        .unwrap();
+    GitWriter
+        .write(&scratch.0, &unstage_in(&scratch.0, "f"))
+        .unwrap();
+    GitWriter
+        .write(&scratch.0, &stage_in(&scratch.0, "f"))
+        .unwrap();
+    GitWriter
+        .write(&scratch.0, &commit_on(&one, "commit"))
         .unwrap();
     let ran = markers.ran();
     assert!(ran.is_empty(), "programs ran: {ran:?}");
@@ -694,4 +714,275 @@ fn each_stash_node_carries_its_place_in_the_stash() {
         (stash_at(&scratch.0, 1), Some(1)),
     ];
     assert_eq!(places, expected);
+}
+
+/// The content of `path` in the working directory and in the index, read with git2, which runs
+/// none of the programs the repository names, as the git binary would.
+fn shown_in(dir: &Path, path: &str) -> (Option<String>, Option<String>) {
+    let workdir = dir.join(path).symlink_metadata().is_ok().then(|| {
+        git2::Oid::hash_file(git2::ObjectType::Blob, dir.join(path))
+            .unwrap()
+            .to_string()
+    });
+    let index = git2::Repository::open(dir)
+        .unwrap()
+        .index()
+        .unwrap()
+        .get_path(Path::new(path), 0)
+        .map(|e| e.id.to_string());
+    (workdir, index)
+}
+
+/// Staging `path` as shown now.
+fn stage_in(dir: &Path, path: &str) -> Write {
+    Write::StageFile {
+        path: path.to_string(),
+        shown: shown_in(dir, path).0,
+    }
+}
+
+/// Unstaging `path` as shown now.
+fn unstage_in(dir: &Path, path: &str) -> Write {
+    Write::UnstageFile {
+        path: path.to_string(),
+        shown: shown_in(dir, path).1,
+    }
+}
+
+fn commit_on(head: &str, message: &str) -> Write {
+    Write::Commit {
+        message: message.to_string(),
+        head: Some(head.to_string()),
+    }
+}
+
+fn staged_names(dir: &Path) -> String {
+    git(dir, &["diff", "--cached", "--name-status"])
+}
+
+#[test]
+// Verifies: ADR-0033, G-4
+fn whole_files_are_staged_and_unstaged_as_git_add_and_restore_do() {
+    let scratch = with_file("stage");
+    write_file(&scratch.0, "f", "changed\n");
+    write_file(&scratch.0, "dir/new", "new\n");
+    write_file(&scratch.0, "gone", "x\n");
+    git(&scratch.0, &["add", "gone"]);
+    git(&scratch.0, &["commit", "--quiet", "-m", "gone"]);
+    std::fs::remove_file(scratch.0.join("gone")).unwrap();
+
+    for path in ["f", "dir/new", "gone"] {
+        GitWriter
+            .write(&scratch.0, &stage_in(&scratch.0, path))
+            .unwrap();
+    }
+    assert_eq!(staged_names(&scratch.0), "A\tdir/new\nM\tf\nD\tgone");
+    for path in ["f", "dir/new", "gone"] {
+        GitWriter
+            .write(&scratch.0, &unstage_in(&scratch.0, path))
+            .unwrap();
+    }
+    assert_eq!(staged_names(&scratch.0), "");
+    assert_eq!(
+        std::fs::read_to_string(scratch.0.join("f")).unwrap(),
+        "changed\n"
+    );
+}
+
+#[test]
+fn a_file_without_a_change_to_stage_or_unstage_is_refused() {
+    let scratch = with_file("stage-refused");
+    let error = GitWriter
+        .write(&scratch.0, &stage_in(&scratch.0, "f"))
+        .unwrap_err();
+    assert!(error.to_string().contains("no change to stage"), "{error}");
+    let error = GitWriter
+        .write(&scratch.0, &unstage_in(&scratch.0, "f"))
+        .unwrap_err();
+    assert!(error.to_string().contains("not staged"), "{error}");
+    assert_eq!(status(&scratch.0), "");
+}
+
+#[test]
+// Verifies: ADR-0033, G-4
+fn the_index_is_committed_by_the_configured_identity_on_the_head_shown() {
+    let scratch = with_file("commit");
+    let head = git(&scratch.0, &["rev-parse", "HEAD"]);
+    write_file(&scratch.0, "f", "changed\n");
+    write_file(&scratch.0, "other", "not staged\n");
+    GitWriter
+        .write(&scratch.0, &stage_in(&scratch.0, "f"))
+        .unwrap();
+    let made = GitWriter
+        .write(
+            &scratch.0,
+            &commit_on(&head, "Change f\n\n# kept, as git commit -m keeps it"),
+        )
+        .unwrap();
+    assert_eq!(made, Some(git(&scratch.0, &["rev-parse", "HEAD"])));
+    assert_eq!(git(&scratch.0, &["rev-parse", "HEAD^"]), head);
+    assert_eq!(
+        git(&scratch.0, &["log", "-1", "--format=%an %s"]),
+        "Ada Change f"
+    );
+    let expected = Command::new("git")
+        .args(["stripspace"])
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .spawn()
+        .and_then(|mut child| {
+            use std::io::Write as _;
+            child
+                .stdin
+                .take()
+                .unwrap()
+                .write_all(b"Change f\n\n# kept, as git commit -m keeps it")?;
+            child.wait_with_output()
+        })
+        .unwrap();
+    assert_eq!(
+        git(&scratch.0, &["log", "-1", "--format=%B"]) + "\n",
+        String::from_utf8(expected.stdout).unwrap()
+    );
+    assert_eq!(status(&scratch.0), "?? other", "what was not staged stays");
+}
+
+#[test]
+// Verifies: ADR-0033, G-4
+fn a_commit_is_refused_with_nothing_changed() {
+    let scratch = with_file("commit-refused");
+    let head = git(&scratch.0, &["rev-parse", "HEAD"]);
+    let error = GitWriter
+        .write(&scratch.0, &commit_on(&head, "nothing"))
+        .unwrap_err();
+    assert!(error.to_string().contains("nothing is staged"), "{error}");
+
+    write_file(&scratch.0, "f", "changed\n");
+    GitWriter
+        .write(&scratch.0, &stage_in(&scratch.0, "f"))
+        .unwrap();
+    let state = |d: &Path| {
+        let ignored = git(d, &["status", "--porcelain", "--ignored"]);
+        (staged_names(d), git(d, &["rev-parse", "HEAD"]), ignored)
+    };
+    let before = state(&scratch.0);
+    let moved = "0123456789abcdef0123456789abcdef01234567";
+    for (write, why) in [
+        (commit_on(moved, "msg"), "no longer the one shown"),
+        (commit_on(&head, "  \n"), "needs a message"),
+    ] {
+        let error = GitWriter.write(&scratch.0, &write).unwrap_err();
+        assert!(error.to_string().contains(why), "{error}");
+    }
+    git(&scratch.0, &["config", "commit.gpgSign", "true"]);
+    let error = GitWriter
+        .write(&scratch.0, &commit_on(&head, "msg"))
+        .unwrap_err();
+    assert!(error.to_string().contains("commit.gpgSign"), "{error}");
+    assert_eq!(state(&scratch.0), before);
+}
+
+#[test]
+// Verifies: ADR-0033
+fn an_annotated_tag_is_refused_where_tags_are_signed_and_a_lightweight_one_is_not() {
+    let scratch = Scratch::new("tag-signed");
+    let (one, _) = repository(&scratch.0);
+    git(&scratch.0, &["config", "tag.gpgSign", "true"]);
+    let error = GitWriter
+        .write(&scratch.0, &tag("v1", &one, Some("release")))
+        .unwrap_err();
+    assert!(error.to_string().contains("tag.gpgSign"), "{error}");
+    assert_eq!(tags(&scratch.0), "");
+    GitWriter
+        .write(&scratch.0, &tag("mark", &one, None))
+        .unwrap();
+}
+
+#[test]
+// Verifies: ADR-0033, G-4
+fn a_file_changed_since_it_was_shown_is_neither_staged_nor_unstaged() {
+    let scratch = with_file("stage-moved");
+    write_file(&scratch.0, "f", "shown\n");
+    let shown = stage_in(&scratch.0, "f");
+    write_file(&scratch.0, "f", "changed after\n");
+    let error = GitWriter.write(&scratch.0, &shown).unwrap_err();
+    assert!(
+        error.to_string().contains("changed since it was shown"),
+        "{error}"
+    );
+    assert_eq!(staged_names(&scratch.0), "");
+
+    GitWriter
+        .write(&scratch.0, &stage_in(&scratch.0, "f"))
+        .unwrap();
+    let shown = unstage_in(&scratch.0, "f");
+    write_file(&scratch.0, "f", "staged again\n");
+    git(&scratch.0, &["add", "f"]);
+    let error = GitWriter.write(&scratch.0, &shown).unwrap_err();
+    assert!(
+        error.to_string().contains("changed since it was shown"),
+        "{error}"
+    );
+    assert_eq!(staged_names(&scratch.0), "M\tf");
+}
+
+#[test]
+// Verifies: ADR-0033, G-4
+fn a_commit_is_refused_while_a_merge_is_in_progress() {
+    let scratch = with_file("merging");
+    git(&scratch.0, &["switch", "--quiet", "-c", "side"]);
+    write_file(&scratch.0, "side", "side\n");
+    git(&scratch.0, &["add", "side"]);
+    git(&scratch.0, &["commit", "--quiet", "-m", "side"]);
+    git(&scratch.0, &["switch", "--quiet", "main"]);
+    git(
+        &scratch.0,
+        &["merge", "--quiet", "--no-commit", "--no-ff", "side"],
+    );
+    let head = git(&scratch.0, &["rev-parse", "HEAD"]);
+    let before = git(&scratch.0, &["status", "--porcelain", "--ignored"]);
+    let error = GitWriter
+        .write(&scratch.0, &commit_on(&head, "merge"))
+        .unwrap_err();
+    assert!(
+        error.to_string().contains("a merge is in progress"),
+        "{error}"
+    );
+    assert_eq!(git(&scratch.0, &["rev-parse", "HEAD"]), head);
+    assert!(scratch.0.join(".git/MERGE_HEAD").exists());
+    assert_eq!(
+        git(&scratch.0, &["status", "--porcelain", "--ignored"]),
+        before
+    );
+}
+
+#[test]
+fn a_commit_cleans_its_message_as_commit_cleanup_says() {
+    let scratch = with_file("cleanup");
+    git(&scratch.0, &["config", "commit.cleanup", "strip"]);
+    let head = git(&scratch.0, &["rev-parse", "HEAD"]);
+    write_file(&scratch.0, "f", "changed\n");
+    GitWriter
+        .write(&scratch.0, &stage_in(&scratch.0, "f"))
+        .unwrap();
+    GitWriter
+        .write(&scratch.0, &commit_on(&head, "# gone\nkept"))
+        .unwrap();
+    assert_eq!(git(&scratch.0, &["log", "-1", "--format=%B"]), "kept");
+}
+
+#[test]
+// Verifies: ADR-0033
+fn an_annotated_tag_is_refused_where_annotated_tags_are_always_signed() {
+    let scratch = Scratch::new("force-sign");
+    let (one, _) = repository(&scratch.0);
+    git(&scratch.0, &["config", "tag.forceSignAnnotated", "true"]);
+    let error = GitWriter
+        .write(&scratch.0, &tag("v1", &one, Some("release")))
+        .unwrap_err();
+    assert!(
+        error.to_string().contains("tag.forceSignAnnotated"),
+        "{error}"
+    );
+    assert_eq!(tags(&scratch.0), "");
 }
