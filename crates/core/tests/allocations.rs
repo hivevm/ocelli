@@ -70,6 +70,7 @@ fn history() -> Vec<CommitData> {
         refs: vec![],
         parent_shas: parents,
         kind: CommitKind::Commit,
+        stash: None,
     };
     let mut commits = vec![commit(1, vec![])];
     let mut main = 1;

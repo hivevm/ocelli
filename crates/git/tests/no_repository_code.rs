@@ -1,10 +1,9 @@
 //! Verifies: ADR-0019, Q-4
 //!
 //! Opening a repository must not run code the repository brings. The repository here names a
-//! program in every place Git would run one: every hook, `core.fsmonitor`, an external diff, a
-//! textconv driver, a filter driver, and a pager. Each program would leave a marker file. Loading
-//! the commit graph, the refs, the changed files, and the diffs, of a commit and of the dirty
-//! working tree, leaves none.
+//! program in every place Git would run one, from the list both tests of Q-4 share (`programs`).
+//! Each program would leave a marker file. Loading the commit graph, the refs, the changed files,
+//! and the diffs, of a commit and of the dirty working tree, leaves none.
 
 #![cfg(unix)]
 
@@ -14,31 +13,7 @@ use ocelli_core::port::RepositoryReader;
 use ocelli_git::GitReader;
 use std::path::{Path, PathBuf};
 
-const HOOKS: &[&str] = &[
-    "applypatch-msg",
-    "pre-applypatch",
-    "post-applypatch",
-    "pre-commit",
-    "pre-merge-commit",
-    "prepare-commit-msg",
-    "commit-msg",
-    "post-commit",
-    "pre-rebase",
-    "post-checkout",
-    "post-merge",
-    "pre-push",
-    "pre-receive",
-    "update",
-    "post-receive",
-    "post-update",
-    "reference-transaction",
-    "push-to-checkout",
-    "pre-auto-gc",
-    "post-rewrite",
-    "sendemail-validate",
-    "fsmonitor-watchman",
-    "post-index-change",
-];
+mod programs;
 
 struct Scratch(PathBuf);
 
@@ -48,18 +23,12 @@ impl Drop for Scratch {
     }
 }
 
-fn program(marker: &Path, name: &str) -> String {
-    format!("sh -c 'touch {}/{name}'", marker.display())
-}
-
 #[test]
 fn reading_a_repository_runs_none_of_its_programs() {
     let root = std::env::temp_dir().join(format!("ocelli-no-repo-code-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&root);
     let _guard = Scratch(root.clone());
     let dir = root.join("repo");
-    let markers = root.join("markers");
-    std::fs::create_dir_all(&markers).unwrap();
 
     let repo = git2::Repository::init(&dir).unwrap();
     let sig =
@@ -84,38 +53,7 @@ fn reading_a_repository_runs_none_of_its_programs() {
         .unwrap();
 
     // Name a program everywhere Git would run one, only now that the history exists.
-    let hooks = root.join("hooks");
-    std::fs::create_dir_all(&hooks).unwrap();
-    for hook in HOOKS {
-        let path = hooks.join(hook);
-        std::fs::write(
-            &path,
-            format!("#!/bin/sh\ntouch {}/hook-{hook}\n", markers.display()),
-        )
-        .unwrap();
-        use std::os::unix::fs::PermissionsExt;
-        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
-        std::fs::copy(&path, dir.join(".git/hooks").join(hook)).unwrap();
-    }
-    let mut cfg = repo.config().unwrap();
-    cfg.set_str("core.hooksPath", hooks.to_str().unwrap())
-        .unwrap();
-    cfg.set_str("core.fsmonitor", &program(&markers, "fsmonitor"))
-        .unwrap();
-    cfg.set_str("diff.external", &program(&markers, "external-diff"))
-        .unwrap();
-    cfg.set_str("diff.evil.command", &program(&markers, "diff-driver"))
-        .unwrap();
-    cfg.set_str("diff.evil.textconv", &program(&markers, "textconv"))
-        .unwrap();
-    cfg.set_str("filter.evil.clean", &program(&markers, "clean"))
-        .unwrap();
-    cfg.set_str("filter.evil.smudge", &program(&markers, "smudge"))
-        .unwrap();
-    cfg.set_str("filter.evil.process", &program(&markers, "process"))
-        .unwrap();
-    cfg.set_str("core.pager", &program(&markers, "pager"))
-        .unwrap();
+    let markers = programs::set_everywhere(&dir, &root.join("tools"));
     std::fs::write(dir.join("a.txt"), "one\ntwo\nthree\n").unwrap();
     std::fs::write(dir.join("untracked.txt"), "new\n").unwrap();
 
@@ -134,31 +72,67 @@ fn reading_a_repository_runs_none_of_its_programs() {
     reader.load_commit_files(&dir, WORKDIR_SHA).unwrap();
     reader.load_file_diff(&dir, WORKDIR_SHA, "a.txt").unwrap();
 
-    let ran: Vec<_> = std::fs::read_dir(&markers)
-        .unwrap()
-        .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
-        .collect();
+    let ran = markers.ran();
     assert!(ran.is_empty(), "reading the repository ran {ran:?}");
 }
 
 #[test]
-fn a_marker_program_leaves_its_marker_when_run() {
-    let root = std::env::temp_dir().join(format!("ocelli-marker-{}", std::process::id()));
+// Verifies: Q-4
+fn every_place_of_the_list_is_set_and_each_program_leaves_its_marker() {
+    let root = std::env::temp_dir().join(format!("ocelli-programs-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&root);
     let _guard = Scratch(root.clone());
-    std::fs::create_dir_all(&root).unwrap();
-    let status = std::process::Command::new("sh")
-        .arg("-c")
-        .arg(
-            program(&root, "probe")
-                .trim_start_matches("sh -c ")
-                .trim_matches('\''),
-        )
-        .status()
-        .unwrap();
-    assert!(status.success());
+    let dir = root.join("repo");
+    git2::Repository::init(&dir).unwrap();
+    let markers = programs::set_everywhere(&dir, &root.join("tools"));
+
+    let config = git2::Repository::open(&dir).unwrap().config().unwrap();
+    for key in programs::PROGRAMS {
+        let program = config.get_string(key).unwrap();
+        let status = std::process::Command::new(&program).status().unwrap();
+        assert!(status.success(), "{key}");
+    }
+    for (key, value) in programs::SWITCHES {
+        assert_eq!(config.get_string(key).unwrap(), *value, "{key}");
+    }
+    let hooks = PathBuf::from(config.get_string("core.hooksPath").unwrap());
+    for hook in programs::HOOKS {
+        for path in [hooks.join(hook), dir.join(".git/hooks").join(hook)] {
+            assert!(
+                std::process::Command::new(&path)
+                    .status()
+                    .unwrap()
+                    .success()
+            );
+        }
+    }
+    let attributes = std::fs::read_to_string(dir.join(".git/info/attributes")).unwrap();
+    assert_eq!(attributes, programs::ATTRIBUTES);
+
+    let mut ran = markers.ran();
+    ran.sort();
+    let mut expected: Vec<String> = programs::PROGRAMS.iter().map(|k| k.to_string()).collect();
+    expected.extend(programs::HOOKS.iter().map(|h| format!("hook-{h}")));
+    expected.sort();
+    assert_eq!(
+        ran, expected,
+        "every program leaves the marker named after it"
+    );
+}
+
+#[test]
+// Verifies: Q-4
+fn the_list_holds_every_hook_git_documents() {
+    let Some(documented) = programs::documented_hooks() else {
+        eprintln!("git's manual is not installed here; the hooks are not compared");
+        return;
+    };
+    let missing: Vec<_> = documented
+        .iter()
+        .filter(|h| !programs::HOOKS.contains(&h.as_str()))
+        .collect();
     assert!(
-        root.join("probe").exists(),
-        "the probe proves the markers can appear"
+        missing.is_empty(),
+        "hooks git documents that the list lacks: {missing:?}"
     );
 }

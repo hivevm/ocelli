@@ -4,7 +4,7 @@
 //! the visible window of the graph is rasterised each frame (ADR-0017);
 //! everything else is read from the [`App`] state.
 
-use crate::app::{App, Focus};
+use crate::app::{App, Focus, Modal, StashPrompt, TagPrompt};
 use crate::chips::{Planned, RefKind, chip_width, chips, plan};
 use crate::diffsplit::{CellKind, SplitRow, split_rows};
 use crate::files::{FileRow, FileView};
@@ -12,6 +12,7 @@ use crate::raster::{self, rasterize};
 use crate::sidebar::{self, Look, RailRow, RowKind};
 use crate::theme::{Palette, lane, palette};
 use ocelli_core::model::{CommitKind, DiffLine, DiffLineKind, FileStatus};
+use ocelli_core::port::Write;
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::style::{Modifier, Style};
@@ -69,17 +70,12 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
     if app.search.editing {
         draw_search_panel(frame, app, p, graph);
     }
-    if app.prompt.is_some() {
-        draw_prompt(frame, app, p, main);
-    }
-    if app.tag_prompt.is_some() {
-        draw_tag_prompt(frame, app, p, main);
-    }
-    if app.stash_prompt.is_some() {
-        draw_stash_prompt(frame, app, p, main);
-    }
-    if app.confirm.is_some() {
-        draw_confirm(frame, app, p, main);
+    match &app.modal {
+        Some(Modal::Open(path)) => draw_prompt(frame, path, p, main),
+        Some(Modal::Tag(tag)) => draw_tag_prompt(frame, tag, p, main),
+        Some(Modal::Stash(stash)) => draw_stash_prompt(frame, stash, p, main),
+        Some(Modal::Confirm(write)) => draw_confirm(frame, write, p, main),
+        None => {}
     }
     draw_status(frame, app, p, status);
 }
@@ -738,8 +734,7 @@ fn draw_search_panel(frame: &mut Frame, app: &App, p: &Palette, graph: Rect) {
     );
 }
 
-fn draw_prompt(frame: &mut Frame, app: &App, p: &Palette, main: Rect) {
-    let Some(text) = &app.prompt else { return };
+fn draw_prompt(frame: &mut Frame, text: &str, p: &Palette, main: Rect) {
     let lines = vec![
         input_line(p, "", text, true),
         Line::styled("Enter open · Esc cancel", Style::new().fg(p.text_dim)),
@@ -749,8 +744,7 @@ fn draw_prompt(frame: &mut Frame, app: &App, p: &Palette, main: Rect) {
 
 /// The tag prompt (G-7): the name, then the message, the line being typed
 /// carrying the cursor.
-fn draw_tag_prompt(frame: &mut Frame, app: &App, p: &Palette, main: Rect) {
-    let Some(tag) = &app.tag_prompt else { return };
+fn draw_tag_prompt(frame: &mut Frame, tag: &TagPrompt, p: &Palette, main: Rect) {
     let typing_name = tag.message.is_none();
     let mut lines = vec![input_line(p, "Name     ", &tag.name, typing_name)];
     if let Some(message) = &tag.message {
@@ -770,8 +764,8 @@ fn draw_tag_prompt(frame: &mut Frame, app: &App, p: &Palette, main: Rect) {
 
 /// The question before a write that discards work, naming what is lost
 /// (ADR-0034).
-fn draw_confirm(frame: &mut Frame, app: &App, p: &Palette, main: Rect) {
-    let Some(lost) = app.confirm.as_ref().and_then(|w| w.discards()) else {
+fn draw_confirm(frame: &mut Frame, write: &Write, p: &Palette, main: Rect) {
+    let Some(lost) = write.discards() else {
         return;
     };
     let lines = vec![
@@ -792,10 +786,7 @@ fn draw_confirm(frame: &mut Frame, app: &App, p: &Palette, main: Rect) {
 
 /// The stash prompt (G-7): the message, and whether the untracked files go
 /// with the changes.
-fn draw_stash_prompt(frame: &mut Frame, app: &App, p: &Palette, main: Rect) {
-    let Some(stash) = &app.stash_prompt else {
-        return;
-    };
+fn draw_stash_prompt(frame: &mut Frame, stash: &StashPrompt, p: &Palette, main: Rect) {
     let untracked = if stash.untracked { "[x]" } else { "[ ]" };
     let lines = vec![
         input_line(p, "Message    ", &stash.message, true),
@@ -838,21 +829,12 @@ fn draw_dialog(frame: &mut Frame, p: &Palette, main: Rect, title: String, lines:
 // ── Status bar ──────────────────────────────────────────────────────────────
 
 fn hints(app: &App) -> &'static str {
-    if app.prompt.is_some() {
-        return "type a path";
-    }
-    if app.confirm.is_some() {
-        return "y goes ahead · any other key keeps it";
-    }
-    if app.stash_prompt.is_some() {
-        return "type a message, or none";
-    }
-    if let Some(tag) = &app.tag_prompt {
-        return if tag.message.is_none() {
-            "type the tag's name"
-        } else {
-            "type a message, or none"
-        };
+    match &app.modal {
+        Some(Modal::Open(_)) => return "type a path",
+        Some(Modal::Confirm(_)) => return "y goes ahead · any other key keeps it",
+        Some(Modal::Tag(tag)) if tag.message.is_none() => return "type the tag's name",
+        Some(Modal::Tag(_) | Modal::Stash(_)) => return "type a message, or none",
+        None => {}
     }
     if app.search.editing {
         return "Enter/⇧Enter next/prev · ↑/↓ · Tab keep · Esc clear";
@@ -1167,11 +1149,11 @@ mod tests {
     // Verifies: ADR-0034
     fn the_question_before_deleting_names_what_is_lost() {
         let mut app = loaded_app();
-        app.confirm = Some(ocelli_core::port::Write::DeleteTag {
+        app.modal = Some(Modal::Confirm(Write::DeleteTag {
             name: "v1".into(),
             commit: "c".into(),
             annotated: true,
-        });
+        }));
         let text = screen(&mut app, 160, 20).join("\n");
         assert!(
             text.contains("This discards the tag v1 and its message")

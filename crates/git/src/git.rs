@@ -109,6 +109,7 @@ pub fn load_chunks(
             refs,
             parent_shas,
             kind: CommitKind::Commit,
+            stash: None,
         });
 
         count += 1;
@@ -211,6 +212,7 @@ fn load_stashes(repo: &mut Repository, commits: &mut Vec<CommitData>) {
             refs: vec![format!("📦 stash@{{{}}}", index)],
             parent_shas,
             kind: CommitKind::Stash,
+            stash: Some(index),
         });
     }
 }
@@ -245,6 +247,7 @@ fn working_dir_node(repo: &Repository) -> Option<CommitData> {
         refs: Vec::new(),
         parent_shas: vec![head_commit.id().to_string()],
         kind: CommitKind::Working,
+        stash: None,
     })
 }
 
@@ -495,6 +498,7 @@ mod tests {
             refs: vec![],
             parent_shas: vec![],
             kind,
+            stash: None,
         }
     }
 

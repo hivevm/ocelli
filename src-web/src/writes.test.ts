@@ -1,7 +1,7 @@
 // Verifies: ADR-0033, ADR-0034, G-7, Q-6
 import { describe, expect, test } from 'bun:test';
 import {
-  Reselect, actionLabel, confirmedWrite, stashIndex, stashRequest, tagRequest, type Write,
+  OneWrite, actionLabel, confirmedWrite, stashRequest, tagRequest, type Write,
 } from './writes.ts';
 
 describe('tagRequest', () => {
@@ -19,45 +19,10 @@ describe('tagRequest', () => {
   });
 });
 
-describe('Reselect', () => {
-  test('looks the commit up only in loads newer than the write', () => {
-    const reselect = new Reselect();
-    reselect.remember('c', 3);
-    expect(reselect.wanted({ generation: 3, loading: true })).toBeNull();
-    expect(reselect.wanted({ generation: 4, loading: true })).toBe('c');
-  });
-
-  test('selects the commit once laid out, and only once', () => {
-    const reselect = new Reselect();
-    reselect.remember('c', 1);
-    const growing = { generation: 2, loading: true };
-    expect(reselect.settle('c', false, growing)).toBe(false);
-    expect(reselect.wanted(growing)).toBe('c');
-    expect(reselect.settle('c', true, growing)).toBe(true);
-    expect(reselect.settle('c', true, growing)).toBe(false);
-    expect(reselect.wanted(growing)).toBeNull();
-  });
-
-  test('gives the commit up when the reload ends without it or another is selected', () => {
-    const reselect = new Reselect();
-    reselect.remember('c', 1);
-    expect(reselect.settle('c', false, { generation: 2, loading: false })).toBe(false);
-    expect(reselect.wanted({ generation: 2, loading: false })).toBeNull();
-    reselect.remember('d', 2);
-    reselect.forget();
-    expect(reselect.wanted({ generation: 3, loading: true })).toBeNull();
-  });
-});
-
 describe('stashes', () => {
   test('a blank message is none, the untracked switch as set', () => {
     expect(stashRequest(' ', true)).toEqual({ kind: 'createStash', message: null, untracked: true });
     expect(stashRequest('wip', false)).toEqual({ kind: 'createStash', message: 'wip', untracked: false });
-  });
-
-  test("a stash node's place is read from its ref", () => {
-    expect(stashIndex(['📦 stash@{2}'])).toBe(2);
-    expect(stashIndex(['main', '🏷 v1'])).toBeNull();
   });
 });
 
@@ -84,5 +49,38 @@ describe('confirmedWrite', () => {
     const never = async () => { throw new Error('asked'); };
     await confirmedWrite(tag, discards, never, async (w, c) => { calls.push([w, c]); });
     expect(calls).toEqual([[tag, false]]);
+  });
+});
+
+describe('OneWrite', () => {
+  /** A write whose answer the test hands over when it likes. */
+  function pending(): { write: () => Promise<string | null>; answer: (e: string | null) => void } {
+    let answer!: (e: string | null) => void;
+    const promise = new Promise<string | null>((resolve) => { answer = resolve; });
+    return { write: () => promise, answer };
+  }
+
+  test('starts no second write while one runs, from whatever control', async () => {
+    const one = new OneWrite();
+    const first = pending();
+    const running = one.run('c', first.write, () => 'c');
+    expect(one.running).toBe(true);
+    let started = false;
+    const second = await one.run('c', async () => { started = true; return null; }, () => 'c');
+    expect(second).toBeNull();
+    expect(started).toBe(false);
+    first.answer('refused');
+    expect(await running).toEqual({ error: 'refused' });
+    expect(one.running).toBe(false);
+  });
+
+  test('drops the answer once another commit is selected', async () => {
+    const one = new OneWrite();
+    const first = pending();
+    let selected = 'c';
+    const running = one.run('c', first.write, () => selected);
+    selected = 'd';
+    first.answer('refused');
+    expect(await running).toBeNull();
   });
 });

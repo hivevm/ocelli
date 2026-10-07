@@ -31,6 +31,8 @@ pub struct CommitData {
     pub refs: Vec<String>,
     pub parent_shas: Vec<String>,
     pub kind: CommitKind,
+    /// A stash node's place `n` in the stash, `stash@{n}` (ADR-0024); `None` for every other node.
+    pub stash: Option<usize>,
 }
 
 /// A connection between a child commit and one of its parents.
@@ -140,6 +142,9 @@ pub struct NodeJson {
     pub committer_avatar: String,
     pub refs: Vec<String>,
     pub kind: CommitKind,
+    /// A stash node's place in the stash, which a stash write names; absent for every other node.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub stash: Option<usize>,
     pub parents: Vec<String>, // parent SHAs in commit order (first parent first); may include SHAs outside the loaded set
     pub children: Vec<String>, // SHAs of loaded children, newest (lowest row) first
 }
@@ -328,17 +333,6 @@ pub struct FileChange {
     pub deletions: u32,
 }
 
-/// The place of a stash node's entry in the stash, read from its `stash@{n}` ref (ADR-0024).
-pub fn stash_index(refs: &[String]) -> Option<usize> {
-    refs.iter().find_map(|r| {
-        r.trim_start_matches("📦 ")
-            .strip_prefix("stash@{")?
-            .strip_suffix('}')?
-            .parse()
-            .ok()
-    })
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -418,11 +412,5 @@ mod tests {
     fn an_edge_reaches_one_lane_past_its_rightmost() {
         assert_eq!(edge((5, 0), (2, 2), true, None).lanes(), 3);
         assert_eq!(edge((5, 0), (2, 1), false, Some(4)).lanes(), 5);
-    }
-
-    #[test]
-    fn a_stash_nodes_place_is_read_from_its_ref() {
-        assert_eq!(stash_index(&["📦 stash@{3}".to_string()]), Some(3));
-        assert_eq!(stash_index(&["main".to_string()]), None);
     }
 }
