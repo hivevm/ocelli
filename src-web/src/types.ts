@@ -43,6 +43,8 @@ export interface RowWindow {
   lanes: number;
   nodes: NodeJson[];
   edges: Edge[];
+  /** Each edge's corners from its parent to its child, as `[row, lane]` (ADR-0030). */
+  paths: [number, number][][];
   litNodes: boolean[] | null;
   litEdges: boolean[] | null;
 }

@@ -24,6 +24,9 @@ pub struct WindowJson {
     pub lanes: usize,
     pub nodes: Vec<NodeJson>,
     pub edges: Vec<Edge>,
+    /// Each edge's corners from its parent to its child, as rows and lanes, which the web
+    /// interface draws through (ADR-0030).
+    pub paths: Vec<Vec<(i32, i32)>>,
     pub lit_nodes: Option<Vec<bool>>,
     pub lit_edges: Option<Vec<bool>>,
 }
@@ -164,6 +167,7 @@ impl Session {
             }),
             generation: c.generation,
             lanes: w.lanes(),
+            paths: w.edges.iter().map(Edge::path).collect(),
             top: w.top,
             nodes: w.nodes,
             edges: w.edges,
@@ -316,6 +320,14 @@ pub(crate) mod tests {
         assert_eq!((w.top, shas(&w)), (2, vec!["c7", "c6"]));
         assert_eq!(w.edges.len(), 3, "c8→c7, c7→c6, and c6→c5 below the window");
         assert_eq!(w.lanes, 1);
+        assert_eq!(
+            w.paths,
+            [
+                vec![(2, 0), (1, 0)],
+                vec![(3, 0), (2, 0)],
+                vec![(4, 0), (3, 0)]
+            ]
+        );
         assert_eq!((w.lit_nodes, w.lit_edges), (None, None), "nothing selected");
         let done = session.finish(g, Ok(())).unwrap();
         assert_eq!(

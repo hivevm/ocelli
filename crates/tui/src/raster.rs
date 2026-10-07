@@ -14,7 +14,7 @@
 
 use ocelli_core::history::Lineage;
 use ocelli_core::history::Window;
-use ocelli_core::model::{CommitKind, Edge, NodeJson};
+use ocelli_core::model::{CommitKind, Edge, NodeJson, Run};
 
 const UP: u8 = 1;
 const DOWN: u8 = 2;
@@ -116,34 +116,23 @@ impl Canvas {
 
     /// Draws one edge; `dim` when it is not on the highlighted lineage.
     fn edge(&mut self, e: &Edge, dim: bool) {
-        // source = parent (older, lower on screen), target = child (newer).
-        let (sr, tr) = (e.source_row as usize, e.target_row as usize);
-        let (sc, tc) = (e.source_col as usize, e.target_col as usize);
-        let (xs, xt) = (2 * sc, 2 * tc);
         // Same rule as the desktop canvas: a BRANCH edge takes the child's lane
         // colour, a MERGE edge the parent's.
-        let lane = if e.is_branch { tc } else { sc };
-
-        let (left, right) = (xs.min(xt), xs.max(xt));
-        // A late child stands below its parent (ADR-0015); its edge runs down instead of up.
-        let (upper, lower) = (sr.min(tr), sr.max(tr));
-        if let Some(track) = e.track {
-            // A MERGE out of the main line: along the parent's row to its track, up the track,
-            // then along the child's row (ADR-0030).
-            let xv = 2 * track as usize;
-            self.horizontal(sr, xs.min(xv), xs.max(xv), lane, dim);
-            self.vertical(xv, upper, lower, lane, dim);
-            self.horizontal(tr, xv.min(xt), xv.max(xt), lane, dim);
-        } else if sc == tc {
-            self.vertical(xs, upper, lower, lane, dim);
-        } else if e.is_branch {
-            // BRANCH: along the parent's row, then into the child's lane.
-            self.horizontal(sr, left, right, lane, dim);
-            self.vertical(xt, upper, lower, lane, dim);
+        let lane = if e.is_branch {
+            e.target_col
         } else {
-            // MERGE: along the parent's column, then along the child's row.
-            self.vertical(xs, upper, lower, lane, dim);
-            self.horizontal(tr, left, right, lane, dim);
+            e.source_col
+        } as usize;
+        // The runs the core routes the edge along (ADR-0030); a lane is two cells wide.
+        for run in e.route() {
+            match run {
+                Run::Along { row, from, to } => {
+                    self.horizontal(row as usize, 2 * from as usize, 2 * to as usize, lane, dim)
+                }
+                Run::Down { lane: x, from, to } => {
+                    self.vertical(2 * x as usize, from as usize, to as usize, lane, dim)
+                }
+            }
         }
     }
 }

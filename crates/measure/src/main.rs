@@ -29,6 +29,8 @@ const USAGE: &str = "Usage: ocelli-measure crossings PATH | ocelli-measure windo
 /// The measured numbers of one repository.
 struct Crossings {
     commits: usize,
+    /// The main line's tip the layout kept the leftmost lane for (ADR-0032).
+    main_line: Option<String>,
     ocelli: usize,
     git: usize,
 }
@@ -39,6 +41,10 @@ fn main() -> Result<()> {
         [command, path] if command == "crossings" => {
             let measured = measure_crossings(&PathBuf::from(path))?;
             println!("commits: {}", measured.commits);
+            println!(
+                "main line: {}",
+                measured.main_line.as_deref().unwrap_or("none")
+            );
             println!("ocelli crossings: {}", measured.ocelli);
             println!("git crossings: {}", measured.git);
             Ok(())
@@ -74,7 +80,7 @@ fn measure_crossings(path: &Path) -> Result<Crossings> {
     let tip = GitReader
         .load_main_tip(path)
         .with_context(|| format!("cannot read the main line of {}", path.display()))?;
-    let mut layout = tip.map_or_else(Layout::new, Layout::with_main_line);
+    let mut layout = tip.clone().map_or_else(Layout::new, Layout::with_main_line);
     let edges = layout.lay_out(commits.clone()).edges;
     let ascii = git_log_graph(path, &commits)?;
     let rows: Vec<&str> = ascii.iter().map(|(graph, _)| graph.as_str()).collect();
@@ -89,6 +95,7 @@ fn measure_crossings(path: &Path) -> Result<Crossings> {
     }
     Ok(Crossings {
         commits: commits.len(),
+        main_line: tip,
         ocelli: crossings::count_edges(&edges),
         git: git_graph::count(&rows)?,
     })

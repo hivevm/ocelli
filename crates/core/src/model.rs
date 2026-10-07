@@ -52,6 +52,76 @@ pub struct Edge {
     pub track: Option<i32>,
 }
 
+/// One straight run of an edge as drawn: along a row between two lanes, or down a lane between
+/// two rows, `from` never past `to`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Run {
+    Along { row: i32, from: i32, to: i32 },
+    Down { lane: i32, from: i32, to: i32 },
+}
+
+impl Edge {
+    /// The corners the edge is drawn through, from the parent to the child, as rows and lanes,
+    /// after its type (ADR-0030): a branch edge along the parent's row and up the child's lane, a
+    /// merge edge up the parent's lane and along the child's row, a merge out of the main line
+    /// along the parent's row to its track, up the track, and along the child's row, and an edge
+    /// within one lane down that lane alone. A corner that would repeat the one before is left out.
+    pub fn path(&self) -> Vec<(i32, i32)> {
+        let (sr, sc, tr, tc) = (
+            self.source_row,
+            self.source_col,
+            self.target_row,
+            self.target_col,
+        );
+        let corners = if let Some(track) = self.track {
+            vec![(sr, sc), (sr, track), (tr, track), (tr, tc)]
+        } else if self.is_branch {
+            vec![(sr, sc), (sr, tc), (tr, tc)]
+        } else {
+            vec![(sr, sc), (tr, sc), (tr, tc)]
+        };
+        let mut path: Vec<(i32, i32)> = Vec::with_capacity(corners.len());
+        for corner in corners {
+            if path.last() != Some(&corner) {
+                path.push(corner);
+            }
+        }
+        path
+    }
+
+    /// The runs the edge is drawn with, one between each two corners of its path.
+    pub fn route(&self) -> Vec<Run> {
+        self.path()
+            .windows(2)
+            .map(|pair| {
+                let ((r1, l1), (r2, l2)) = (pair[0], pair[1]);
+                if r1 == r2 {
+                    Run::Along {
+                        row: r1,
+                        from: l1.min(l2),
+                        to: l1.max(l2),
+                    }
+                } else {
+                    Run::Down {
+                        lane: l1,
+                        from: r1.min(r2),
+                        to: r1.max(r2),
+                    }
+                }
+            })
+            .collect()
+    }
+
+    /// The lanes the edge reaches: one past the rightmost lane of its route.
+    pub fn lanes(&self) -> usize {
+        let rightmost = self
+            .source_col
+            .max(self.target_col)
+            .max(self.track.unwrap_or(0));
+        rightmost as usize + 1
+    }
+}
+
 /// The serializable form of a node sent to the frontend.
 /// The camelCase field names are the contract the canvas renderer reads.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -254,4 +324,86 @@ pub struct FileChange {
     pub status: FileStatus,
     pub additions: u32,
     pub deletions: u32,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn edge(source: (i32, i32), target: (i32, i32), is_branch: bool, track: Option<i32>) -> Edge {
+        Edge {
+            source_row: source.0,
+            source_col: source.1,
+            target_row: target.0,
+            target_col: target.1,
+            is_branch,
+            min_row: source.0.min(target.0),
+            max_row: source.0.max(target.0),
+            track,
+        }
+    }
+
+    #[test]
+    // Verifies: ADR-0030
+    fn each_edge_type_takes_its_route() {
+        let along = |row, from, to| Run::Along { row, from, to };
+        let down = |lane, from, to| Run::Down { lane, from, to };
+        // A branch edge: along the parent's row, then up the child's lane, either side.
+        assert_eq!(
+            edge((5, 0), (2, 2), true, None).route(),
+            [along(5, 0, 2), down(2, 2, 5)]
+        );
+        assert_eq!(
+            edge((5, 2), (2, 0), true, None).route(),
+            [along(5, 0, 2), down(0, 2, 5)]
+        );
+        // A merge edge: up the parent's lane, then along the child's row, either side.
+        assert_eq!(
+            edge((5, 1), (2, 3), false, None).route(),
+            [down(1, 2, 5), along(2, 1, 3)]
+        );
+        // Within one lane: down that lane alone.
+        assert_eq!(edge((5, 1), (2, 1), true, None).route(), [down(1, 2, 5)]);
+        // A merge out of the main line: along to its track, up the track, along to the child.
+        assert_eq!(
+            edge((5, 0), (2, 1), false, Some(3)).route(),
+            [along(5, 0, 3), down(3, 2, 5), along(2, 1, 3)]
+        );
+        // The track in the child's lane: up it to the child, no second run along.
+        assert_eq!(
+            edge((5, 0), (2, 2), false, Some(2)).route(),
+            [along(5, 0, 2), down(2, 2, 5)]
+        );
+        // Down to a late child below its parent: the same runs, the rows the other way.
+        assert_eq!(edge((1, 0), (4, 0), true, None).route(), [down(0, 1, 4)]);
+    }
+
+    #[test]
+    // Verifies: ADR-0030
+    fn an_edge_runs_through_its_corners_from_the_parent_to_the_child() {
+        assert_eq!(
+            edge((5, 0), (2, 2), true, None).path(),
+            [(5, 0), (5, 2), (2, 2)]
+        );
+        assert_eq!(
+            edge((5, 1), (2, 3), false, None).path(),
+            [(5, 1), (2, 1), (2, 3)]
+        );
+        assert_eq!(edge((5, 1), (2, 1), false, None).path(), [(5, 1), (2, 1)]);
+        assert_eq!(
+            edge((5, 0), (2, 1), false, Some(3)).path(),
+            [(5, 0), (5, 3), (2, 3), (2, 1)]
+        );
+        assert_eq!(
+            edge((5, 0), (2, 2), false, Some(2)).path(),
+            [(5, 0), (5, 2), (2, 2)]
+        );
+    }
+
+    #[test]
+    // Verifies: ADR-0030, ADR-0031
+    fn an_edge_reaches_one_lane_past_its_rightmost() {
+        assert_eq!(edge((5, 0), (2, 2), true, None).lanes(), 3);
+        assert_eq!(edge((5, 0), (2, 1), false, Some(4)).lanes(), 5);
+    }
 }

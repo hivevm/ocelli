@@ -8,9 +8,9 @@
 //! horizontal run on it. Edges to one parent overlap where git draws a single line, which is why a
 //! point counts once.
 
-use ocelli_core::model::Edge;
 #[cfg(test)]
 use ocelli_core::model::Graph;
+use ocelli_core::model::{Edge, Run};
 use std::collections::HashSet;
 
 /// A horizontal segment on `row`, from lane `from` to lane `to` (`from < to`).
@@ -29,43 +29,17 @@ struct Vertical {
     to: i32,
 }
 
-/// The straight segments an edge is drawn with (ADR-0030).
+/// The straight segments an edge is drawn with, as the core routes it (ADR-0030).
 fn segments(e: &Edge) -> (Vec<Horizontal>, Option<Vertical>) {
-    let (low, high) = (
-        e.target_row.min(e.source_row),
-        e.target_row.max(e.source_row),
-    );
-    let along = |row: i32, a: i32, b: i32| {
-        (a != b).then_some(Horizontal {
-            row,
-            from: a.min(b),
-            to: a.max(b),
-        })
-    };
-    if let Some(track) = e.track {
-        let runs = [
-            along(e.source_row, e.source_col, track),
-            along(e.target_row, track, e.target_col),
-        ];
-        return (
-            runs.into_iter().flatten().collect(),
-            vertical(track, low, high),
-        );
+    let mut horizontals = Vec::new();
+    let mut vertical = None;
+    for run in e.route() {
+        match run {
+            Run::Along { row, from, to } => horizontals.push(Horizontal { row, from, to }),
+            Run::Down { lane, from, to } => vertical = Some(Vertical { lane, from, to }),
+        }
     }
-    if e.source_col == e.target_col {
-        return (Vec::new(), vertical(e.source_col, low, high));
-    }
-    if e.is_branch {
-        let run = along(e.source_row, e.source_col, e.target_col);
-        (run.into_iter().collect(), vertical(e.target_col, low, high))
-    } else {
-        let run = along(e.target_row, e.source_col, e.target_col);
-        (run.into_iter().collect(), vertical(e.source_col, low, high))
-    }
-}
-
-fn vertical(lane: i32, from: i32, to: i32) -> Option<Vertical> {
-    (from < to).then_some(Vertical { lane, from, to })
+    (horizontals, vertical)
 }
 
 /// The number of edge crossings in a laid-out commit graph.
