@@ -83,6 +83,31 @@ pub enum Write {
         message: String,
         head: Option<String>,
     },
+    /// Creates the local branch `name`, expected to be free, at `commit`, and switches to it where
+    /// `switch` says so.
+    CreateBranch {
+        name: String,
+        commit: String,
+        switch: bool,
+    },
+    /// Switches to the local branch `name`, expected at `tip`, taking the uncommitted changes
+    /// along where the switch touches none of them.
+    SwitchBranch { name: String, tip: String },
+    /// Switches to `commit` with `HEAD` detached, the changes taken along as for a branch.
+    Detach { commit: String },
+    /// Creates the local branch `branch` tracking `remote`'s branch of that name, expected at
+    /// `tip`, and switches to it, as `git switch <branch>` does.
+    TrackRemote {
+        remote: String,
+        branch: String,
+        tip: String,
+    },
+    /// Deletes the local branch `name`, expected at `tip`, and merged or not as `merged` says.
+    DeleteBranch {
+        name: String,
+        tip: String,
+        merged: bool,
+    },
 }
 
 impl Write {
@@ -95,7 +120,12 @@ impl Write {
             | Write::ApplyStash { drop: false, .. }
             | Write::StageFile { .. }
             | Write::UnstageFile { .. }
-            | Write::Commit { .. } => None,
+            | Write::Commit { .. }
+            | Write::CreateBranch { .. }
+            | Write::SwitchBranch { .. }
+            | Write::Detach { .. }
+            | Write::TrackRemote { .. }
+            | Write::DeleteBranch { merged: true, .. } => None,
             Write::DeleteTag {
                 name,
                 annotated: true,
@@ -108,6 +138,9 @@ impl Write {
             Write::DropStash { index, .. } => {
                 Some(format!("the stash stash@{{{index}}} and the changes in it"))
             }
+            Write::DeleteBranch { name, .. } => Some(format!(
+                "the branch {name}, which is not merged, and the commits only it reaches"
+            )),
         }
     }
 }
@@ -206,6 +239,16 @@ mod tests {
         assert_eq!(
             drop.discards().as_deref(),
             Some("the stash stash@{1} and the changes in it")
+        );
+        let delete_branch = |merged| Write::DeleteBranch {
+            name: "side".into(),
+            tip: "s".into(),
+            merged,
+        };
+        assert_eq!(delete_branch(true).discards(), None);
+        assert_eq!(
+            delete_branch(false).discards().as_deref(),
+            Some("the branch side, which is not merged, and the commits only it reaches")
         );
         assert_eq!(delete(false).discards().as_deref(), Some("the tag v1"));
         assert_eq!(

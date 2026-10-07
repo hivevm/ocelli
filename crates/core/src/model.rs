@@ -164,7 +164,7 @@ pub struct Graph {
 /// A local branch and where it stands relative to its configured upstream.
 /// `ahead`/`behind` are computed from refs already on disk and are therefore as
 /// current as the last fetch — the viewer never fetches (specification Non-Goals).
-#[derive(Debug, Serialize)]
+#[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct LocalBranch {
     pub name: String,
@@ -176,6 +176,9 @@ pub struct LocalBranch {
     pub upstream: Option<String>,
     pub ahead: usize,
     pub behind: usize,
+    /// Whether every commit of the branch is in its upstream, or in `HEAD` where it has none, as
+    /// `git branch -d` asks before deleting it.
+    pub merged: bool,
 }
 
 /// A remote-tracking branch, named without its remote prefix (`feature/x`, not

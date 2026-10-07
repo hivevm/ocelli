@@ -85,6 +85,17 @@
   const selectedTags = $derived(
     selectedNode ? (repoRefs?.tags ?? []).filter(t => t.sha === selectedNode?.sha) : [],
   );
+  // The local and remote branches on the selected commit, which its chips switch to or delete.
+  const selectedLocals = $derived(
+    selectedNode ? (repoRefs?.locals ?? []).filter(b => b.sha === selectedNode?.sha) : [],
+  );
+  const selectedRemotes = $derived(
+    selectedNode
+      ? (repoRefs?.remotes ?? []).flatMap(r => r.branches
+        .filter(b => b.sha === selectedNode?.sha)
+        .map(b => ({ remote: r.name, branch: b.name, tip: b.sha })))
+      : [],
+  );
 
   /** A command that failed: the status bar says so. */
   function report(e: unknown): void {
@@ -491,6 +502,8 @@
       {onSelectFile}
       onJumpToRow={jumpToRow}
       tags={selectedTags}
+      locals={selectedLocals}
+      remotes={selectedRemotes}
       onWrite={performWrite}
     />
   </div><!-- end #top-pane -->

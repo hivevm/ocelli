@@ -75,6 +75,29 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
         Some(Modal::Tag(tag)) => draw_tag_prompt(frame, tag, p, main),
         Some(Modal::Stash(stash)) => draw_stash_prompt(frame, stash, p, main),
         Some(Modal::Confirm(write)) => draw_confirm(frame, write, p, main),
+        Some(Modal::Branch {
+            commit,
+            name,
+            switch,
+        }) => {
+            let short = &commit[..commit.len().min(7)];
+            let switch = if *switch { "[x]" } else { "[ ]" };
+            let lines = vec![
+                input_line(p, "Name    ", name, true),
+                Line::from(vec![
+                    Span::styled("Switch  ", Style::new().fg(p.text_muted)),
+                    Span::styled(
+                        format!("{switch} switch to it"),
+                        Style::new().fg(p.text_bright),
+                    ),
+                ]),
+                Line::styled(
+                    "Enter create · Tab switch · Esc cancel",
+                    Style::new().fg(p.text_dim),
+                ),
+            ];
+            draw_dialog(frame, p, main, format!(" Branch at {short} "), lines);
+        }
         Some(Modal::Commit { head, message }) => {
             let short = &head[..head.len().min(7)];
             let lines = vec![
@@ -868,6 +891,7 @@ fn hints(app: &App) -> &'static str {
         Some(Modal::Tag(tag)) if tag.message.is_none() => return "type the tag's name",
         Some(Modal::Tag(_) | Modal::Stash(_)) => return "type a message, or none",
         Some(Modal::Commit { .. }) => return "type the commit's message",
+        Some(Modal::Branch { .. }) => return "type the branch's name",
         None => {}
     }
     if app.search.editing {
@@ -881,12 +905,17 @@ fn hints(app: &App) -> &'static str {
     }
     match app.focus {
         Focus::Sidebar if app.side.minimised => "j/k move · Enter expand · 1 expand",
-        Focus::Sidebar => "j/k move · Enter open/toggle · / filter · d delete tag · 1 minimise",
-        Focus::Graph => {
-            "j/k move · ]/[ parent/child · }/{ refs · / search · y copy · t tag · s stash · \
-             a/p/d apply/pop/drop · Esc deselect"
+        Focus::Sidebar => {
+            "j/k move · Enter open/toggle · w switch · d delete · / filter · 1 minimise"
         }
-        Focus::Detail => "j/k link · Enter jump · y copy · t tag · a/p/d apply/pop/drop",
+        Focus::Graph => match app.selected_node().map(|n| n.kind) {
+            Some(CommitKind::Working) => "j/k move · / search · c commit · s stash · Esc deselect",
+            Some(CommitKind::Stash) => "j/k move · / search · a/p/d apply/pop/drop · Esc deselect",
+            _ => {
+                "j/k move · ]/[ }/{ jump · / search · y copy · t tag · b branch · w switch · s stash"
+            }
+        },
+        Focus::Detail => "j/k link · Enter jump · y copy · t tag · b branch · w switch",
         Focus::Files if working(app) => {
             "j/k move · Enter diff/fold · t tree/flat · a stage · u unstage · c commit"
         }

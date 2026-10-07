@@ -5,8 +5,9 @@
 use anyhow::{Context, Result, bail};
 use git2::build::CheckoutBuilder;
 use git2::{
-    ErrorCode, ObjectType, Oid, Reference, Repository, RepositoryState, StashApplyOptions,
-    StashFlags, Status, TreeWalkMode, TreeWalkResult,
+    BranchType, CheckoutNotificationType, Commit, ErrorCode, ObjectType, Oid, Reference,
+    Repository, RepositoryState, StashApplyOptions, StashFlags, Status, TreeWalkMode,
+    TreeWalkResult,
 };
 use ocelli_core::port::Write;
 use std::path::Path;
@@ -19,6 +20,29 @@ pub fn write(repo_path: &Path, write: &Write) -> Result<Option<String>> {
         Write::Commit { message, head } => {
             return commit(&repo, message, head.as_deref()).map(Some);
         }
+        Write::CreateBranch {
+            name,
+            commit,
+            switch,
+        } => create_branch(&repo, name, commit, *switch),
+        Write::SwitchBranch { name, tip } => {
+            let branch = branch_as_shown(&repo, name, tip)?;
+            let target = repo.find_commit(Oid::from_str(tip)?)?;
+            switch_to(&repo, &target, Some(&refname_of(&branch)?))
+        }
+        Write::Detach { commit } => {
+            let target = Oid::from_str(commit)
+                .ok()
+                .and_then(|oid| repo.find_commit(oid).ok())
+                .with_context(|| format!("the commit {commit} is no longer in the repository"))?;
+            switch_to(&repo, &target, None)
+        }
+        Write::TrackRemote {
+            remote,
+            branch,
+            tip,
+        } => track_remote(&repo, remote, branch, tip),
+        Write::DeleteBranch { name, tip, merged } => delete_branch(&repo, name, tip, *merged),
         Write::StageFile { path, shown } => {
             as_shown(&repo, path, shown, |s| s.workdir)?;
             stage_file(&repo, path)
@@ -407,4 +431,205 @@ fn in_progress(state: RepositoryState) -> &'static str {
         RepositoryState::ApplyMailbox | RepositoryState::ApplyMailboxOrRebase => "git am",
         _ => "rebase",
     }
+}
+
+/// Refuses a name `git branch` refuses: one no reference can have, one that reads as an option,
+/// and `HEAD`.
+fn valid_branch_name(name: &str) -> Result<()> {
+    if name.starts_with('-')
+        || name == "HEAD"
+        || !Reference::is_valid_name(&format!("refs/heads/{name}"))
+    {
+        bail!("'{name}' is not a name a branch can have");
+    }
+    Ok(())
+}
+
+/// The local branch `name`, refused unless it still points at `tip`.
+fn branch_as_shown<'r>(repo: &'r Repository, name: &str, tip: &str) -> Result<git2::Branch<'r>> {
+    let branch = repo
+        .find_branch(name, BranchType::Local)
+        .with_context(|| format!("there is no branch named '{name}' any more"))?;
+    if branch.get().target().map(|t| t.to_string()).as_deref() != Some(tip) {
+        bail!("the branch '{name}' is no longer where it was shown: reload to see it as it is");
+    }
+    Ok(branch)
+}
+
+/// Refuses where the branch `refname` is checked out in another working tree, as `git` does.
+fn not_checked_out_elsewhere(repo: &Repository, refname: &str) -> Result<()> {
+    for name in repo.worktrees()?.iter().flatten() {
+        let Ok(worktree) = repo.find_worktree(name) else {
+            continue;
+        };
+        let Ok(other) = Repository::open_from_worktree(&worktree) else {
+            continue;
+        };
+        let head = other.head().ok().and_then(|h| h.name().map(str::to_string));
+        if head.as_deref() == Some(refname) {
+            let short = refname.trim_start_matches("refs/heads/");
+            bail!("'{short}' is checked out in the working tree '{name}'");
+        }
+    }
+    Ok(())
+}
+
+/// Checks `target` out and points `HEAD` at the branch `refname`, or at `target` itself where
+/// there is none, as `git switch` does: the uncommitted changes go along where the target touches
+/// none of the paths they touch, and a file deleted in the working directory comes back where the
+/// target changes it. What would stop it is looked for first, so a switch refused changes
+/// nothing: a staged change to a path the target changes, which libgit2 would overwrite, and the
+/// branch checked out in another working tree; libgit2 then finds every other path in the way
+/// before it writes anything, and the refusal names the paths.
+fn switch_to(repo: &Repository, target: &Commit, refname: Option<&str>) -> Result<()> {
+    if !matches!(
+        repo.state(),
+        RepositoryState::Clean | RepositoryState::Bisect
+    ) {
+        bail!(
+            "a {} is in progress: finish it with git before switching",
+            in_progress(repo.state())
+        );
+    }
+    if let Some(refname) = refname {
+        not_checked_out_elsewhere(repo, refname)?;
+    }
+    let head = repo.head().ok().and_then(|h| h.peel_to_tree().ok());
+    let goal = target.tree()?;
+    let paths = |diff: git2::Diff| -> Vec<String> {
+        diff.deltas()
+            .flat_map(|d| [d.old_file().path(), d.new_file().path()])
+            .flatten()
+            .map(|p| p.display().to_string())
+            .collect()
+    };
+    let changed = paths(repo.diff_tree_to_tree(head.as_ref(), Some(&goal), None)?);
+    let mut staged: Vec<_> = paths(repo.diff_tree_to_index(head.as_ref(), None, None)?)
+        .into_iter()
+        .filter(|p| changed.contains(p))
+        .collect();
+    if !staged.is_empty() {
+        staged.sort();
+        staged.dedup();
+        bail!(
+            "staged changes to {} are in the way: commit or stash them first",
+            staged.join(", ")
+        );
+    }
+
+    let mut in_the_way = Vec::new();
+    let mut checkout = CheckoutBuilder::new();
+    checkout
+        .recreate_missing(true)
+        .notify_on(CheckoutNotificationType::CONFLICT)
+        .notify(|_, path, _, _, _| {
+            if let Some(path) = path {
+                in_the_way.push(path.display().to_string());
+            }
+            true
+        });
+    let checked_out = repo.checkout_tree(target.as_object(), Some(&mut checkout));
+    drop(checkout);
+    match checked_out {
+        Err(e) if e.code() == ErrorCode::Conflict => {
+            in_the_way.sort();
+            bail!(
+                "uncommitted changes to {} are in the way: commit or stash them first",
+                in_the_way.join(", ")
+            );
+        }
+        result => result?,
+    }
+    match refname {
+        Some(refname) => repo.set_head(refname)?,
+        None => repo.set_head_detached(target.id())?,
+    }
+    Ok(())
+}
+
+/// The full reference name of a branch.
+fn refname_of(branch: &git2::Branch) -> Result<String> {
+    Ok(branch
+        .get()
+        .name()
+        .context("a branch name git2 cannot read")?
+        .to_string())
+}
+
+/// Switches to the branch `name` just created, deleting it again where the switch is refused,
+/// so that a refusal leaves nothing behind.
+fn switch_to_new(repo: &Repository, name: &str, target: &Commit) -> Result<()> {
+    let created = repo.find_branch(name, BranchType::Local)?;
+    let refname = refname_of(&created)?;
+    switch_to(repo, target, Some(&refname)).inspect_err(|_| {
+        if let Ok(mut created) = repo.find_branch(name, BranchType::Local) {
+            let _ = created.delete();
+        }
+    })
+}
+
+/// Creates the branch `name` at `commit`, and switches to it where `switch` says so. Created
+/// first, so that a name `git` would refuse beside another branch, such as `a` beside `a/b`, is
+/// refused before anything else changes.
+fn create_branch(repo: &Repository, name: &str, commit: &str, switch: bool) -> Result<()> {
+    valid_branch_name(name)?;
+    if repo.find_branch(name, BranchType::Local).is_ok() {
+        bail!("a branch named '{name}' exists already");
+    }
+    let target = Oid::from_str(commit)
+        .ok()
+        .and_then(|oid| repo.find_commit(oid).ok())
+        .with_context(|| format!("the commit {commit} is no longer in the repository"))?;
+    repo.branch(name, &target, false)
+        .with_context(|| format!("a branch named '{name}' cannot be created here"))?;
+    if switch {
+        switch_to_new(repo, name, &target)?;
+    }
+    Ok(())
+}
+
+/// Creates `branch` tracking `remote`'s branch of that name, still at `tip`, and switches to it;
+/// a refusal on the way deletes the branch again.
+fn track_remote(repo: &Repository, remote: &str, branch: &str, tip: &str) -> Result<()> {
+    let upstream = format!("{remote}/{branch}");
+    let remote_branch = repo
+        .find_branch(&upstream, BranchType::Remote)
+        .with_context(|| format!("there is no branch '{upstream}' any more"))?;
+    if remote_branch
+        .get()
+        .target()
+        .map(|t| t.to_string())
+        .as_deref()
+        != Some(tip)
+    {
+        bail!("'{upstream}' is no longer where it was shown: reload to see it as it is");
+    }
+    if repo.find_branch(branch, BranchType::Local).is_ok() {
+        bail!("a local branch named '{branch}' exists already: switch to it instead");
+    }
+    valid_branch_name(branch)?;
+    let target = repo.find_commit(Oid::from_str(tip)?)?;
+    let mut local = repo
+        .branch(branch, &target, false)
+        .with_context(|| format!("a branch named '{branch}' cannot be created here"))?;
+    if let Err(e) = local.set_upstream(Some(&upstream)) {
+        let _ = local.delete();
+        return Err(e.into());
+    }
+    switch_to_new(repo, branch, &target)
+}
+
+/// Deletes the branch `name`, if it is still the one shown: at `tip`, and merged or not as
+/// `merged` says. The checked-out branch is never deleted.
+fn delete_branch(repo: &Repository, name: &str, tip: &str, merged: bool) -> Result<()> {
+    let mut branch = branch_as_shown(repo, name, tip)?;
+    if branch.is_head() {
+        bail!("'{name}' is checked out: switch to another branch before deleting it");
+    }
+    not_checked_out_elsewhere(repo, &refname_of(&branch)?)?;
+    if crate::refs::merged(repo, &branch) != merged {
+        bail!("whether '{name}' is merged changed since it was shown: reload to see it as it is");
+    }
+    branch.delete()?;
+    Ok(())
 }

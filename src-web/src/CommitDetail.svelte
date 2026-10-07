@@ -2,8 +2,10 @@
   import FileTree from './FileTree.svelte';
   import StageToggle from './StageToggle.svelte';
   import { buildFileTree } from './fileTree.ts';
-  import { OneWrite, commitRequest, stageToggle, tagRequest, type Write } from './writes.ts';
-  import type { NodeJson, FileChange, Relative, Tag } from './types.ts';
+  import {
+    OneWrite, branchRequest, commitRequest, stageToggle, tagRequest, type Write,
+  } from './writes.ts';
+  import type { NodeJson, FileChange, LocalBranch, Relative, Tag } from './types.ts';
 
   interface Props {
     node: NodeJson | null;
@@ -16,12 +18,17 @@
     onJumpToRow: (row: number) => void;
     /** The tags on `node`, as the refs read them. */
     tags: Tag[];
+    /** The local branches on `node`. */
+    locals: LocalBranch[];
+    /** The remote branches on `node`, by remote. */
+    remotes: { remote: string; branch: string; tip: string }[];
     /** Performs a write on `node` (G-7), asking first where it discards work (ADR-0034);
         resolves with why it was refused, or null. */
     onWrite: (write: Write) => Promise<string | null>;
   }
   let {
-    node, relatives, showAvatars, changedFiles, diffFile, onSelectFile, onJumpToRow, tags, onWrite,
+    node, relatives, showAvatars, changedFiles, diffFile, onSelectFile, onJumpToRow, tags, locals,
+    remotes, onWrite,
   }: Props = $props();
 
   /** The place of `node` in the stash, when it is a stash node. */
@@ -74,6 +81,26 @@
     void write({ kind: 'deleteTag', name: tag.name, commit: tag.sha, annotated: tag.annotated });
   }
 
+  // The branch form: a name, and whether to switch to the branch.
+  let branchName = $state('');
+  let switchTo = $state(true);
+  const branch = $derived(node ? branchRequest(node.sha, branchName, switchTo) : null);
+
+  async function submitBranch(e: SubmitEvent): Promise<void> {
+    e.preventDefault();
+    if (branch && (await write(branch))) form = null;
+  }
+
+  /** The local branch a chip shows. */
+  function localOf(ref: string): LocalBranch | undefined {
+    return locals.find(b => b.name === ref);
+  }
+
+  /** The remote branch a chip shows. */
+  function remoteOf(ref: string): { remote: string; branch: string; tip: string } | undefined {
+    return remotes.find(r => `${r.remote}/${r.branch}` === ref);
+  }
+
   /** The tag a `🏷 name` chip shows, when the refs have read it. */
   function tagOf(ref: string): Tag | undefined {
     return ref.startsWith('🏷') ? tags.find(t => `🏷 ${t.name}` === ref) : undefined;
@@ -87,7 +114,7 @@
   let copyTimer: ReturnType<typeof setTimeout> | undefined;
 
   // The tag form, closed and emptied when another commit is selected.
-  let tagging = $state(false);
+  let form = $state<'tag' | 'branch' | null>(null);
   let tagName = $state('');
   let tagMessage = $state('');
   const tag = $derived(node ? tagRequest(node.sha, tagName, tagMessage) : null);
@@ -95,24 +122,26 @@
   $effect(() => {
     void node;
     copied = false;
-    tagging = false;
+    form = null;
     tagName = '';
     tagMessage = '';
+    branchName = '';
+    switchTo = true;
     writing = one.running;
     writeError = null;
     // A reload after staging selects the working-directory node anew; its message stays.
     if (node?.kind !== 'working') commitMessage = '';
   });
 
-  /** Opens or closes the tag form; a refusal shown before belongs to what came before. */
-  function openForm(open: boolean): void {
-    tagging = open;
+  /** Opens a form, or closes it; a refusal shown before belongs to what came before. */
+  function openForm(open: 'tag' | 'branch' | null): void {
+    form = open;
     writeError = null;
   }
 
   async function submitTag(e: SubmitEvent): Promise<void> {
     e.preventDefault();
-    if (tag && (await write(tag))) tagging = false;
+    if (tag && (await write(tag))) form = null;
   }
 
   async function copySha(): Promise<void> {
@@ -157,11 +186,27 @@
         <div class="detail-refs">
           {#each node.refs as ref}
             {@const tag = tagOf(ref)}
+            {@const local = localOf(ref)}
+            {@const remote = remoteOf(ref)}
             <span class="ref-chip {ref.startsWith('🏷') ? 'tag' : ref.includes('/') ? 'remote' : 'local'}">
               {ref}
               {#if tag}
                 <button class="chip-delete" disabled={writing} title="Delete the tag {tag.name}"
                         aria-label="Delete the tag {tag.name}" onclick={() => deleteTag(tag)}>×</button>
+              {/if}
+              {#if local && !local.isHead}
+                <button class="chip-delete" disabled={writing} title="Switch to {local.name}"
+                        aria-label="Switch to {local.name}"
+                        onclick={() => void write({ kind: 'switchBranch', name: local.name, tip: local.sha })}>⇄</button>
+                <button class="chip-delete" disabled={writing} title="Delete the branch {local.name}"
+                        aria-label="Delete the branch {local.name}"
+                        onclick={() => void write({
+                          kind: 'deleteBranch', name: local.name, tip: local.sha, merged: local.merged,
+                        })}>×</button>
+              {:else if remote}
+                <button class="chip-delete" disabled={writing}
+                        title="Switch to a local branch tracking {ref}" aria-label="Switch to {ref}"
+                        onclick={() => void write({ kind: 'trackRemote', ...remote })}>⇄</button>
               {/if}
             </span>
           {/each}
@@ -190,10 +235,10 @@
           <button class="tag-btn" disabled={writing} onclick={() => onStash('only')}>Drop…</button>
         </div>
       {/if}
-      {#if writeError && !tagging}<div class="tag-error">{writeError}</div>{/if}
+      {#if writeError && form === null}<div class="tag-error">{writeError}</div>{/if}
 
       {#if node.kind === 'commit'}
-        {#if tagging}
+        {#if form === 'tag'}
           <form class="tag-form" onsubmit={submitTag}>
             <!-- svelte-ignore a11y_autofocus -->
             <input class="tag-input" placeholder="Tag name" aria-label="Tag name" autofocus
@@ -203,14 +248,39 @@
                       bind:value={tagMessage}></textarea>
             {#if writeError}<div class="tag-error">{writeError}</div>{/if}
             <div class="tag-actions">
-              <button type="button" class="tag-btn" onclick={() => openForm(false)}>Cancel</button>
+              <button type="button" class="tag-btn" onclick={() => openForm(null)}>Cancel</button>
               <button type="submit" class="tag-btn primary" disabled={!tag || writing}>
                 {tag?.message === null ? 'Create lightweight tag' : 'Create tag'}
               </button>
             </div>
           </form>
         {:else}
-          <button class="tag-btn" onclick={() => openForm(true)}>Tag…</button>
+          {#if form === 'branch'}
+            <form class="tag-form" onsubmit={submitBranch}>
+              <!-- svelte-ignore a11y_autofocus -->
+              <input class="tag-input" placeholder="Branch name" aria-label="Branch name" autofocus
+                     bind:value={branchName} />
+              <label class="switch-to">
+                <input type="checkbox" bind:checked={switchTo} /> Switch to it
+              </label>
+              {#if writeError}<div class="tag-error">{writeError}</div>{/if}
+              <div class="tag-actions">
+                <button type="button" class="tag-btn" onclick={() => openForm(null)}>Cancel</button>
+                <button type="submit" class="tag-btn primary" disabled={!branch || writing}>
+                  Create branch
+                </button>
+              </div>
+            </form>
+          {:else}
+            <div class="tag-actions commit-actions">
+              <button class="tag-btn" onclick={() => openForm('tag')}>Tag…</button>
+              <button class="tag-btn" onclick={() => openForm('branch')}>Branch…</button>
+              <button class="tag-btn" disabled={writing} title="Check this commit out, HEAD detached"
+                      onclick={() => node && void write({ kind: 'detach', commit: node.sha })}>
+                Switch here
+              </button>
+            </div>
+          {/if}
         {/if}
       {/if}
     </div>
@@ -540,6 +610,18 @@
 
   .tag-actions .tag-btn {
     margin-top: 0;
+  }
+
+  .commit-actions {
+    justify-content: flex-start;
+    margin-top: 8px;
+  }
+
+  .switch-to {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    color: var(--text-muted);
   }
 
   .stash-actions {

@@ -88,6 +88,14 @@ fn a_fixed_repository_loads_as_the_reference_did() {
         .map(|tag| tag.as_object_mut().unwrap().remove("annotated").unwrap())
         .collect();
     assert_eq!(annotated, [false, true], "light, v1.0");
+    // Whether a branch is merged came after it too (G-4).
+    let merged: Vec<_> = refs["locals"]
+        .as_array_mut()
+        .unwrap()
+        .iter_mut()
+        .map(|branch| branch.as_object_mut().unwrap().remove("merged").unwrap())
+        .collect();
+    assert_eq!(merged, [true, false, true], "feature, hotfix, main");
     assert_eq!(refs, expected("repo-refs.json"));
 
     let (head, merge) = {

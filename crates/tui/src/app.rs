@@ -18,7 +18,9 @@ use crate::theme::Theme;
 use ocelli_core::graph::LaidChunk;
 use ocelli_core::history::{History, Lineage};
 use ocelli_core::load::{Event, LoadSession};
-use ocelli_core::model::{CommitKind, DiffLine, FileChange, NodeJson, RepoRefs, Shown, Tag};
+use ocelli_core::model::{
+    CommitKind, DiffLine, FileChange, LocalBranch, NodeJson, RepoRefs, Shown, Tag,
+};
 use ocelli_core::port::{Confirmation, Write};
 use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use std::collections::HashSet;
@@ -45,6 +47,8 @@ pub struct Loaded {
     pub sidebar: sidebar::Data,
     /// The tags as read, for what deleting one discards.
     pub tags: Vec<Tag>,
+    /// The local branches as read, for where one points and whether it is merged.
+    pub locals: Vec<LocalBranch>,
 }
 
 impl Loaded {
@@ -64,6 +68,7 @@ impl Loaded {
             },
             sidebar: sidebar::Data::new(&RepoRefs::default()),
             tags: Vec::new(),
+            locals: Vec::new(),
         }
     }
 
@@ -71,6 +76,7 @@ impl Loaded {
     pub fn set_refs(&mut self, repo_refs: RepoRefs) {
         self.sidebar = sidebar::Data::new(&repo_refs);
         self.tags = repo_refs.tags.clone();
+        self.locals = repo_refs.locals.clone();
         self.refs = RefContext {
             head: repo_refs
                 .locals
@@ -172,6 +178,12 @@ pub enum Modal {
     Confirm(Write),
     /// The message typed after `c` for a commit on `head`.
     Commit { head: String, message: String },
+    /// The name typed after `b` for a branch at `commit`, switched to where `switch` says so.
+    Branch {
+        commit: String,
+        name: String,
+        switch: bool,
+    },
 }
 
 pub struct App {
@@ -482,6 +494,11 @@ impl App {
                 Modal::Stash(stash) => self.stash_key(stash, key),
                 Modal::Confirm(write) => self.answer(write, key),
                 Modal::Commit { head, message } => self.commit_key(head, message, key),
+                Modal::Branch {
+                    commit,
+                    name,
+                    switch,
+                } => self.branch_key(commit, name, switch, key),
             };
         }
         if self.search.editing {
@@ -780,33 +797,151 @@ impl App {
             },
             _ => return,
         };
+        self.ask_or_queue(write);
+    }
+
+    /// The entry selected in the expanded sidebar, where it is a ref.
+    fn sidebar_item(&self) -> Option<Item> {
+        let data = self.data.as_ref()?;
+        let rows = sidebar::rows(&data.sidebar, &self.side);
+        match rows.get(self.side.selected).map(|r| &r.kind) {
+            Some(sidebar::RowKind::Leaf(item)) => Some((*item).clone()),
+            _ => None,
+        }
+    }
+
+    /// `d` on a tag or a local branch in the sidebar: deletes it, asking first
+    /// where that discards work (ADR-0034).
+    fn start_delete(&mut self) {
+        let Some(data) = &self.data else { return };
+        let Some(item) = self.sidebar_item() else {
+            return;
+        };
+        let write = match item.look {
+            sidebar::Look::Tag => {
+                let Some(tag) = data.tags.iter().find(|t| t.name == item.name) else {
+                    return;
+                };
+                Write::DeleteTag {
+                    name: tag.name.clone(),
+                    commit: tag.sha.clone(),
+                    annotated: tag.annotated,
+                }
+            }
+            sidebar::Look::Local => {
+                let Some(branch) = data.locals.iter().find(|b| b.name == item.name) else {
+                    return;
+                };
+                Write::DeleteBranch {
+                    name: branch.name.clone(),
+                    tip: branch.sha.clone(),
+                    merged: branch.merged,
+                }
+            }
+            sidebar::Look::Head => {
+                self.status = format!("{} is checked out", item.name);
+                return;
+            }
+            _ => return,
+        };
+        self.ask_or_queue(write);
+    }
+
+    /// `w` in the sidebar: switches to a local branch, or to a remote one
+    /// through a local branch tracking it (G-4).
+    fn start_switch(&mut self) {
+        let Some(item) = self.sidebar_item() else {
+            return;
+        };
+        let Action::Reveal(tip) = item.action.clone() else {
+            return;
+        };
+        let write = match (item.look, item.remote) {
+            (sidebar::Look::Local, _) => Write::SwitchBranch {
+                name: item.name.clone(),
+                tip,
+            },
+            (sidebar::Look::Remote, Some(remote)) => Write::TrackRemote {
+                remote,
+                branch: item.name.clone(),
+                tip,
+            },
+            _ => return,
+        };
+        self.status = format!("Switching to {}…", item.name);
+        self.queue(write, Confirmation::Absent);
+    }
+
+    /// A write that discards work goes to the question; any other is queued.
+    fn ask_or_queue(&mut self, write: Write) {
         if write.discards().is_some() {
             self.modal = Some(Modal::Confirm(write));
         } else {
-            self.status = format!("Applying stash@{{{index}}}…");
+            self.status = "Writing…".to_string();
             self.queue(write, Confirmation::Absent);
         }
     }
 
-    /// `d` on a tag in the sidebar: asks before deleting it.
-    fn start_delete_tag(&mut self) {
-        let Some(data) = &self.data else { return };
-        let rows = sidebar::rows(&data.sidebar, &self.side);
-        let Some(sidebar::RowKind::Leaf(item)) = rows.get(self.side.selected).map(|r| &r.kind)
-        else {
+    /// `b` on a commit: asks for the name of a branch there.
+    fn start_branch(&mut self) {
+        let Some(node) = self.selected_node() else {
             return;
         };
-        if item.look != sidebar::Look::Tag {
+        if node.kind != CommitKind::Commit {
+            self.status = "Only a commit can carry a branch".to_string();
             return;
         }
-        let Some(tag) = data.tags.iter().find(|t| t.name == item.name) else {
+        self.modal = Some(Modal::Branch {
+            commit: node.sha.clone(),
+            name: String::new(),
+            switch: true,
+        });
+    }
+
+    fn branch_key(&mut self, commit: String, mut name: String, mut switch: bool, key: KeyEvent) {
+        match key.code {
+            KeyCode::Char(_) => name.extend(typed(key)),
+            KeyCode::Backspace => {
+                name.pop();
+            }
+            KeyCode::Tab => switch = !switch,
+            KeyCode::Esc => return,
+            KeyCode::Enter if !name.trim().is_empty() => {
+                let name = name.trim().to_string();
+                self.status = format!("Creating {name}…");
+                let write = Write::CreateBranch {
+                    name,
+                    commit,
+                    switch,
+                };
+                self.queue(write, Confirmation::Absent);
+                return;
+            }
+            _ => {}
+        }
+        self.modal = Some(Modal::Branch {
+            commit,
+            name,
+            switch,
+        });
+    }
+
+    /// `w` on a commit in the graph or the detail: switches to it with `HEAD`
+    /// detached.
+    fn start_detach(&mut self) {
+        let Some(node) = self.selected_node() else {
             return;
         };
-        self.modal = Some(Modal::Confirm(Write::DeleteTag {
-            name: tag.name.clone(),
-            commit: tag.sha.clone(),
-            annotated: tag.annotated,
-        }));
+        if node.kind != CommitKind::Commit {
+            return;
+        }
+        self.status = format!("Switching to {}…", node.short_sha);
+        self.queue(
+            Write::Detach {
+                commit: node.sha.clone(),
+            },
+            Confirmation::Absent,
+        );
     }
 
     fn start_search(&mut self) {
@@ -894,7 +1029,8 @@ impl App {
             KeyCode::Char('g') | KeyCode::Home => *sel = 0,
             KeyCode::Char('G') | KeyCode::End => *sel = len.saturating_sub(1),
             KeyCode::Char('/') if !minimised => self.side.editing = true,
-            KeyCode::Char('d') if !minimised => self.start_delete_tag(),
+            KeyCode::Char('d') if !minimised => self.start_delete(),
+            KeyCode::Char('w') if !minimised => self.start_switch(),
             KeyCode::Char('l') | KeyCode::Right if minimised => self.activate_sidebar(),
             KeyCode::Char('l') | KeyCode::Right => self.move_focus(1),
             KeyCode::Enter | KeyCode::Char(' ') => self.activate_sidebar(),
@@ -960,6 +1096,14 @@ impl App {
                 self.start_commit();
                 None
             }
+            KeyCode::Char('b') => {
+                self.start_branch();
+                None
+            }
+            KeyCode::Char('w') => {
+                self.start_detach();
+                None
+            }
             KeyCode::Char('s') => {
                 self.modal = Some(Modal::Stash(StashPrompt::default()));
                 None
@@ -1014,6 +1158,8 @@ impl App {
             KeyCode::Char('y') => self.copy_sha(),
             KeyCode::Char('t') => self.start_tag(),
             KeyCode::Char('c') => self.start_commit(),
+            KeyCode::Char('b') => self.start_branch(),
+            KeyCode::Char('w') => self.start_detach(),
             KeyCode::Char(c @ ('a' | 'p' | 'd')) => self.on_stash(KeyCode::Char(c)),
             KeyCode::Enter => {
                 let Some(sha) = links.get(self.link) else {
@@ -1592,14 +1738,23 @@ pub(crate) mod tests {
 
     /// The sidebar's selection on the tag `v1` of `sidebar::tests::repo_refs`.
     fn on_the_tag(app: &mut App) {
-        // The rail's tag glyph expands the sidebar with the section open.
+        on_the_entry(app, 4, "v1");
+    }
+
+    /// The sidebar's selection on the entry `label` of the section the rail
+    /// lists at `rail`, which its glyph opens as it expands the sidebar.
+    fn on_the_entry(app: &mut App, rail: usize, label: &str) {
         press(app, KeyCode::Char('1'));
         app.focus = Focus::Sidebar;
-        app.side.rail_selected = 4;
+        app.side.rail_selected = rail;
         press(app, KeyCode::Enter);
         let data = app.data.as_ref().unwrap();
         let rows = sidebar::rows(&data.sidebar, &app.side);
-        app.side.selected = rows.iter().position(|r| r.label == "v1").unwrap();
+        let labels: Vec<_> = rows.iter().map(|r| r.label.clone()).collect();
+        app.side.selected = labels
+            .iter()
+            .position(|l| l == label)
+            .unwrap_or_else(|| panic!("{label} not among {labels:?}"));
     }
 
     #[test]
@@ -1907,6 +2062,87 @@ pub(crate) mod tests {
             app.write.is_some(),
             "the result is in, the next write starts"
         );
+    }
+
+    #[test]
+    // Verifies: ADR-0033, G-4
+    fn b_asks_for_a_branch_at_the_commit_switched_to_unless_turned_off() {
+        let mut app = loaded_app();
+        press(&mut app, KeyCode::Char('j'));
+        press(&mut app, KeyCode::Char('b'));
+        type_text(&mut app, "topic");
+        press(&mut app, KeyCode::Enter);
+        let branch = |switch| Write::CreateBranch {
+            name: "topic".into(),
+            commit: "c".into(),
+            switch,
+        };
+        assert_eq!(taken(&mut app), Some((branch(true), Confirmation::Absent)));
+        press(&mut app, KeyCode::Char('b'));
+        type_text(&mut app, "topic");
+        press(&mut app, KeyCode::Tab);
+        press(&mut app, KeyCode::Enter);
+        assert_eq!(taken(&mut app), Some((branch(false), Confirmation::Absent)));
+    }
+
+    #[test]
+    // Verifies: ADR-0033, G-4
+    fn w_switches_to_a_branch_a_remote_branch_or_a_commit() {
+        let mut app = loaded_app();
+        press(&mut app, KeyCode::Char('w'));
+        let detach = Write::Detach { commit: "d".into() };
+        assert_eq!(taken(&mut app), Some((detach, Confirmation::Absent)));
+
+        let mut app = loaded_app();
+        on_the_entry(&mut app, 1, "x");
+        press(&mut app, KeyCode::Char('w'));
+        let switch = Write::SwitchBranch {
+            name: "feat/x".into(),
+            tip: "b".into(),
+        };
+        assert_eq!(taken(&mut app), Some((switch, Confirmation::Absent)));
+
+        let mut app = loaded_app();
+        on_the_entry(&mut app, 2, "main");
+        // The remote's `main`, below the local one.
+        let data = app.data.as_ref().unwrap();
+        let rows = sidebar::rows(&data.sidebar, &app.side);
+        app.side.selected = rows.iter().rposition(|r| r.label == "main").unwrap();
+        press(&mut app, KeyCode::Char('w'));
+        let track = Write::TrackRemote {
+            remote: "origin".into(),
+            branch: "main".into(),
+            tip: "b".into(),
+        };
+        assert_eq!(taken(&mut app), Some((track, Confirmation::Absent)));
+    }
+
+    #[test]
+    // Verifies: ADR-0034, Q-6
+    fn d_deletes_a_merged_branch_and_asks_first_for_one_that_is_not() {
+        let delete = |merged| Write::DeleteBranch {
+            name: "feat/x".into(),
+            tip: "b".into(),
+            merged,
+        };
+        for merged in [true, false] {
+            let mut app = loaded_app();
+            app.data.as_mut().unwrap().locals[1].merged = merged;
+            on_the_entry(&mut app, 1, "x");
+            press(&mut app, KeyCode::Char('d'));
+            if merged {
+                assert_eq!(taken(&mut app), Some((delete(true), Confirmation::Absent)));
+            } else {
+                assert_eq!(app.confirm(), Some(&delete(false)));
+                press(&mut app, KeyCode::Char('n'));
+                assert_eq!(app.write, None);
+            }
+        }
+        let mut app = loaded_app();
+        on_the_entry(&mut app, 1, "main");
+        press(&mut app, KeyCode::Char('d'));
+        assert_eq!((app.modal.clone(), app.write.clone()), (None, None));
+        assert_eq!(app.status, "main is checked out");
     }
 
     #[test]

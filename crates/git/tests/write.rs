@@ -192,9 +192,36 @@ fn writing_a_repository_runs_none_of_its_programs() {
     GitWriter
         .write(&scratch.0, &stage_in(&scratch.0, "f"))
         .unwrap();
-    GitWriter
+    let made = GitWriter
         .write(&scratch.0, &commit_on(&one, "commit"))
+        .unwrap()
         .unwrap();
+    // A switch is where git runs post-checkout.
+    let branch = Write::CreateBranch {
+        name: "b".into(),
+        commit: one.clone(),
+        switch: true,
+    };
+    GitWriter.write(&scratch.0, &branch).unwrap();
+    let back = Write::SwitchBranch {
+        name: "main".into(),
+        tip: made.clone(),
+    };
+    GitWriter.write(&scratch.0, &back).unwrap();
+    GitWriter
+        .write(
+            &scratch.0,
+            &Write::Detach {
+                commit: one.clone(),
+            },
+        )
+        .unwrap();
+    let delete = Write::DeleteBranch {
+        name: "b".into(),
+        tip: one.clone(),
+        merged: true,
+    };
+    GitWriter.write(&scratch.0, &delete).unwrap();
     let ran = markers.ran();
     assert!(ran.is_empty(), "programs ran: {ran:?}");
 }
@@ -985,4 +1012,326 @@ fn an_annotated_tag_is_refused_where_annotated_tags_are_always_signed() {
         "{error}"
     );
     assert_eq!(tags(&scratch.0), "");
+}
+
+/// HEAD as `git` reads it: the branch it is on, or the commit it is detached at.
+fn head_of(dir: &Path) -> String {
+    let out = Command::new("git")
+        .arg("-C")
+        .arg(dir)
+        .args(["symbolic-ref", "--quiet", "--short", "HEAD"])
+        .output()
+        .unwrap();
+    match out.status.success() {
+        true => String::from_utf8(out.stdout).unwrap().trim().to_string(),
+        false => format!("detached at {}", git(dir, &["rev-parse", "HEAD"])),
+    }
+}
+
+/// A repository with `f` committed on main, and a branch `side` one commit on, changing `f` and
+/// adding `s`; main checked out.
+fn with_side(name: &str) -> (Scratch, String, String) {
+    let scratch = with_file(name);
+    let main = git(&scratch.0, &["rev-parse", "HEAD"]);
+    git(&scratch.0, &["switch", "--quiet", "-c", "side"]);
+    write_file(&scratch.0, "f", "side\n");
+    write_file(&scratch.0, "s", "side only\n");
+    git(&scratch.0, &["add", "f", "s"]);
+    git(&scratch.0, &["commit", "--quiet", "-m", "side"]);
+    let side = git(&scratch.0, &["rev-parse", "HEAD"]);
+    git(&scratch.0, &["switch", "--quiet", "main"]);
+    (scratch, main, side)
+}
+
+fn everything(dir: &Path) -> (String, String, String) {
+    let status = git(dir, &["status", "--porcelain", "--ignored"]);
+    (
+        head_of(dir),
+        status,
+        git(
+            dir,
+            &[
+                "branch",
+                "--list",
+                "--format=%(refname:short) %(objectname)",
+            ],
+        ),
+    )
+}
+
+#[test]
+// Verifies: ADR-0033, G-4
+fn a_branch_is_created_at_the_commit_and_switched_to_where_asked() {
+    let (scratch, main, side) = with_side("create-branch");
+    let create = |name: &str, commit: &str, switch| Write::CreateBranch {
+        name: name.into(),
+        commit: commit.into(),
+        switch,
+    };
+    write_file(&scratch.0, "mine", "untracked\n");
+    GitWriter
+        .write(&scratch.0, &create("here", &main, false))
+        .unwrap();
+    assert_eq!(git(&scratch.0, &["rev-parse", "here"]), main);
+    assert_eq!(head_of(&scratch.0), "main");
+
+    GitWriter
+        .write(&scratch.0, &create("there", &side, true))
+        .unwrap();
+    assert_eq!(head_of(&scratch.0), "there");
+    assert_eq!(git(&scratch.0, &["rev-parse", "HEAD"]), side);
+    assert_eq!(
+        status(&scratch.0),
+        "?? mine",
+        "the working directory is side's, mine kept"
+    );
+
+    let before = everything(&scratch.0);
+    for (name, why) in [
+        ("here", "exists already"),
+        ("-x", "not a name"),
+        ("HEAD", "not a name"),
+        ("a..b", "not a name"),
+    ] {
+        let error = GitWriter
+            .write(&scratch.0, &create(name, &main, true))
+            .unwrap_err();
+        assert!(error.to_string().contains(why), "{name}: {error}");
+    }
+    assert_eq!(everything(&scratch.0), before);
+}
+
+#[test]
+// Verifies: ADR-0033, G-4
+fn a_switch_takes_the_changes_along_or_is_refused_naming_what_is_in_the_way() {
+    let (scratch, main, side) = with_side("switch");
+    let switch = |name: &str, tip: &str| Write::SwitchBranch {
+        name: name.into(),
+        tip: tip.into(),
+    };
+    write_file(&scratch.0, "mine", "untracked\n");
+    GitWriter.write(&scratch.0, &switch("side", &side)).unwrap();
+    assert_eq!(head_of(&scratch.0), "side");
+    assert_eq!(
+        std::fs::read_to_string(scratch.0.join("s")).unwrap(),
+        "side only\n"
+    );
+    assert_eq!(status(&scratch.0), "?? mine");
+
+    write_file(&scratch.0, "f", "my change\n");
+    let before = everything(&scratch.0);
+    let error = GitWriter
+        .write(&scratch.0, &switch("main", &main))
+        .unwrap_err();
+    assert!(
+        error.to_string().contains("changes to f are in the way"),
+        "{error}"
+    );
+    let error = GitWriter
+        .write(&scratch.0, &switch("main", &side))
+        .unwrap_err();
+    assert!(
+        error.to_string().contains("no longer where it was shown"),
+        "{error}"
+    );
+    assert_eq!(everything(&scratch.0), before);
+    assert_eq!(
+        std::fs::read_to_string(scratch.0.join("f")).unwrap(),
+        "my change\n"
+    );
+
+    git(&scratch.0, &["checkout", "--quiet", "--", "f"]);
+    GitWriter
+        .write(
+            &scratch.0,
+            &Write::Detach {
+                commit: main.clone(),
+            },
+        )
+        .unwrap();
+    assert_eq!(head_of(&scratch.0), format!("detached at {main}"));
+}
+
+#[test]
+// Verifies: ADR-0033, G-4
+fn a_remote_branch_is_switched_to_through_a_local_branch_that_tracks_it() {
+    let (origin, _, side) = with_side("remote-origin");
+    let clone = Scratch::new("remote-clone");
+    std::fs::remove_dir_all(&clone.0).unwrap();
+    git(
+        Path::new("/"),
+        &[
+            "clone",
+            "--quiet",
+            origin.0.to_str().unwrap(),
+            clone.0.to_str().unwrap(),
+        ],
+    );
+    let track = Write::TrackRemote {
+        remote: "origin".into(),
+        branch: "side".into(),
+        tip: side.clone(),
+    };
+    GitWriter.write(&clone.0, &track).unwrap();
+    assert_eq!(head_of(&clone.0), "side");
+    assert_eq!(
+        git(&clone.0, &["rev-parse", "--abbrev-ref", "side@{upstream}"]),
+        "origin/side"
+    );
+    let error = GitWriter.write(&clone.0, &track).unwrap_err();
+    assert!(error.to_string().contains("exists already"), "{error}");
+}
+
+#[test]
+// Verifies: ADR-0033, ADR-0034, G-4
+fn a_branch_is_deleted_only_as_shown_and_never_while_checked_out() {
+    let (scratch, main, side) = with_side("delete-branch");
+    git(&scratch.0, &["branch", "merged", &main]);
+    let delete = |name: &str, tip: &str, merged| Write::DeleteBranch {
+        name: name.into(),
+        tip: tip.into(),
+        merged,
+    };
+    let before = everything(&scratch.0);
+    for (write, why) in [
+        (
+            delete("side", &side, true),
+            "whether 'side' is merged changed",
+        ),
+        (delete("side", &main, false), "no longer where it was shown"),
+        (delete("main", &main, true), "is checked out"),
+    ] {
+        let error = GitWriter.write(&scratch.0, &write).unwrap_err();
+        assert!(error.to_string().contains(why), "{error}");
+    }
+    assert_eq!(everything(&scratch.0), before);
+    GitWriter
+        .write(&scratch.0, &delete("merged", &main, true))
+        .unwrap();
+    GitWriter
+        .write(&scratch.0, &delete("side", &side, false))
+        .unwrap();
+    assert_eq!(
+        git(
+            &scratch.0,
+            &["branch", "--list", "--format=%(refname:short)"]
+        ),
+        "main"
+    );
+}
+
+/// What a refused write must leave as it was: HEAD, the branches, the working directory's status
+/// with ignored files, and the index's entries.
+fn all_of(dir: &Path) -> (String, String, String, String) {
+    let (head, status, branches) = everything(dir);
+    (head, status, branches, git(dir, &["ls-files", "--stage"]))
+}
+
+#[test]
+// Verifies: ADR-0033, G-4
+fn a_switch_carries_what_the_target_leaves_alone_and_refuses_staged_changes_it_touches() {
+    let (scratch, _, side) = with_side("switch-carry");
+    let switch = Write::SwitchBranch {
+        name: "side".into(),
+        tip: side.clone(),
+    };
+
+    // Staged where the target changes f, the working directory as HEAD has it.
+    write_file(&scratch.0, "f", "staged\n");
+    git(&scratch.0, &["add", "f"]);
+    write_file(&scratch.0, "f", "base\n");
+    let before = all_of(&scratch.0);
+    let error = GitWriter.write(&scratch.0, &switch).unwrap_err();
+    assert!(
+        error
+            .to_string()
+            .contains("staged changes to f are in the way"),
+        "{error}"
+    );
+    assert_eq!(all_of(&scratch.0), before);
+    git(&scratch.0, &["reset", "--quiet", "--", "f"]);
+
+    // A staged file the target leaves alone goes along; a deleted f the target changes comes
+    // back, as git switch has it.
+    write_file(&scratch.0, "h", "new\n");
+    git(&scratch.0, &["add", "h"]);
+    std::fs::remove_file(scratch.0.join("f")).unwrap();
+    GitWriter.write(&scratch.0, &switch).unwrap();
+    assert_eq!(head_of(&scratch.0), "side");
+    assert_eq!(status(&scratch.0), "A  h");
+    assert_eq!(
+        std::fs::read_to_string(scratch.0.join("f")).unwrap(),
+        "side\n"
+    );
+}
+
+#[test]
+// Verifies: ADR-0033, G-4
+fn a_branch_checked_out_in_another_working_tree_is_neither_switched_to_nor_deleted() {
+    let (scratch, main, side) = with_side("worktree");
+    let elsewhere = Scratch::new("worktree-other");
+    std::fs::remove_dir_all(&elsewhere.0).unwrap();
+    git(
+        &scratch.0,
+        &[
+            "worktree",
+            "add",
+            "--quiet",
+            elsewhere.0.to_str().unwrap(),
+            "side",
+        ],
+    );
+    let before = all_of(&scratch.0);
+    for write in [
+        Write::SwitchBranch {
+            name: "side".into(),
+            tip: side.clone(),
+        },
+        Write::DeleteBranch {
+            name: "side".into(),
+            tip: side.clone(),
+            merged: false,
+        },
+    ] {
+        let error = GitWriter.write(&scratch.0, &write).unwrap_err();
+        assert!(
+            error
+                .to_string()
+                .contains("checked out in the working tree"),
+            "{error}"
+        );
+    }
+    assert_eq!(all_of(&scratch.0), before);
+    let _ = main;
+}
+
+#[test]
+// Verifies: ADR-0033, G-4
+fn a_branch_whose_name_clashes_with_another_is_refused_with_nothing_changed() {
+    let (scratch, main, side) = with_side("clash");
+    git(&scratch.0, &["branch", "feature/x", &main]);
+    let before = all_of(&scratch.0);
+    let create = Write::CreateBranch {
+        name: "feature".into(),
+        commit: side.clone(),
+        switch: true,
+    };
+    let error = GitWriter.write(&scratch.0, &create).unwrap_err();
+    assert!(
+        error.to_string().contains("cannot be created here"),
+        "{error}"
+    );
+    assert_eq!(all_of(&scratch.0), before);
+
+    // A switch refused after the branch was created takes the branch away again.
+    write_file(&scratch.0, "f", "mine\n");
+    let before = all_of(&scratch.0);
+    let create = Write::CreateBranch {
+        name: "topic".into(),
+        commit: side.clone(),
+        switch: true,
+    };
+    let error = GitWriter.write(&scratch.0, &create).unwrap_err();
+    assert!(error.to_string().contains("in the way"), "{error}");
+    assert_eq!(all_of(&scratch.0), before);
 }
