@@ -72,10 +72,14 @@ fn create_tag(repo: &Repository, name: &str, commit: &str, message: Option<&str>
         .ok()
         .and_then(|oid| repo.find_object(oid, Some(ObjectType::Commit)).ok())
         .with_context(|| format!("the commit {commit} is no longer in the repository"))?;
-    // Cleaned up as `git tag` cleans it: surrounding blank lines and trailing spaces go, and it
-    // ends in a newline.
+    // Cleaned up as `git tag` cleans it: comment lines, surrounding blank lines, and trailing
+    // spaces go, and it ends in a newline.
+    let comment = comment_string(repo)?;
     let message = message
-        .map(|m| git2::message_prettify(m, None))
+        .map(|m| {
+            let kept: Vec<_> = m.lines().filter(|l| !l.starts_with(&comment)).collect();
+            git2::message_prettify(kept.join("\n"), None)
+        })
         .transpose()?;
     match message.filter(|m| !m.is_empty()) {
         Some(message) => {
@@ -87,6 +91,20 @@ fn create_tag(repo: &Repository, name: &str, commit: &str, message: Option<&str>
         }
     }
     Ok(())
+}
+
+/// What starts a comment line in a message, as `git` reads it: `core.commentString` or
+/// `core.commentChar`, whichever the configuration sets last, and `#` where neither is set or
+/// it is `auto`, which `git tag` does not adjust.
+fn comment_string(repo: &Repository) -> Result<String> {
+    let config = repo.config()?.snapshot()?;
+    let mut comment = None;
+    config
+        .entries(Some("core\\.comment(char|string)"))?
+        .for_each(|entry| comment = entry.value().map(str::to_string))?;
+    Ok(comment
+        .filter(|c| !c.is_empty() && c != "auto")
+        .unwrap_or_else(|| "#".to_string()))
 }
 
 /// Deletes the tag, if it is still the one the developer saw: on `commit`, and annotated or not

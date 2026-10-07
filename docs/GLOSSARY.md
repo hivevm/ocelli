@@ -70,6 +70,9 @@ to invent.
 - **Remote server** — the part of Ocelli that runs on the machine holding a repository and serves
   the web interface to the developer's browser, as VS Code's remote development does.
   _Avoid:_ backend, daemon, agent.
+- **Stash node** — the node of the commit graph that stands for one entry of the stash, joined to
+  the commit it was made on, and carrying its place `n` of `stash@{n}`.
+  _Avoid:_ stash commit, stash entry node.
 - **Submodule state** — what the sidebar says about a configured submodule: on the pinned commit,
   modified when its working copy has drifted from it, or not initialized when it was never checked
   out; determined without cloning or fetching.
@@ -84,3 +87,8 @@ to invent.
 - **Working-directory node** — the node at the top of the commit graph that stands for the
   uncommitted changes of the working directory.
   _Avoid:_ WIP node, workdir commit.
+- **Write** — a change Ocelli makes to a repository at the developer's request, such as creating a
+  tag or applying a stash, naming the state it expects to find and refused with nothing changed
+  where the repository no longer holds it; a write that discards work runs only once the
+  developer has confirmed it.
+  _Avoid:_ operation, action, mutation.

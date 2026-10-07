@@ -18,7 +18,7 @@ use crate::theme::Theme;
 use ocelli_core::graph::LaidChunk;
 use ocelli_core::history::{History, Lineage};
 use ocelli_core::load::{Event, LoadSession};
-use ocelli_core::model::{CommitKind, DiffLine, FileChange, NodeJson, RepoRefs, Tag, stash_index};
+use ocelli_core::model::{CommitKind, DiffLine, FileChange, NodeJson, RepoRefs, Tag};
 use ocelli_core::port::{Confirmation, Write};
 use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use std::collections::HashSet;
@@ -49,8 +49,11 @@ pub struct Loaded {
 
 impl Loaded {
     /// The first chunk, shown before the refs arrive (ADR-0016).
-    pub fn new(first_chunk: LaidChunk) -> Self {
+    pub fn new(first_chunk: LaidChunk, select_again: Option<String>) -> Self {
         let mut session = LoadSession::new();
+        if let Some(sha) = select_again {
+            session.select_again(sha);
+        }
         session.append(first_chunk);
         Self {
             session,
@@ -155,6 +158,20 @@ pub struct StashPrompt {
     pub untracked: bool,
 }
 
+/// What takes every key until it closes: a prompt, or the question before a
+/// write that discards work. One at a time, by its type.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Modal {
+    /// The path typed after `o`.
+    Open(String),
+    /// The tag typed after `t`.
+    Tag(TagPrompt),
+    /// The stash described after `s`.
+    Stash(StashPrompt),
+    /// A write that discards work, waiting for the developer's answer (ADR-0034).
+    Confirm(Write),
+}
+
 pub struct App {
     pub repo: PathBuf,
     pub status: String,
@@ -183,26 +200,38 @@ pub struct App {
     /// Side-by-side instead of unified — kept across files.
     pub diff_split: bool,
     pub search: Search,
-    /// Path being typed after `o`; `None` when no prompt is open.
-    pub prompt: Option<String>,
-    /// The tag being typed after `t`; `None` when no tag prompt is open.
-    pub tag_prompt: Option<TagPrompt>,
-    /// The stash being described after `s`; `None` when no stash prompt is open.
-    pub stash_prompt: Option<StashPrompt>,
+    /// The prompt or question open; `None` when keys go to the panes.
+    pub modal: Option<Modal>,
     pub quit: bool,
     /// Reads for the worker, drained by the event loop after every key.
     pub requests: Vec<Request>,
     /// A repository to switch to, taken by the event loop, which then starts a
     /// fresh load and drops every result still in flight for the old one.
     pub reload: Option<PathBuf>,
-    /// A write that discards work, waiting for the developer's answer (ADR-0034).
-    pub confirm: Option<Write>,
     /// A write for the event loop to run; its result comes back as [`Msg::Written`].
     pub write: Option<(Write, Confirmation)>,
-    /// The commit to select again once its row arrives in a reload after a write.
-    pub reselect: Option<String>,
+    /// The commit a write left selected, handed to the core's load session of the reload with
+    /// its first chunk; the session names its row once laid out (ADR-0033).
+    pub select_again: Option<String>,
     /// Text for the terminal clipboard, taken by the event loop.
     pub clipboard: Option<String>,
+}
+
+/// The character a key types: one without a modifier, or one AltGr types,
+/// which some terminals report as Ctrl+Alt (crossterm on Windows), as `[`, `{`
+/// and `@` are on many European layouts. A letter or a digit held with Ctrl or
+/// Alt types nothing; it is a chord or a slip.
+fn typed(key: KeyEvent) -> Option<char> {
+    let KeyCode::Char(c) = key.code else {
+        return None;
+    };
+    let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
+    let alt = key.modifiers.contains(KeyModifiers::ALT);
+    match (ctrl, alt) {
+        (false, false) => Some(c),
+        (true, true) if !c.is_ascii_alphanumeric() => Some(c),
+        _ => None,
+    }
 }
 
 impl App {
@@ -227,15 +256,12 @@ impl App {
             diff: None,
             diff_split: false,
             search: Search::default(),
-            prompt: None,
-            tag_prompt: None,
-            stash_prompt: None,
+            modal: None,
             quit: false,
             requests: Vec::new(),
             reload: None,
-            confirm: None,
             write: None,
-            reselect: None,
+            select_again: None,
             clipboard: None,
         }
     }
@@ -298,9 +324,9 @@ impl App {
             // The repository is read again, the commit that was selected
             // selected again once its row arrives (ADR-0033).
             Msg::Written(Ok(())) => {
-                let reselect = self.selected_sha();
+                let select_again = self.selected_sha();
                 self.open_repo(self.repo.clone(), "Written — reloading…");
-                self.reselect = reselect;
+                self.select_again = select_again;
             }
             Msg::Diff { sha, path, lines } => {
                 let current = self.files.as_ref().map(|f| f.sha.as_str()) == Some(sha.as_str());
@@ -313,17 +339,9 @@ impl App {
 
     /// Takes in how the load goes (ADR-0016).
     fn on_load(&mut self, event: Event) {
-        let ended = matches!(event, Event::Ended(_));
         self.take_in(event);
-        if let Some(sha) = self.reselect.clone() {
-            match self.data.as_ref().and_then(|d| d.row_of(&sha)) {
-                Some(row) => {
-                    self.reselect = None;
-                    self.select(row);
-                }
-                None if ended => self.reselect = None,
-                None => {}
-            }
+        if let Some(row) = self.data.as_mut().and_then(|d| d.session.row_to_select()) {
+            self.show(row);
         }
     }
 
@@ -333,10 +351,10 @@ impl App {
             (Event::Progress(p), None) => self.status = p,
             (Event::Progress(_), Some(_)) => {}
             (Event::Chunk(chunk), None) => {
-                let data = Loaded::new(chunk);
+                let data = Loaded::new(chunk, self.select_again.take());
                 self.status = data.session.status();
                 self.data = Some(data);
-                self.select(0);
+                self.show(0);
                 // A query typed while the history was loading.
                 self.update_matches();
             }
@@ -374,8 +392,17 @@ impl App {
         self.selected_node().map(|n| n.sha.clone())
     }
 
-    /// Selects a graph row: computes its lineage and asks for its files.
+    /// Selects a graph row the developer chose, which wins over a commit a write left to select
+    /// again (ADR-0033).
     fn select(&mut self, row: usize) {
+        if let Some(data) = self.data.as_mut() {
+            data.session.keep_selection();
+        }
+        self.show(row);
+    }
+
+    /// Selects a graph row: computes its lineage and asks for its files.
+    fn show(&mut self, row: usize) {
         let Some(data) = &self.data else { return };
         if data.rows() == 0 {
             return;
@@ -435,18 +462,15 @@ impl App {
             self.quit = true;
             return;
         }
-        // Text inputs take every key until they close.
-        if self.prompt.is_some() {
-            return self.prompt_key(key);
-        }
-        if self.tag_prompt.is_some() {
-            return self.tag_key(key);
-        }
-        if self.stash_prompt.is_some() {
-            return self.stash_key(key);
-        }
-        if let Some(write) = self.confirm.take() {
-            return self.answer(write, key);
+        // A prompt or a question takes every key until it closes; its handler
+        // puts it back while it stays open.
+        if let Some(modal) = self.modal.take() {
+            return match modal {
+                Modal::Open(path) => self.prompt_key(path, key),
+                Modal::Tag(tag) => self.tag_key(tag, key),
+                Modal::Stash(stash) => self.stash_key(stash, key),
+                Modal::Confirm(write) => self.answer(write, key),
+            };
         }
         if self.search.editing {
             return self.search_key(key);
@@ -460,11 +484,20 @@ impl App {
         if self.diff.is_some() {
             return self.diff_key(key, ctrl);
         }
+        // A character held with Ctrl or Alt reaches the panes only as a chord
+        // one knows, the graph's Ctrl+D and Ctrl+U, or as one AltGr typed;
+        // every other one does nothing, so no slip of a modifier writes or asks.
+        let chord = key.modifiers == KeyModifiers::CONTROL
+            && self.focus == Focus::Graph
+            && matches!(key.code, KeyCode::Char('d' | 'u'));
+        if matches!(key.code, KeyCode::Char(_)) && typed(key).is_none() && !chord {
+            return;
+        }
         match key.code {
             KeyCode::Char('q') => self.quit = true,
             KeyCode::Char('1') => self.side.toggle_minimised(),
             KeyCode::Char('T') => self.theme = self.theme.toggled(),
-            KeyCode::Char('o') => self.prompt = Some(self.repo.display().to_string()),
+            KeyCode::Char('o') => self.modal = Some(Modal::Open(self.repo.display().to_string())),
             KeyCode::Char('r') => self.open_repo(self.repo.clone(), "Refreshing…"),
             KeyCode::Char('n') => self.jump_to_match(1),
             KeyCode::Char('N') => self.jump_to_match(-1),
@@ -497,23 +530,56 @@ impl App {
 
     // ── Text inputs ─────────────────────────────────────────────────────────
 
-    fn prompt_key(&mut self, key: KeyEvent) {
-        let Some(text) = &mut self.prompt else { return };
+    /// The modals the tests look into.
+    #[cfg(test)]
+    pub fn prompt(&self) -> Option<&str> {
+        match &self.modal {
+            Some(Modal::Open(path)) => Some(path),
+            _ => None,
+        }
+    }
+
+    #[cfg(test)]
+    pub fn tag_prompt(&self) -> Option<&TagPrompt> {
+        match &self.modal {
+            Some(Modal::Tag(tag)) => Some(tag),
+            _ => None,
+        }
+    }
+
+    #[cfg(test)]
+    pub fn stash_prompt(&self) -> Option<&StashPrompt> {
+        match &self.modal {
+            Some(Modal::Stash(stash)) => Some(stash),
+            _ => None,
+        }
+    }
+
+    #[cfg(test)]
+    pub fn confirm(&self) -> Option<&Write> {
+        match &self.modal {
+            Some(Modal::Confirm(write)) => Some(write),
+            _ => None,
+        }
+    }
+
+    fn prompt_key(&mut self, mut text: String, key: KeyEvent) {
         match key.code {
-            KeyCode::Char(c) => text.push(c),
+            KeyCode::Char(_) => text.extend(typed(key)),
             KeyCode::Backspace => {
                 text.pop();
             }
-            KeyCode::Esc => self.prompt = None,
+            KeyCode::Esc => return,
             KeyCode::Enter => {
                 let path = PathBuf::from(text.trim());
-                self.prompt = None;
                 if !path.as_os_str().is_empty() {
                     self.open_repo(path, "Opening…");
                 }
+                return;
             }
             _ => {}
         }
+        self.modal = Some(Modal::Open(text));
     }
 
     /// `t`: asks for a tag on the selected commit. The working-directory node
@@ -526,33 +592,27 @@ impl App {
             self.status = "Only a commit can be tagged".to_string();
             return;
         }
-        self.tag_prompt = Some(TagPrompt {
+        self.modal = Some(Modal::Tag(TagPrompt {
             sha: node.sha.clone(),
             name: String::new(),
             message: None,
-        });
+        }));
     }
 
-    fn tag_key(&mut self, key: KeyEvent) {
-        let Some(tag) = &mut self.tag_prompt else {
-            return;
-        };
+    fn tag_key(&mut self, mut tag: TagPrompt, key: KeyEvent) {
         let text = tag.message.as_mut().unwrap_or(&mut tag.name);
         match key.code {
-            KeyCode::Char(c) if !key.modifiers.contains(KeyModifiers::CONTROL) => text.push(c),
+            KeyCode::Char(_) => text.extend(typed(key)),
             KeyCode::Backspace => {
                 text.pop();
             }
-            KeyCode::Esc => self.tag_prompt = None,
+            KeyCode::Esc => return,
             KeyCode::Enter if tag.message.is_none() => {
                 if !tag.name.trim().is_empty() {
                     tag.message = Some(String::new());
                 }
             }
             KeyCode::Enter => {
-                let Some(tag) = self.tag_prompt.take() else {
-                    return;
-                };
                 let name = tag.name.trim().to_string();
                 self.status = format!("Tagging {name}…");
                 // An empty message makes a lightweight tag.
@@ -562,9 +622,11 @@ impl App {
                     message: tag.message.filter(|m| !m.trim().is_empty()),
                 };
                 self.write = Some((write, Confirmation::Absent));
+                return;
             }
             _ => {}
         }
+        self.modal = Some(Modal::Tag(tag));
     }
 
     /// The answer to a write that discards work: only `y` writes, every other
@@ -578,23 +640,15 @@ impl App {
         }
     }
 
-    fn stash_key(&mut self, key: KeyEvent) {
-        let Some(stash) = &mut self.stash_prompt else {
-            return;
-        };
+    fn stash_key(&mut self, mut stash: StashPrompt, key: KeyEvent) {
         match key.code {
-            KeyCode::Char(c) if !key.modifiers.contains(KeyModifiers::CONTROL) => {
-                stash.message.push(c)
-            }
+            KeyCode::Char(_) => stash.message.extend(typed(key)),
             KeyCode::Backspace => {
                 stash.message.pop();
             }
             KeyCode::Tab => stash.untracked = !stash.untracked,
-            KeyCode::Esc => self.stash_prompt = None,
+            KeyCode::Esc => return,
             KeyCode::Enter => {
-                let Some(stash) = self.stash_prompt.take() else {
-                    return;
-                };
                 self.status = "Stashing…".to_string();
                 let message = Some(stash.message).filter(|m| !m.trim().is_empty());
                 let write = Write::CreateStash {
@@ -602,9 +656,11 @@ impl App {
                     untracked: stash.untracked,
                 };
                 self.write = Some((write, Confirmation::Absent));
+                return;
             }
             _ => {}
         }
+        self.modal = Some(Modal::Stash(stash));
     }
 
     /// `a`, `p`, `d` on a selected stash node: applies it, and pops or drops it
@@ -613,7 +669,7 @@ impl App {
         let Some(node) = self.selected_node() else {
             return;
         };
-        let Some(index) = stash_index(&node.refs).filter(|_| node.kind == CommitKind::Stash) else {
+        let Some(index) = node.stash else {
             return;
         };
         let commit = node.sha.clone();
@@ -627,7 +683,7 @@ impl App {
             _ => return,
         };
         if write.discards().is_some() {
-            self.confirm = Some(write);
+            self.modal = Some(Modal::Confirm(write));
         } else {
             self.status = format!("Applying stash@{{{index}}}…");
             self.write = Some((write, Confirmation::Absent));
@@ -648,11 +704,11 @@ impl App {
         let Some(tag) = data.tags.iter().find(|t| t.name == item.name) else {
             return;
         };
-        self.confirm = Some(Write::DeleteTag {
+        self.modal = Some(Modal::Confirm(Write::DeleteTag {
             name: tag.name.clone(),
             commit: tag.sha.clone(),
             annotated: tag.annotated,
-        });
+        }));
     }
 
     fn start_search(&mut self) {
@@ -802,11 +858,11 @@ impl App {
                 self.start_tag();
                 None
             }
-            KeyCode::Char('s') if !ctrl => {
-                self.stash_prompt = Some(StashPrompt::default());
+            KeyCode::Char('s') => {
+                self.modal = Some(Modal::Stash(StashPrompt::default()));
                 None
             }
-            KeyCode::Char(c @ ('a' | 'p' | 'd')) if !ctrl => {
+            KeyCode::Char(c @ ('a' | 'p' | 'd')) => {
                 self.on_stash(KeyCode::Char(c));
                 None
             }
@@ -855,11 +911,7 @@ impl App {
             KeyCode::Char('k') | KeyCode::Up => self.link = self.link.saturating_sub(1),
             KeyCode::Char('y') => self.copy_sha(),
             KeyCode::Char('t') => self.start_tag(),
-            KeyCode::Char(c @ ('a' | 'p' | 'd'))
-                if !key.modifiers.contains(KeyModifiers::CONTROL) =>
-            {
-                self.on_stash(KeyCode::Char(c))
-            }
+            KeyCode::Char(c @ ('a' | 'p' | 'd')) => self.on_stash(KeyCode::Char(c)),
             KeyCode::Enter => {
                 let Some(sha) = links.get(self.link) else {
                     return;
@@ -982,6 +1034,7 @@ pub(crate) mod tests {
             refs: refs.iter().map(|r| r.to_string()).collect(),
             parent_shas: parents.iter().map(|p| p.to_string()).collect(),
             kind: CommitKind::Commit,
+            stash: None,
         }
     }
 
@@ -1291,7 +1344,7 @@ pub(crate) mod tests {
     fn o_opens_a_path_prompt_and_r_reloads_the_current_repository() {
         let mut app = loaded_app();
         press(&mut app, KeyCode::Char('o'));
-        assert_eq!(app.prompt.as_deref(), Some("/repo"));
+        assert_eq!(app.prompt(), Some("/repo"));
         for _ in 0.."/repo".len() {
             press(&mut app, KeyCode::Backspace);
         }
@@ -1313,16 +1366,12 @@ pub(crate) mod tests {
         press(&mut app, KeyCode::Char('j'));
         press(&mut app, KeyCode::Char('t'));
         press(&mut app, KeyCode::Enter);
-        assert_eq!(
-            app.tag_prompt.as_ref().unwrap().message,
-            None,
-            "a name first"
-        );
+        assert_eq!(app.tag_prompt().unwrap().message, None, "a name first");
         type_text(&mut app, "v2");
         press(&mut app, KeyCode::Enter);
         type_text(&mut app, "Second");
         press(&mut app, KeyCode::Enter);
-        assert_eq!(app.tag_prompt, None);
+        assert_eq!(app.tag_prompt(), None);
         let tag = Write::CreateTag {
             name: "v2".into(),
             commit: "c".into(),
@@ -1347,7 +1396,7 @@ pub(crate) mod tests {
         press(&mut app, KeyCode::Char('t'));
         type_text(&mut app, "x");
         press(&mut app, KeyCode::Esc);
-        assert_eq!(app.tag_prompt, None);
+        assert_eq!(app.tag_prompt(), None);
         assert_eq!(app.write, None);
         press(&mut app, KeyCode::Char('j'));
         assert_eq!(sha(&app), "c", "keys move again once the prompt is closed");
@@ -1364,13 +1413,13 @@ pub(crate) mod tests {
             RepoRefs::default(),
         );
         press(&mut app, KeyCode::Char('t'));
-        assert_eq!(app.tag_prompt, None);
+        assert_eq!(app.tag_prompt(), None);
         assert_eq!(app.status, "Only a commit can be tagged");
 
         let mut app = loaded_app();
         press(&mut app, KeyCode::Esc);
         press(&mut app, KeyCode::Char('t'));
-        assert_eq!(app.tag_prompt, None, "nothing selected, nothing to tag");
+        assert_eq!(app.tag_prompt(), None, "nothing selected, nothing to tag");
     }
 
     #[test]
@@ -1380,7 +1429,7 @@ pub(crate) mod tests {
         press(&mut app, KeyCode::Char('j'));
         app.on_msg(Msg::Written(Ok(())));
         assert_eq!(app.reload, Some(PathBuf::from("/repo")));
-        assert_eq!(app.reselect.as_deref(), Some("c"));
+        assert_eq!(app.select_again.as_deref(), Some("c"));
         let commits = vec![
             commit("d", 4, &["b", "c"], &["main"]),
             commit("c", 3, &["a"], &["🏷 v1", "🏷 v2"]),
@@ -1395,7 +1444,27 @@ pub(crate) mod tests {
                 .refs
                 .contains(&"🏷 v2".to_string())
         );
-        assert_eq!(app.reselect, None);
+        assert_eq!(app.select_again, None);
+    }
+
+    #[test]
+    // Verifies: ADR-0033
+    fn the_commit_a_write_left_selected_arrives_late_and_yields_to_the_developer() {
+        let reload = |pick: bool| {
+            let mut app = loaded_app();
+            app.select_again = Some("c4".to_string());
+            app.data = None;
+            let mut layout = Layout::new();
+            app.on_msg(next_chunk(layout.lay_out(line(8, 3))));
+            assert_eq!(sha(&app), "c8", "the newest until the commit arrives");
+            if pick {
+                press(&mut app, KeyCode::Char('j'));
+            }
+            app.on_msg(next_chunk(layout.lay_out(line(5, 3))));
+            sha(&app)
+        };
+        assert_eq!(reload(false), "c4");
+        assert_eq!(reload(true), "c7", "the developer's own choice stays");
     }
 
     #[test]
@@ -1430,9 +1499,9 @@ pub(crate) mod tests {
             commit: "c".into(),
             annotated: true,
         };
-        assert_eq!(app.confirm, Some(delete.clone()));
+        assert_eq!(app.confirm(), Some(&delete));
         press(&mut app, KeyCode::Char('y'));
-        assert_eq!(app.confirm, None);
+        assert_eq!(app.confirm(), None);
         assert_eq!(app.write, Some((delete, Confirmation::Given)));
     }
 
@@ -1449,7 +1518,7 @@ pub(crate) mod tests {
             on_the_tag(&mut app);
             press(&mut app, KeyCode::Char('d'));
             press(&mut app, answer);
-            assert_eq!(app.confirm, None);
+            assert_eq!(app.confirm(), None);
             assert_eq!(app.write, None, "{answer:?}");
             assert_eq!(app.status, "Nothing discarded");
         }
@@ -1461,7 +1530,7 @@ pub(crate) mod tests {
         app.focus = Focus::Sidebar;
         app.side.selected = 0;
         press(&mut app, KeyCode::Char('d'));
-        assert_eq!(app.confirm, None);
+        assert_eq!(app.confirm(), None);
     }
 
     #[test]
@@ -1472,7 +1541,7 @@ pub(crate) mod tests {
         type_text(&mut app, "wip");
         press(&mut app, KeyCode::Tab);
         press(&mut app, KeyCode::Enter);
-        assert_eq!(app.stash_prompt, None);
+        assert_eq!(app.stash_prompt(), None);
         let stash = Write::CreateStash {
             message: Some("wip".into()),
             untracked: true,
@@ -1497,6 +1566,7 @@ pub(crate) mod tests {
     fn on_a_stash() -> App {
         let mut stash = commit("s", 9, &["a"], &["📦 stash@{1}"]);
         stash.kind = CommitKind::Stash;
+        stash.stash = Some(1);
         let mut app = App::new("/repo".into(), Glyphs::Unicode);
         let chunk = Layout::new().lay_out(vec![stash, commit("a", 1, &[], &[])]);
         first_chunk(&mut app, chunk, RepoRefs::default());
@@ -1514,11 +1584,11 @@ pub(crate) mod tests {
             commit: "s".into(),
             drop,
         };
-        assert_eq!(app.confirm, None, "applying keeps the stash");
+        assert_eq!(app.confirm(), None, "applying keeps the stash");
         assert_eq!(app.write.take(), Some((apply(false), Confirmation::Absent)));
 
         press(&mut app, KeyCode::Char('p'));
-        assert_eq!(app.confirm, Some(apply(true)));
+        assert_eq!(app.confirm(), Some(&apply(true)));
         press(&mut app, KeyCode::Char('y'));
         assert_eq!(app.write.take(), Some((apply(true), Confirmation::Given)));
 
@@ -1527,7 +1597,7 @@ pub(crate) mod tests {
             commit: "s".into(),
         };
         press(&mut app, KeyCode::Char('d'));
-        assert_eq!(app.confirm, Some(drop));
+        assert_eq!(app.confirm(), Some(&drop));
         press(&mut app, KeyCode::Char('n'));
         assert_eq!(app.write, None, "declined, nothing written");
         assert_eq!(app.status, "Nothing discarded");
@@ -1538,10 +1608,76 @@ pub(crate) mod tests {
         let mut app = on_a_stash();
         let ctrl = |code| KeyEvent::new(code, KeyModifiers::CONTROL);
         app.on_key(ctrl(KeyCode::Char('s')));
-        assert_eq!(app.stash_prompt, None);
+        assert_eq!(app.stash_prompt(), None);
         app.focus = Focus::Detail;
         app.on_key(ctrl(KeyCode::Char('d')));
-        assert_eq!(app.confirm, None);
+        assert_eq!(app.confirm(), None);
+    }
+
+    #[test]
+    // Verifies: ADR-0034, G-7
+    fn no_key_held_with_ctrl_or_alt_writes_or_asks() {
+        let on_the_commit = || {
+            let mut app = loaded_app();
+            press(&mut app, KeyCode::Char('j'));
+            app
+        };
+        let on_a_tag = || {
+            let mut app = loaded_app();
+            on_the_tag(&mut app);
+            app
+        };
+        let held = [
+            KeyModifiers::CONTROL,
+            KeyModifiers::ALT,
+            KeyModifiers::CONTROL | KeyModifiers::ALT,
+        ];
+        for (selected, fresh) in [
+            ("a commit", &on_the_commit as &dyn Fn() -> App),
+            ("a stash", &on_a_stash),
+            ("a tag in the sidebar", &on_a_tag),
+        ] {
+            for focus in PANES {
+                for c in ' '..='~' {
+                    for modifiers in held {
+                        let mut app = fresh();
+                        app.focus = focus;
+                        app.on_key(KeyEvent::new(KeyCode::Char(c), modifiers));
+                        let asked = matches!(
+                            app.modal,
+                            Some(Modal::Confirm(_) | Modal::Tag(_) | Modal::Stash(_))
+                        );
+                        assert!(
+                            app.write.is_none() && !asked,
+                            "{modifiers:?}+{c} on {selected} in {focus:?} writes or asks"
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn a_character_altgr_types_works_as_typed() {
+        let altgr = |c| KeyEvent::new(KeyCode::Char(c), KeyModifiers::CONTROL | KeyModifiers::ALT);
+        let mut app = loaded_app();
+        app.on_key(altgr(']'));
+        assert_eq!(sha(&app), "b", "first parent, as `]` without AltGr");
+        press(&mut app, KeyCode::Char('t'));
+        for c in ['v', '@', '{'] {
+            app.on_key(if c == 'v' {
+                KeyEvent::new(KeyCode::Char(c), KeyModifiers::NONE)
+            } else {
+                altgr(c)
+            });
+        }
+        assert_eq!(app.tag_prompt().unwrap().name, "v@{");
+        app.on_key(altgr('q'));
+        assert_eq!(
+            app.tag_prompt().unwrap().name,
+            "v@{",
+            "a letter with Ctrl+Alt types nothing"
+        );
     }
 
     #[test]
@@ -1550,7 +1686,7 @@ pub(crate) mod tests {
         for key in ['a', 'p', 'd'] {
             press(&mut app, KeyCode::Char(key));
         }
-        assert_eq!(app.confirm, None);
+        assert_eq!(app.confirm(), None);
         assert_eq!(app.write, None);
     }
 

@@ -205,6 +205,7 @@ pub(crate) fn node_json(
         committer_avatar: gravatar_url(&commit.committer_email),
         refs: commit.refs.clone(),
         kind: commit.kind,
+        stash: commit.stash,
         parents: commit.parent_shas.clone(),
         children,
     }
@@ -789,6 +790,7 @@ pub(crate) mod tests {
             refs: vec![],
             parent_shas: parents.iter().map(|s| s.to_string()).collect(),
             kind: CommitKind::Commit,
+            stash: None,
         }
     }
 

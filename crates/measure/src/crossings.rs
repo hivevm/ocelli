@@ -156,6 +156,7 @@ mod tests {
             refs: Vec::new(),
             parent_shas: parents.iter().map(|p| p.to_string()).collect(),
             kind: ocelli_core::model::CommitKind::Commit,
+            stash: None,
         }
     }
 

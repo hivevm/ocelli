@@ -251,6 +251,7 @@ mod tests {
             refs: vec![],
             parent_shas: parents.iter().map(|p| p.to_string()).collect(),
             kind: CommitKind::Commit,
+            stash: None,
         }
     }
 
@@ -364,6 +365,7 @@ mod tests {
                     committer_avatar: String::new(),
                     refs: vec![],
                     kind: CommitKind::Commit,
+                    stash: None,
                     parents: vec![],
                     children: vec![],
                 })

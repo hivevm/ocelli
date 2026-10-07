@@ -12,7 +12,7 @@
   import { refShas } from './refTree.ts';
   import type { RowRange } from './rowWindow.ts';
   import { Newest } from './hostAnswers.ts';
-  import { Reselect, actionLabel, confirmedWrite, type Write } from './writes.ts';
+  import { actionLabel, confirmedWrite, type Write } from './writes.ts';
   import StashDialog from './StashDialog.svelte';
   import type {
     NodeJson, FileChange, DiffLine, RepoRefs, Growth, RowWindow, Relative, Selected, Found,
@@ -76,8 +76,6 @@
   const selects = new Newest();
   const refreshes = new Newest();
   const currentLoad = (): number | undefined => growth?.generation;
-  // The commit to select again in the reload after a write (ADR-0033).
-  const reselect = new Reselect();
   // The question open before a write that discards work, and how it is answered (ADR-0034).
   let question = $state<
     { lost: string; action: string; answer: (confirmed: boolean) => void } | null
@@ -141,22 +139,8 @@
     void updateLoadedRefs();
     // The selection's parents and lineage may reach into the rows just added.
     if (selectedNode) void refreshRelatives(selectedNode.sha);
-    void selectAgain(next);
-  }
-
-  /** Selects the commit a write left selected, once the reload has laid it out. */
-  async function selectAgain(next: Growth): Promise<void> {
-    const sha = reselect.wanted(next);
-    if (!sha) return;
-    try {
-      const [row] = await invoke<(number | null)[]>('rows_of', { shas: [sha] });
-      // A row of another load would name another commit.
-      if (growth?.generation !== next.generation) return;
-      const laidOut = row !== null && row !== undefined;
-      if (reselect.settle(sha, laidOut, next) && laidOut) jumpToRow(row);
-    } catch (e) {
-      report(e);
-    }
+    // The commit a write left selected, which the core names once this load has laid it out.
+    if (next.select !== null) jumpToRow(next.select);
   }
 
   async function refreshRelatives(sha: string): Promise<void> {
@@ -283,24 +267,20 @@
     await invoke('browse_repo').catch((e: unknown) => { status = 'Error: ' + e; });
   }
 
-  /** Loads the current repository again; resolves with whether the load started. */
-  async function refreshRepo(): Promise<boolean> {
-    if (!currentRepoPath) return false;
+  /** Loads the current repository again; `select` names a commit for the core to select again
+      once the load lays it out (ADR-0033). */
+  async function refreshRepo(select: string | null = null): Promise<void> {
+    if (!currentRepoPath) return;
     status = 'Refreshing…';
-    try {
-      await invoke('open_repo', { path: currentRepoPath });
-      return true;
-    } catch (e) {
+    await invoke('open_repo', { path: currentRepoPath, select }).catch((e: unknown) => {
       status = 'Error: ' + e;
-      return false;
-    }
+    });
   }
 
-  /** Loads again after a write, the commit selected now selected again in the reload
-      (ADR-0033): the developer may have selected another while the write ran. */
+  /** Loads again after a write, the commit selected now selected again in the reload: the
+      developer may have selected another while the write ran. */
   async function reloadAfterWrite(): Promise<void> {
-    if (selectedNode) reselect.remember(selectedNode.sha, growth?.generation ?? 0);
-    if (!(await refreshRepo())) reselect.forget();
+    await refreshRepo(selectedNode?.sha ?? null);
   }
 
   /// Switches to another repository the sidebar points at — a submodule, a
@@ -351,8 +331,6 @@
       lights up, and its changed files follow. */
   async function onSelectRow(row: number): Promise<void> {
     let selected: Selected | null;
-    // A commit the developer selects during the reload wins over the one a write left to select.
-    reselect.forget();
     try {
       selected = await selects.ask(() => invoke<Selected | null>('select_row', { row }), currentLoad);
     } catch (e) {
@@ -429,7 +407,7 @@
       </svg>
       Open Repo
     </button>
-    <button class="tb-btn" onclick={refreshRepo}>
+    <button class="tb-btn" onclick={() => refreshRepo()}>
       <svg viewBox="0 0 16 16" fill="currentColor">
         <path d="M11.534 7h3.932a.25.25 0 01.192.41l-1.966 2.36a.25.25 0 01-.384 0l-1.966-2.36a.25.25 0 01.192-.41zm-11 2h3.932a.25.25 0 00.192-.41L2.692 6.23a.25.25 0 00-.384 0L.342 8.59A.25.25 0 00.534 9z"/>
         <path fill-rule="evenodd" d="M8 3c-1.552 0-2.94.707-3.857 1.818a.5.5 0 11-.771-.636A6.002 6.002 0 0113.917 7H12.9A5.002 5.002 0 008 3zM3.1 9a5.002 5.002 0 008.757 2.182.5.5 0 11.771.636A6.002 6.002 0 012.083 9H3.1z"/>

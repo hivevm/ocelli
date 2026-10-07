@@ -1,6 +1,7 @@
 <script lang="ts">
   // Describes a new stash (G-7): a message, and whether the untracked files go with the changes;
   // ignored files never do. A refusal, such as nothing to stash, is said here.
+  import Dialog from './Dialog.svelte';
   import { stashRequest, type Write } from './writes.ts';
 
   interface Props {
@@ -10,15 +11,10 @@
   }
   let { onStash, onClose }: Props = $props();
 
-  let dialog = $state<HTMLDialogElement | null>(null);
   let message = $state('');
   let untracked = $state(false);
   let error = $state<string | null>(null);
   let busy = $state(false);
-
-  $effect(() => {
-    dialog?.showModal();
-  });
 
   async function submit(e: SubmitEvent): Promise<void> {
     e.preventDefault();
@@ -30,7 +26,7 @@
   }
 </script>
 
-<dialog bind:this={dialog} class="stash" oncancel={(e) => { e.preventDefault(); onClose(); }}>
+<Dialog onCancel={onClose} width="380px">
   <form onsubmit={submit}>
     <div class="title">Stash the uncommitted changes</div>
     <!-- svelte-ignore a11y_autofocus -->
@@ -46,23 +42,9 @@
       <button type="submit" class="btn primary" disabled={busy}>Stash</button>
     </div>
   </form>
-</dialog>
+</Dialog>
 
 <style>
-  .stash {
-    width: 380px;
-    padding: 16px;
-    color: var(--text);
-    background: var(--bg-panel);
-    border: 1px solid var(--border-strong);
-    border-radius: var(--radius-lg);
-    box-shadow: 0 8px 24px var(--shadow);
-  }
-
-  .stash::backdrop {
-    background: var(--shadow);
-  }
-
   form {
     display: flex;
     flex-direction: column;

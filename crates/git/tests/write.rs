@@ -11,6 +11,8 @@ use ocelli_git::GitWriter;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
+mod programs;
+
 struct Scratch(PathBuf);
 
 impl Scratch {
@@ -151,38 +153,7 @@ fn writing_a_repository_runs_none_of_its_programs() {
     let one = git(&scratch.0, &["rev-parse", "HEAD"]);
     // Outside the repository, so that stashing the untracked files leaves them be.
     let tools = Scratch::new("programs-ran");
-    let markers = tools.0.join("markers");
-    std::fs::create_dir_all(&markers).unwrap();
-    let program = |name: &str| {
-        let path = tools.0.join(name);
-        std::fs::write(
-            &path,
-            format!("#!/bin/sh\ntouch {}/{name}\n", markers.display()),
-        )
-        .unwrap();
-        Command::new("chmod").arg("+x").arg(&path).status().unwrap();
-        path
-    };
-    for hook in [
-        "reference-transaction",
-        "post-commit",
-        "pre-commit",
-        "post-checkout",
-    ] {
-        std::fs::copy(program(hook), scratch.0.join(".git/hooks").join(hook)).unwrap();
-    }
-    let fsmonitor = program("fsmonitor");
-    git(
-        &scratch.0,
-        &["config", "core.fsmonitor", fsmonitor.to_str().unwrap()],
-    );
-    // What `git tag -a` would run: a signing program.
-    let gpg = program("gpg");
-    git(&scratch.0, &["config", "tag.gpgSign", "true"]);
-    git(
-        &scratch.0,
-        &["config", "gpg.program", gpg.to_str().unwrap()],
-    );
+    let markers = programs::set_everywhere(&scratch.0, &tools.0);
 
     GitWriter
         .write(&scratch.0, &tag("v1", &one, Some("release")))
@@ -204,7 +175,7 @@ fn writing_a_repository_runs_none_of_its_programs() {
     GitWriter
         .write(&scratch.0, &apply(0, &stash, true))
         .unwrap();
-    let ran: Vec<_> = std::fs::read_dir(&markers).unwrap().collect();
+    let ran = markers.ran();
     assert!(ran.is_empty(), "programs ran: {ran:?}");
 }
 
@@ -536,6 +507,20 @@ fn a_stash_with_anything_in_its_way_is_refused_with_nothing_changed() {
         },
         "later is tracked by now",
     );
+    // An untracked file the stash took along, and one whose name differs only in case, where
+    // the file system folds case and the two are one file.
+    let probe = Scratch::new("case-probe");
+    std::fs::write(probe.0.join("Case"), "").unwrap();
+    if probe.0.join("CASE").exists() {
+        refused_after(
+            "case",
+            |d| write_file(d, "Readme", "stashed\n"),
+            |d| write_file(d, "README", "mine\n"),
+            "Readme is not tracked",
+        );
+    } else {
+        eprintln!("this file system tells Readme from README; the case-folding case is skipped");
+    }
     // Changes staged in the index.
     refused_after(
         "staged",
@@ -546,4 +531,167 @@ fn a_stash_with_anything_in_its_way_is_refused_with_nothing_changed() {
         },
         "the index holds staged changes",
     );
+}
+
+/// Whether `git` takes `name` as a tag on `commit`; the tag it made is deleted again.
+fn git_takes(dir: &Path, name: &str, commit: &str) -> bool {
+    let made = Command::new("git")
+        .arg("-C")
+        .arg(dir)
+        .args(["tag", "--", name, commit])
+        .output()
+        .unwrap()
+        .status
+        .success();
+    if made {
+        git(dir, &["tag", "-d", "--", name]);
+    }
+    made
+}
+
+/// The message of the annotated tag `name`, as `git` reads it back.
+fn tag_message(dir: &Path, name: &str) -> String {
+    let out = Command::new("git")
+        .arg("-C")
+        .arg(dir)
+        .args(["cat-file", "tag", &format!("refs/tags/{name}")])
+        .output()
+        .unwrap();
+    let object = String::from_utf8(out.stdout).unwrap();
+    object.split_once("\n\n").map_or("", |(_, m)| m).to_string()
+}
+
+#[test]
+// Verifies: ADR-0033, G-7
+fn the_writer_takes_the_tag_names_git_takes() {
+    let scratch = Scratch::new("names");
+    let (one, _) = repository(&scratch.0);
+    let names = [
+        "v1",
+        "v1.0",
+        "release/1",
+        "ünï",
+        "-v1",
+        "v1-",
+        ".v1",
+        "v1.",
+        "v..1",
+        "v1.lock",
+        "a/.b",
+        "a//b",
+        "/a",
+        "a/",
+        "v@{1",
+        "@",
+        "HEAD",
+        "v 1",
+        "v~1",
+        "v^1",
+        "v:1",
+        "v?1",
+        "v*1",
+        "v[1",
+        "v\\1",
+        "v\x07",
+        "v\x7f",
+        &one,
+    ];
+    let mut differ = Vec::new();
+    for name in names {
+        let git_ok = git_takes(&scratch.0, name, &one);
+        let ours = GitWriter.write(&scratch.0, &tag(name, &one, None));
+        if ours.is_ok() {
+            git(&scratch.0, &["tag", "-d", "--", name]);
+        }
+        if git_ok != ours.is_ok() {
+            differ.push((name.to_string(), git_ok));
+        }
+    }
+    assert!(
+        differ.is_empty(),
+        "taken by git, not by the writer, or back: {differ:?}"
+    );
+}
+
+#[test]
+// Verifies: ADR-0033, G-7
+fn the_writer_cleans_a_tag_message_as_git_does() {
+    let scratch = Scratch::new("messages");
+    let (one, _) = repository(&scratch.0);
+    let messages = [
+        "plain",
+        "\n\nblank lines around\n\n\n",
+        "inside\n\n\n\nblank lines",
+        "trailing spaces   \nand tabs\t\t",
+        "# a comment\nkept?",
+        "subject\n# comment inside\nbody",
+        "crlf\r\nlines\r\n",
+        "   \n\t\n",
+    ];
+    let mut lightweight = 0;
+    for (i, message) in messages.iter().enumerate() {
+        let theirs = format!("git-{i}");
+        let ours = format!("ours-{i}");
+        git(&scratch.0, &["tag", "-a", "-m", message, &theirs, &one]);
+        GitWriter
+            .write(&scratch.0, &tag(&ours, &one, Some(message)))
+            .unwrap();
+        let expected = tag_message(&scratch.0, &theirs);
+        if expected.trim().is_empty() {
+            // G-7 decides that a tag without a message is lightweight, where git writes an
+            // annotated tag with an empty one.
+            assert_eq!(
+                git(&scratch.0, &["cat-file", "-t", &ours]),
+                "commit",
+                "{message:?}"
+            );
+            lightweight += 1;
+            continue;
+        }
+        assert_eq!(tag_message(&scratch.0, &ours), expected, "{message:?}");
+    }
+    assert_eq!(
+        lightweight, 1,
+        "only the message of whitespace alone makes no annotated tag"
+    );
+
+    // The repository's own comment string, a character of more than one byte among them.
+    for (key, value) in [("core.commentChar", "§"), ("core.commentString", "//")] {
+        git(&scratch.0, &["config", key, value]);
+        let message = format!("{value} gone\nkept\n# stays");
+        let (theirs, ours) = (format!("git-{key}"), format!("ours-{key}"));
+        git(&scratch.0, &["tag", "-a", "-m", &message, &theirs, &one]);
+        GitWriter
+            .write(&scratch.0, &tag(&ours, &one, Some(&message)))
+            .unwrap();
+        let expected = tag_message(&scratch.0, &theirs);
+        assert_eq!(expected, "kept\n# stays\n", "{key}");
+        assert_eq!(tag_message(&scratch.0, &ours), expected, "{key}");
+        git(&scratch.0, &["config", "--unset", key]);
+    }
+}
+
+#[test]
+// Verifies: ADR-0024, ADR-0033
+fn each_stash_node_carries_its_place_in_the_stash() {
+    use ocelli_core::model::CommitKind;
+    let scratch = with_file("places");
+    for content in ["first\n", "second\n"] {
+        std::fs::write(scratch.0.join("f"), content).unwrap();
+        git(&scratch.0, &["stash", "push", "--quiet"]);
+    }
+    let commits = ocelli_git::GitReader
+        .load_first_chunk(&scratch.0, &mut |_| {})
+        .unwrap();
+    let mut places: Vec<_> = commits
+        .iter()
+        .filter(|c| c.kind == CommitKind::Stash)
+        .map(|c| (c.sha.clone(), c.stash))
+        .collect();
+    places.sort_by_key(|(_, place)| *place);
+    let expected = [
+        (stash_at(&scratch.0, 0), Some(0)),
+        (stash_at(&scratch.0, 1), Some(1)),
+    ];
+    assert_eq!(places, expected);
 }

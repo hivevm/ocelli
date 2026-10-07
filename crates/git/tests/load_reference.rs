@@ -41,6 +41,18 @@ fn json<T: serde::Serialize>(value: &T) -> Value {
     serde_json::to_value(value).unwrap()
 }
 
+/// Takes the stash nodes' places out of a graph, which came after the reference implementation
+/// (G-7), and returns them with each node's label.
+fn stash_places(graph: &mut Value) -> Vec<(String, Value)> {
+    let mut places = Vec::new();
+    for node in graph["nodes"].as_array_mut().unwrap() {
+        if let Some(place) = node.as_object_mut().unwrap().remove("stash") {
+            places.push((node["refs"][0].as_str().unwrap().to_string(), place));
+        }
+    }
+    places
+}
+
 #[test]
 fn a_fixed_repository_loads_as_the_reference_did() {
     let (_guard, dir) = scratch();
@@ -49,10 +61,12 @@ fn a_fixed_repository_loads_as_the_reference_did() {
     let mut quiet = |_: String| {};
 
     let commits = reader.load_first_chunk(&dir, &mut quiet).unwrap();
+    let mut graph = json(&build_graph(commits));
     assert_eq!(
-        json(&build_graph(commits)),
-        expected("repo-graph-clean.json")
+        stash_places(&mut graph),
+        [("📦 stash@{0}".to_string(), Value::from(0))]
     );
+    assert_eq!(graph, expected("repo-graph-clean.json"));
 
     // The worktree's path is where the scratch directory happens to be, spelled as libgit2
     // resolves it (a real path on macOS, forward slashes on Windows); only its last component
@@ -96,6 +110,7 @@ fn a_fixed_repository_loads_as_the_reference_did() {
     let mut graph = json(&build_graph(
         reader.load_first_chunk(&dir, &mut quiet).unwrap(),
     ));
+    assert_eq!(stash_places(&mut graph).len(), 1);
     for node in graph["nodes"].as_array_mut().unwrap() {
         if node["sha"] == WORKDIR_SHA {
             node["date"] = "<now>".into();

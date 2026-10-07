@@ -4,7 +4,7 @@
 
 pub mod git;
 pub mod refs;
-pub mod write;
+mod write;
 
 use anyhow::Result;
 use ocelli_core::model::{CommitData, DiffLine, FileChange, RepoRefs};

@@ -40,6 +40,9 @@ pub struct Growth {
     pub lanes: usize,
     pub loading: bool,
     pub status: String,
+    /// The row the web interface selects now: the commit a write left selected, once this
+    /// growth laid it out (ADR-0033).
+    pub select: Option<usize>,
 }
 
 /// A parent or child of the selected commit: its label, and its row once it is laid out.
@@ -77,6 +80,9 @@ struct Current {
     /// The generation the session holds.
     generation: u64,
     session: LoadSession,
+    /// The commit to select again in the load of a generation, which its session takes with its
+    /// first chunk (ADR-0033).
+    select_again: Option<(u64, String)>,
     /// The selected row and its lineage, grown as chunks arrive.
     selected: Option<(usize, Lineage)>,
     /// The last search: its query, the rows it searched, and its matches among them, so asking
@@ -93,6 +99,7 @@ impl Current {
             lanes: history.lanes(),
             loading: self.session.loading(),
             status: self.session.status(),
+            select: None,
         }
     }
 }
@@ -105,10 +112,12 @@ pub struct Session {
 
 impl Session {
     /// Begins a load and returns its generation. The history of the load before stays readable
-    /// until the new load's first chunk replaces it.
-    pub fn begin(&self) -> u64 {
+    /// until the new load's first chunk replaces it. `select_again` names the commit a write left
+    /// selected, to select again once the load lays it out (ADR-0033).
+    pub fn begin(&self, select_again: Option<String>) -> u64 {
         let mut c = self.current.write().unwrap();
         c.begun += 1;
+        c.select_again = select_again.map(|sha| (c.begun, sha));
         c.begun
     }
 
@@ -124,6 +133,9 @@ impl Session {
             c.session = LoadSession::new();
             c.selected = None;
             c.searched = None;
+            if let Some((_, sha)) = c.select_again.take_if(|(g, _)| *g == generation) {
+                c.session.select_again(sha);
+            }
         }
         let from = c.session.append(chunk);
         let Current {
@@ -132,7 +144,11 @@ impl Session {
         if let Some((_, lineage)) = selected {
             session.history().extend_lineage(lineage, from);
         }
-        Some(c.growth())
+        let select = c.session.row_to_select();
+        Some(Growth {
+            select,
+            ..c.growth()
+        })
     }
 
     /// Whether `generation` is the newest load begun.
@@ -193,6 +209,9 @@ impl Session {
         if c.generation != generation {
             return None;
         }
+        // The developer's own choice wins over the commit a write left to select again.
+        c.session.keep_selection();
+        c.select_again = None;
         c.session.history().extend_lineage(&mut lineage, rows);
         c.selected = Some((row, lineage));
         Some(selected(&c, row))
@@ -288,6 +307,7 @@ pub(crate) mod tests {
             refs: vec![],
             parent_shas: parents.iter().map(|p| p.to_string()).collect(),
             kind: CommitKind::Commit,
+            stash: None,
         }
     }
 
@@ -308,7 +328,7 @@ pub(crate) mod tests {
     fn a_window_reads_the_rows_of_every_chunk_appended() {
         let session = Session::default();
         let mut layout = Layout::new();
-        let g = session.begin();
+        let g = session.begin(None);
         let growth = session.append(g, layout.lay_out(three(9))).unwrap();
         assert_eq!((growth.rows, growth.loading), (3, true));
         assert_eq!(
@@ -340,12 +360,12 @@ pub(crate) mod tests {
     // Verifies: ADR-0031, ADR-0016
     fn a_newer_load_refuses_the_older_ones_chunks_and_replaces_its_history_on_its_first() {
         let session = Session::default();
-        let old = session.begin();
+        let old = session.begin(None);
         session
             .append(old, Layout::new().lay_out(three(9)))
             .unwrap();
         session.select(0).unwrap();
-        let new = session.begin();
+        let new = session.begin(None);
         assert!(
             session
                 .append(old, Layout::new().lay_out(three(6)))
@@ -372,7 +392,7 @@ pub(crate) mod tests {
     // Verifies: ADR-0016
     fn a_load_ending_before_its_first_chunk_reports_no_growth() {
         let session = Session::default();
-        let g = session.begin();
+        let g = session.begin(None);
         assert!(session.finish(g, Ok(())).is_none());
     }
 
@@ -381,7 +401,7 @@ pub(crate) mod tests {
     fn the_lineage_lights_the_window_and_grows_with_the_chunks() {
         let session = Session::default();
         let mut layout = Layout::new();
-        let g = session.begin();
+        let g = session.begin(None);
         let mut first = three(9);
         first.push(commit("side", 1, &[]));
         session.append(g, layout.lay_out(first)).unwrap();
@@ -408,7 +428,7 @@ pub(crate) mod tests {
     fn the_relatives_of_the_selection_gain_their_rows_as_they_arrive() {
         let session = Session::default();
         let mut layout = Layout::new();
-        let g = session.begin();
+        let g = session.begin(None);
         session.append(g, layout.lay_out(three(9))).unwrap();
         let picked = session.select(2).unwrap();
         let parent = &picked.relatives[0];
@@ -430,7 +450,7 @@ pub(crate) mod tests {
     fn a_search_finds_every_row_and_lists_the_first_ones() {
         let session = Session::default();
         let mut layout = Layout::new();
-        let g = session.begin();
+        let g = session.begin(None);
         session.append(g, layout.lay_out(three(9))).unwrap();
         session.append(g, layout.lay_out(three(6))).unwrap();
         let found = session.search("COMMIT", 2);
@@ -445,7 +465,7 @@ pub(crate) mod tests {
     fn a_search_asked_again_as_the_history_grows_finds_what_a_fresh_one_does() {
         let session = Session::default();
         let mut layout = Layout::new();
-        let g = session.begin();
+        let g = session.begin(None);
         session.append(g, layout.lay_out(three(9))).unwrap();
         assert_eq!(session.search("c", 9).rows, [0, 1, 2]);
         session.append(g, layout.lay_out(three(6))).unwrap();
@@ -455,6 +475,55 @@ pub(crate) mod tests {
             session.search("c8", 9).rows,
             [1],
             "another query searches afresh"
+        );
+    }
+
+    #[test]
+    // Verifies: ADR-0033
+    fn the_load_after_a_write_names_the_row_to_select_once_it_is_laid_out() {
+        let session = Session::default();
+        let mut layout = Layout::new();
+        let g = session.begin(Some("c5".to_string()));
+        let first = session.append(g, layout.lay_out(three(9))).unwrap();
+        let second = session.append(g, layout.lay_out(three(6))).unwrap();
+        let third = session.append(g, layout.lay_out(three(3))).unwrap();
+        assert_eq!(
+            (first.select, second.select, third.select),
+            (None, Some(4), None)
+        );
+    }
+
+    #[test]
+    // Verifies: ADR-0033
+    fn the_developers_choice_or_a_newer_load_gives_the_commit_up() {
+        let session = Session::default();
+        let mut layout = Layout::new();
+        let g = session.begin(Some("c5".to_string()));
+        session.append(g, layout.lay_out(three(9))).unwrap();
+        session.select(0).unwrap();
+        assert_eq!(
+            session.append(g, layout.lay_out(three(6))).unwrap().select,
+            None
+        );
+
+        // Chosen in the history before, while the load after the write had not laid out a row.
+        let g = session.begin(Some("c8".to_string()));
+        session.select(1).unwrap();
+        let mut layout = Layout::new();
+        assert_eq!(
+            session.append(g, layout.lay_out(three(9))).unwrap().select,
+            None
+        );
+
+        session.begin(Some("c8".to_string()));
+        let newer = session.begin(None);
+        let mut layout = Layout::new();
+        assert_eq!(
+            session
+                .append(newer, layout.lay_out(three(9)))
+                .unwrap()
+                .select,
+            None
         );
     }
 }

@@ -1,7 +1,7 @@
 <script lang="ts">
   import FileTree from './FileTree.svelte';
   import { buildFileTree } from './fileTree.ts';
-  import { stashIndex, tagRequest, type Write } from './writes.ts';
+  import { OneWrite, tagRequest, type Write } from './writes.ts';
   import type { NodeJson, FileChange, Relative, Tag } from './types.ts';
 
   interface Props {
@@ -24,21 +24,24 @@
   }: Props = $props();
 
   /** The place of `node` in the stash, when it is a stash node. */
-  const stash = $derived(node?.kind === 'stash' ? stashIndex(node.refs) : null);
+  const stash = $derived(node?.stash ?? null);
 
-  // A write the buttons asked for, running, and why the last was refused, with the commit it
-  // was asked for.
+  // The one write the form, the buttons, and the chips run at a time, and why the last was
+  // refused, shown with the commit it was asked for.
+  const one = new OneWrite();
   let writing = $state(false);
   let writeError = $state<string | null>(null);
 
-  async function write(request: Write): Promise<void> {
-    if (writing) return;
-    const asked = node?.sha;
+  /** Runs `request`; resolves with whether it was written or kept, for this commit. */
+  async function write(request: Write): Promise<boolean> {
+    if (!node) return false;
+    const sha = node.sha;
     writing = true;
-    const error = await onWrite(request);
-    if (node?.sha !== asked) return;
-    writing = false;
-    writeError = error;
+    const answer = await one.run(sha, () => onWrite(request), () => node?.sha);
+    writing = one.running;
+    if (!answer) return false;
+    writeError = answer.error;
+    return answer.error === null;
   }
 
   function onStash(drop: boolean | 'only'): void {
@@ -69,8 +72,6 @@
   let tagging = $state(false);
   let tagName = $state('');
   let tagMessage = $state('');
-  let tagError = $state<string | null>(null);
-  let tagBusy = $state(false);
   const tag = $derived(node ? tagRequest(node.sha, tagName, tagMessage) : null);
 
   $effect(() => {
@@ -79,23 +80,19 @@
     tagging = false;
     tagName = '';
     tagMessage = '';
-    tagError = null;
-    tagBusy = false;
-    writing = false;
+    writing = one.running;
     writeError = null;
   });
 
+  /** Opens or closes the tag form; a refusal shown before belongs to what came before. */
+  function openForm(open: boolean): void {
+    tagging = open;
+    writeError = null;
+  }
+
   async function submitTag(e: SubmitEvent): Promise<void> {
     e.preventDefault();
-    if (!tag || tagBusy) return;
-    const asked = node?.sha;
-    tagBusy = true;
-    const error = await onWrite(tag);
-    // The answer belongs to the commit it was asked for, not one selected meanwhile.
-    if (node?.sha !== asked) return;
-    tagBusy = false;
-    tagError = error;
-    if (error === null) tagging = false;
+    if (tag && (await write(tag))) tagging = false;
   }
 
   async function copySha(): Promise<void> {
@@ -143,7 +140,7 @@
             <span class="ref-chip {ref.startsWith('🏷') ? 'tag' : ref.includes('/') ? 'remote' : 'local'}">
               {ref}
               {#if tag}
-                <button class="chip-delete" title="Delete the tag {tag.name}"
+                <button class="chip-delete" disabled={writing} title="Delete the tag {tag.name}"
                         aria-label="Delete the tag {tag.name}" onclick={() => deleteTag(tag)}>×</button>
               {/if}
             </span>
@@ -160,7 +157,7 @@
           <button class="tag-btn" disabled={writing} onclick={() => onStash('only')}>Drop…</button>
         </div>
       {/if}
-      {#if writeError}<div class="tag-error">{writeError}</div>{/if}
+      {#if writeError && !tagging}<div class="tag-error">{writeError}</div>{/if}
 
       {#if node.kind === 'commit'}
         {#if tagging}
@@ -171,16 +168,16 @@
             <textarea class="tag-input" rows="2" aria-label="Tag message"
                       placeholder="Message — leave empty for a lightweight tag"
                       bind:value={tagMessage}></textarea>
-            {#if tagError}<div class="tag-error">{tagError}</div>{/if}
+            {#if writeError}<div class="tag-error">{writeError}</div>{/if}
             <div class="tag-actions">
-              <button type="button" class="tag-btn" onclick={() => (tagging = false)}>Cancel</button>
-              <button type="submit" class="tag-btn primary" disabled={!tag || tagBusy}>
+              <button type="button" class="tag-btn" onclick={() => openForm(false)}>Cancel</button>
+              <button type="submit" class="tag-btn primary" disabled={!tag || writing}>
                 {tag?.message === null ? 'Create lightweight tag' : 'Create tag'}
               </button>
             </div>
           </form>
         {:else}
-          <button class="tag-btn" onclick={() => (tagging = true)}>Tag…</button>
+          <button class="tag-btn" onclick={() => openForm(true)}>Tag…</button>
         {/if}
       {/if}
     </div>

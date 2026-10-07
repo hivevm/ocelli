@@ -1,6 +1,5 @@
 // The web interface's side of a write (ADR-0033): the writes it hands the host, asking before one
-// that discards work in the words the core names it with (ADR-0034), and which commit to select
-// again once the reload after a write has laid it out.
+// that discards work in the words the core names it with (ADR-0034), and running one at a time.
 //
 // All of it is bookkeeping over strings and numbers, so it lives here and is tested directly.
 
@@ -32,15 +31,6 @@ function blankIsNone(text: string): string | null {
   return text.trim() === '' ? null : text;
 }
 
-/** The place of a stash node's entry in the stash, read from its `stash@{n}` ref (ADR-0024). */
-export function stashIndex(refs: string[]): number | null {
-  for (const ref of refs) {
-    const m = /^(?:📦 )?stash@\{(\d+)\}$/u.exec(ref);
-    if (m) return Number(m[1]);
-  }
-  return null;
-}
-
 /** The label of the button that goes ahead with a write that discards work. */
 export function actionLabel(write: Write): string {
   switch (write.kind) {
@@ -68,44 +58,40 @@ export async function confirmedWrite(
   return 'written';
 }
 
-/** A load's progress, as far as selecting again needs it. */
-export interface Progress {
-  generation: number;
-  loading: boolean;
+/** A write's refusal, or null for a write done or kept. */
+export interface Answer {
+  error: string | null;
 }
 
 /**
- * The commit selected when a write was done, to select again in the load that follows it. Rows
- * of the load the write ran in are no use: the reload's own rows are looked up as they grow,
- * until the commit is found or the reload ends without it.
+ * The one write the commit detail runs at a time, for the commit it was asked for: a second is
+ * not started while one runs, from whatever control, and the answer is dropped when another
+ * commit is selected by the time it comes.
  */
-export class Reselect {
-  #sha: string | null = null;
-  #after = 0;
+export class OneWrite {
+  #running = false;
 
-  /** Remembers `sha`, to look up once a load newer than `generation` grows. */
-  remember(sha: string, generation: number): void {
-    this.#sha = sha;
-    this.#after = generation;
-  }
-
-  /** The commit to look up in the rows `progress` reports, or null. */
-  wanted(progress: Progress): string | null {
-    return progress.generation > this.#after ? this.#sha : null;
+  /** Whether a write runs. */
+  get running(): boolean {
+    return this.#running;
   }
 
   /**
-   * Takes the lookup's answer for `sha`: whether to select it now. A commit not laid out yet
-   * stays wanted while the load runs, and is given up once it has ended.
+   * Runs `write` for the commit `sha` and resolves with its answer, or with null when it was not
+   * started or `selected` names another commit once it answers.
    */
-  settle(sha: string, laidOut: boolean, progress: Progress): boolean {
-    if (this.#sha !== sha) return false;
-    if (laidOut || !progress.loading) this.#sha = null;
-    return laidOut;
-  }
-
-  /** Gives the commit up, as when the developer selects another. */
-  forget(): void {
-    this.#sha = null;
+  async run(
+    sha: string,
+    write: () => Promise<string | null>,
+    selected: () => string | undefined,
+  ): Promise<Answer | null> {
+    if (this.#running) return null;
+    this.#running = true;
+    try {
+      const error = await write();
+      return selected() === sha ? { error } : null;
+    } finally {
+      this.#running = false;
+    }
   }
 }
