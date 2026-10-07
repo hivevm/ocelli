@@ -243,14 +243,14 @@ pub fn write_discards(write: Write) -> Option<String> {
 
 /// Performs `write` (G-7): a write that discards work only where the developer `confirmed` it in
 /// the web interface's dialog, which the core decides (ADR-0034). A write refused changes nothing
-/// and says why; the web interface reloads after a write done, the commit selected again
-/// (ADR-0033).
+/// and says why; the web interface reloads after a write done, the commit selected again, or the
+/// commit the write made, which this returns (ADR-0033).
 #[tauri::command]
 pub async fn perform_write(
     write: Write,
     confirmed: bool,
     state: State<'_, AppState>,
-) -> Result<(), String> {
+) -> Result<Option<String>, String> {
     let confirmation = if confirmed {
         Confirmation::Given
     } else {
@@ -264,7 +264,7 @@ async fn perform(
     write: Write,
     confirmation: Confirmation,
     state: &State<'_, AppState>,
-) -> Result<(), String> {
+) -> Result<Option<String>, String> {
     let repo_path = match state.current_repo.lock().unwrap().clone() {
         Some(p) => p,
         None => return Err("No repository open".into()),

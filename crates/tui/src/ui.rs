@@ -8,10 +8,10 @@ use crate::app::{App, Focus, Modal, StashPrompt, TagPrompt};
 use crate::chips::{Planned, RefKind, chip_width, chips, plan};
 use crate::diffsplit::{CellKind, SplitRow, split_rows};
 use crate::files::{FileRow, FileView};
-use crate::raster::{self, rasterize};
+use crate::raster::{self, Glyphs, rasterize};
 use crate::sidebar::{self, Look, RailRow, RowKind};
 use crate::theme::{Palette, lane, palette};
-use ocelli_core::model::{CommitKind, DiffLine, DiffLineKind, FileStatus};
+use ocelli_core::model::{CommitKind, DiffLine, DiffLineKind, FileStatus, Staged};
 use ocelli_core::port::Write;
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Layout, Rect};
@@ -75,6 +75,17 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
         Some(Modal::Tag(tag)) => draw_tag_prompt(frame, tag, p, main),
         Some(Modal::Stash(stash)) => draw_stash_prompt(frame, stash, p, main),
         Some(Modal::Confirm(write)) => draw_confirm(frame, write, p, main),
+        Some(Modal::Commit { head, message }) => {
+            let short = &head[..head.len().min(7)];
+            let lines = vec![
+                input_line(p, "Message  ", message, true),
+                Line::styled(
+                    "Enter commit the staged files · Esc cancel",
+                    Style::new().fg(p.text_dim),
+                ),
+            ];
+            draw_dialog(frame, p, main, format!(" Commit on {short} "), lines);
+        }
         None => {}
     }
     draw_status(frame, app, p, status);
@@ -493,6 +504,28 @@ fn status_letter(p: &Palette, status: &FileStatus) -> Span<'static> {
     )
 }
 
+/// Whether the files shown are the working-directory node's, which stage.
+fn working(app: &App) -> bool {
+    app.files
+        .as_ref()
+        .is_some_and(|f| f.sha == ocelli_core::model::WORKDIR_SHA)
+}
+
+/// How much of a file's change is staged: all, part, or none (G-4).
+fn staged_mark(p: &Palette, glyphs: Glyphs, staged: Staged) -> Span<'static> {
+    let (unicode, ascii, colour) = match staged {
+        Staged::Yes => ("● ", "[x] ", p.accent),
+        Staged::Partly => ("◐ ", "[~] ", p.amber),
+        Staged::No => ("○ ", "[ ] ", p.text_dim),
+    };
+    let mark = if glyphs == Glyphs::Ascii {
+        ascii
+    } else {
+        unicode
+    };
+    Span::styled(mark, Style::new().fg(colour))
+}
+
 fn draw_files(frame: &mut Frame, app: &App, p: &Palette, area: Rect) {
     let focused = app.focus == Focus::Files && app.diff.is_none();
     let view = match app.file_view {
@@ -550,11 +583,11 @@ fn draw_files(frame: &mut Frame, app: &App, p: &Palette, area: Rect) {
                 if open == Some(f.path.as_str()) {
                     name_style = name_style.fg(p.accent).add_modifier(Modifier::BOLD);
                 }
-                let mut spans = vec![
-                    Span::raw("  ".repeat(depth)),
-                    status_letter(p, &f.status),
-                    Span::styled(name, name_style),
-                ];
+                let mut spans = vec![Span::raw("  ".repeat(depth))];
+                if let Some(staged) = f.staged {
+                    spans.push(staged_mark(p, app.glyphs, staged));
+                }
+                spans.extend([status_letter(p, &f.status), Span::styled(name, name_style)]);
                 if f.additions > 0 {
                     spans.push(Span::styled(
                         format!(" +{}", f.additions),
@@ -834,6 +867,7 @@ fn hints(app: &App) -> &'static str {
         Some(Modal::Confirm(_)) => return "y goes ahead · any other key keeps it",
         Some(Modal::Tag(tag)) if tag.message.is_none() => return "type the tag's name",
         Some(Modal::Tag(_) | Modal::Stash(_)) => return "type a message, or none",
+        Some(Modal::Commit { .. }) => return "type the commit's message",
         None => {}
     }
     if app.search.editing {
@@ -853,6 +887,9 @@ fn hints(app: &App) -> &'static str {
              a/p/d apply/pop/drop · Esc deselect"
         }
         Focus::Detail => "j/k link · Enter jump · y copy · t tag · a/p/d apply/pop/drop",
+        Focus::Files if working(app) => {
+            "j/k move · Enter diff/fold · t tree/flat · a stage · u unstage · c commit"
+        }
         Focus::Files => "j/k move · Enter diff/fold · t tree/flat",
     }
 }
@@ -1019,6 +1056,8 @@ mod tests {
                 status: FileStatus::Modified,
                 additions: 1,
                 deletions: 1,
+                staged: None,
+                shown: None,
             }]),
         });
         // The pane's own title says both that the list is drawn and which view it starts in.
@@ -1071,6 +1110,8 @@ mod tests {
                 status: FileStatus::Modified,
                 additions: 1,
                 deletions: 1,
+                staged: None,
+                shown: None,
             }]),
         });
         app.focus = Focus::Files;
@@ -1175,6 +1216,35 @@ mod tests {
                 && text.contains("[x] include untracked files"),
             "{text}"
         );
+    }
+
+    #[test]
+    fn the_working_nodes_files_show_what_is_staged() {
+        use ocelli_core::model::{FileStatus, Staged};
+        let mut app = loaded_app();
+        let file = |path: &str, staged| FileChange {
+            path: path.into(),
+            old_path: None,
+            status: FileStatus::Modified,
+            additions: 0,
+            deletions: 0,
+            staged: Some(staged),
+            shown: None,
+        };
+        app.files = Some(crate::app::Files {
+            sha: ocelli_core::model::WORKDIR_SHA.into(),
+            files: Ok(vec![
+                file("all", Staged::Yes),
+                file("part", Staged::Partly),
+                file("none", Staged::No),
+            ]),
+            selected: 0,
+        });
+        app.file_view = crate::files::FileView::Flat;
+        let text = screen(&mut app, 160, 20).join("\n");
+        for expected in ["● M all", "◐ M part", "○ M none"] {
+            assert!(text.contains(expected), "{expected:?} missing:\n{text}");
+        }
     }
 
     #[test]

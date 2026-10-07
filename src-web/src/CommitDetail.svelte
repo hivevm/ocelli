@@ -1,7 +1,8 @@
 <script lang="ts">
   import FileTree from './FileTree.svelte';
+  import StageToggle from './StageToggle.svelte';
   import { buildFileTree } from './fileTree.ts';
-  import { OneWrite, tagRequest, type Write } from './writes.ts';
+  import { OneWrite, commitRequest, stageToggle, tagRequest, type Write } from './writes.ts';
   import type { NodeJson, FileChange, Relative, Tag } from './types.ts';
 
   interface Props {
@@ -52,6 +53,23 @@
       : { kind: 'applyStash', index: stash, commit, drop });
   }
 
+  /** Stages or unstages a file of the uncommitted changes. */
+  function onStage(file: FileChange): void {
+    if (file.staged) void write(stageToggle(file));
+  }
+
+  // The commit form of the working-directory node, on its parent, the checked-out commit.
+  let commitMessage = $state('');
+  const commit = $derived(
+    node?.kind === 'working' ? commitRequest(node.parents[0] ?? null, commitMessage) : null,
+  );
+  const anyStaged = $derived(changedFiles.some((f) => f.staged === 'yes' || f.staged === 'partly'));
+
+  async function submitCommit(e: SubmitEvent): Promise<void> {
+    e.preventDefault();
+    if (commit && (await write(commit))) commitMessage = '';
+  }
+
   function deleteTag(tag: Tag): void {
     void write({ kind: 'deleteTag', name: tag.name, commit: tag.sha, annotated: tag.annotated });
   }
@@ -82,6 +100,8 @@
     tagMessage = '';
     writing = one.running;
     writeError = null;
+    // A reload after staging selects the working-directory node anew; its message stays.
+    if (node?.kind !== 'working') commitMessage = '';
   });
 
   /** Opens or closes the tag form; a refusal shown before belongs to what came before. */
@@ -149,6 +169,19 @@
       {/if}
 
       <div class="detail-message">{node.message}</div>
+
+      {#if node.kind === 'working'}
+        <form class="tag-form" onsubmit={submitCommit}>
+          <textarea class="tag-input" rows="3" aria-label="Commit message"
+                    placeholder={anyStaged ? 'Commit message' : 'Stage files below to commit them'}
+                    bind:value={commitMessage}></textarea>
+          <div class="tag-actions">
+            <button type="submit" class="tag-btn primary" disabled={!commit || !anyStaged || writing}>
+              Commit
+            </button>
+          </div>
+        </form>
+      {/if}
 
       {#if stash !== null}
         <div class="tag-actions stash-actions">
@@ -301,7 +334,8 @@
       </div>
     {:else if fileViewMode === 'tree'}
       <div class="file-list">
-        <FileTree nodes={fileTree} {diffFile} {onSelectFile} />
+        <FileTree nodes={fileTree} {diffFile} {onSelectFile}
+                  onStage={node.kind === 'working' ? onStage : undefined} staging={writing} />
       </div>
     {:else}
       <div class="file-list">
@@ -313,6 +347,9 @@
             tabindex="0"
             onkeydown={(e) => e.key === 'Enter' && onSelectFile(file)}
           >
+            {#if node.kind === 'working' && file.staged}
+              <StageToggle {file} disabled={writing} {onStage} />
+            {/if}
             <span class="file-status {file.status}">{file.status[0]}</span>
             <span class="file-path" title={file.path}>
               {#if file.oldPath}

@@ -12,7 +12,7 @@
   import { refShas } from './refTree.ts';
   import type { RowRange } from './rowWindow.ts';
   import { Newest } from './hostAnswers.ts';
-  import { actionLabel, confirmedWrite, type Write } from './writes.ts';
+  import { actionLabel, confirmedWrite, type Outcome, type Write } from './writes.ts';
   import StashDialog from './StashDialog.svelte';
   import type {
     NodeJson, FileChange, DiffLine, RepoRefs, Growth, RowWindow, Relative, Selected, Found,
@@ -277,10 +277,10 @@
     });
   }
 
-  /** Loads again after a write, the commit selected now selected again in the reload: the
+  /** Loads again after a write, selecting the commit it made, else the one selected now: the
       developer may have selected another while the write ran. */
-  async function reloadAfterWrite(): Promise<void> {
-    await refreshRepo(selectedNode?.sha ?? null);
+  async function reloadAfterWrite(made: string | null): Promise<void> {
+    await refreshRepo(made ?? selectedNode?.sha ?? null);
   }
 
   /// Switches to another repository the sidebar points at — a submodule, a
@@ -296,18 +296,18 @@
       after it shows the result, the commit selected again. Resolves with why the host refused
       it, or null once written or kept. */
   async function performWrite(write: Write): Promise<string | null> {
-    let done: 'kept' | 'written';
+    let done: Outcome;
     try {
       done = await confirmedWrite(
         write,
         (w) => invoke<string | null>('write_discards', { write: w }),
         ask,
-        async (w, confirmed) => { await invoke('perform_write', { write: w, confirmed }); },
+        (w, confirmed) => invoke<string | null>('perform_write', { write: w, confirmed }),
       );
     } catch (e) {
       return String(e);
     }
-    if (done === 'written') await reloadAfterWrite();
+    if (done.kind === 'written') await reloadAfterWrite(done.made);
     return null;
   }
 

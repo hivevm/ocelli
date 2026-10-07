@@ -18,7 +18,7 @@ use crate::theme::Theme;
 use ocelli_core::graph::LaidChunk;
 use ocelli_core::history::{History, Lineage};
 use ocelli_core::load::{Event, LoadSession};
-use ocelli_core::model::{CommitKind, DiffLine, FileChange, NodeJson, RepoRefs, Tag};
+use ocelli_core::model::{CommitKind, DiffLine, FileChange, NodeJson, RepoRefs, Shown, Tag};
 use ocelli_core::port::{Confirmation, Write};
 use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use std::collections::HashSet;
@@ -170,6 +170,8 @@ pub enum Modal {
     Stash(StashPrompt),
     /// A write that discards work, waiting for the developer's answer (ADR-0034).
     Confirm(Write),
+    /// The message typed after `c` for a commit on `head`.
+    Commit { head: String, message: String },
 }
 
 pub struct App {
@@ -210,6 +212,8 @@ pub struct App {
     pub reload: Option<PathBuf>,
     /// A write for the event loop to run; its result comes back as [`Msg::Written`].
     pub write: Option<(Write, Confirmation)>,
+    /// Whether a write runs: no second one starts until its result is in.
+    pub writing: bool,
     /// The commit a write left selected, handed to the core's load session of the reload with
     /// its first chunk; the session names its row once laid out (ADR-0033).
     pub select_again: Option<String>,
@@ -261,6 +265,7 @@ impl App {
             requests: Vec::new(),
             reload: None,
             write: None,
+            writing: false,
             select_again: None,
             clipboard: None,
         }
@@ -304,6 +309,7 @@ impl App {
         next.side.rail_selected = 0;
         next.status = status.to_string();
         next.reload = Some(path);
+        next.writing = self.writing;
         *self = next;
     }
 
@@ -320,11 +326,16 @@ impl App {
                     });
                 }
             }
-            Msg::Written(Err(e)) => self.status = format!("Not written: {e}"),
-            // The repository is read again, the commit that was selected
-            // selected again once its row arrives (ADR-0033).
-            Msg::Written(Ok(())) => {
-                let select_again = self.selected_sha();
+            Msg::Written(Err(e)) => {
+                self.writing = false;
+                self.status = format!("Not written: {e}");
+            }
+            // The repository is read again, the commit the write made, or else
+            // the one that was selected, selected again once its row arrives
+            // (ADR-0033).
+            Msg::Written(Ok(made)) => {
+                self.writing = false;
+                let select_again = made.or_else(|| self.selected_sha());
                 self.open_repo(self.repo.clone(), "Written — reloading…");
                 self.select_again = select_again;
             }
@@ -470,6 +481,7 @@ impl App {
                 Modal::Tag(tag) => self.tag_key(tag, key),
                 Modal::Stash(stash) => self.stash_key(stash, key),
                 Modal::Confirm(write) => self.answer(write, key),
+                Modal::Commit { head, message } => self.commit_key(head, message, key),
             };
         }
         if self.search.editing {
@@ -621,7 +633,7 @@ impl App {
                     commit: tag.sha,
                     message: tag.message.filter(|m| !m.trim().is_empty()),
                 };
-                self.write = Some((write, Confirmation::Absent));
+                self.queue(write, Confirmation::Absent);
                 return;
             }
             _ => {}
@@ -629,12 +641,98 @@ impl App {
         self.modal = Some(Modal::Tag(tag));
     }
 
+    /// `c` on the working-directory node: asks for the message of a commit on
+    /// the checked-out commit, its parent.
+    fn start_commit(&mut self) {
+        let Some(node) = self.selected_node() else {
+            return;
+        };
+        if node.kind != CommitKind::Working {
+            return;
+        }
+        let Some(head) = node.parents.first() else {
+            return;
+        };
+        self.modal = Some(Modal::Commit {
+            head: head.clone(),
+            message: String::new(),
+        });
+    }
+
+    fn commit_key(&mut self, head: String, mut message: String, key: KeyEvent) {
+        match key.code {
+            KeyCode::Char(_) => message.extend(typed(key)),
+            KeyCode::Backspace => {
+                message.pop();
+            }
+            KeyCode::Esc => return,
+            KeyCode::Enter if !message.trim().is_empty() => {
+                self.status = "Committing…".to_string();
+                let write = Write::Commit {
+                    message,
+                    head: Some(head),
+                };
+                self.queue(write, Confirmation::Absent);
+                return;
+            }
+            _ => {}
+        }
+        self.modal = Some(Modal::Commit { head, message });
+    }
+
+    /// `a` and `u` on a file of the working-directory node: stages or unstages
+    /// it whole.
+    fn stage(&mut self, stage: bool) {
+        let rows = self.file_rows();
+        let Some(files) = &self.files else { return };
+        if files.sha != ocelli_core::model::WORKDIR_SHA {
+            return;
+        }
+        let (Ok(list), Some(FileRow::File { index, .. })) =
+            (&files.files, rows.get(files.selected))
+        else {
+            return;
+        };
+        let file = &list[*index];
+        let (path, shown) = (
+            file.path.clone(),
+            file.shown.clone().unwrap_or(Shown {
+                workdir: None,
+                index: None,
+            }),
+        );
+        self.status = format!("{} {path}…", if stage { "Staging" } else { "Unstaging" });
+        let write = if stage {
+            Write::StageFile {
+                path,
+                shown: shown.workdir,
+            }
+        } else {
+            Write::UnstageFile {
+                path,
+                shown: shown.index,
+            }
+        };
+        self.queue(write, Confirmation::Absent);
+    }
+
+    /// Hands `write` to the event loop, unless one runs still: a second press
+    /// writes nothing.
+    fn queue(&mut self, write: Write, confirmation: Confirmation) {
+        if self.writing {
+            self.status = "A write is still running".to_string();
+            return;
+        }
+        self.writing = true;
+        self.write = Some((write, confirmation));
+    }
+
     /// The answer to a write that discards work: only `y` writes, every other
     /// key keeps the work (ADR-0034).
     fn answer(&mut self, write: Write, key: KeyEvent) {
         if key.code == KeyCode::Char('y') {
             self.status = "Writing…".to_string();
-            self.write = Some((write, Confirmation::Given));
+            self.queue(write, Confirmation::Given);
         } else {
             self.status = "Nothing discarded".to_string();
         }
@@ -655,7 +753,7 @@ impl App {
                     message,
                     untracked: stash.untracked,
                 };
-                self.write = Some((write, Confirmation::Absent));
+                self.queue(write, Confirmation::Absent);
                 return;
             }
             _ => {}
@@ -686,7 +784,7 @@ impl App {
             self.modal = Some(Modal::Confirm(write));
         } else {
             self.status = format!("Applying stash@{{{index}}}…");
-            self.write = Some((write, Confirmation::Absent));
+            self.queue(write, Confirmation::Absent);
         }
     }
 
@@ -858,6 +956,10 @@ impl App {
                 self.start_tag();
                 None
             }
+            KeyCode::Char('c') => {
+                self.start_commit();
+                None
+            }
             KeyCode::Char('s') => {
                 self.modal = Some(Modal::Stash(StashPrompt::default()));
                 None
@@ -911,6 +1013,7 @@ impl App {
             KeyCode::Char('k') | KeyCode::Up => self.link = self.link.saturating_sub(1),
             KeyCode::Char('y') => self.copy_sha(),
             KeyCode::Char('t') => self.start_tag(),
+            KeyCode::Char('c') => self.start_commit(),
             KeyCode::Char(c @ ('a' | 'p' | 'd')) => self.on_stash(KeyCode::Char(c)),
             KeyCode::Enter => {
                 let Some(sha) = links.get(self.link) else {
@@ -933,6 +1036,9 @@ impl App {
     fn files_key(&mut self, key: KeyEvent) {
         match key.code {
             KeyCode::Char('h') | KeyCode::Left => return self.move_focus(-1),
+            KeyCode::Char('a') => return self.stage(true),
+            KeyCode::Char('u') => return self.stage(false),
+            KeyCode::Char('c') => return self.start_commit(),
             KeyCode::Char('t') => {
                 self.file_view = match self.file_view {
                     FileView::Flat => FileView::Tree,
@@ -1070,6 +1176,12 @@ pub(crate) mod tests {
         Msg::Load(Event::Ended(result))
     }
 
+    /// The write handed to the event loop, which then runs it and reports it done.
+    fn taken(app: &mut App) -> Option<(Write, Confirmation)> {
+        app.writing = false;
+        app.write.take()
+    }
+
     pub(crate) fn press(app: &mut App, code: KeyCode) {
         app.on_key(KeyEvent::new(code, KeyModifiers::NONE));
     }
@@ -1158,6 +1270,8 @@ pub(crate) mod tests {
                 status: FileStatus::Modified,
                 additions: 1,
                 deletions: 0,
+                staged: None,
+                shown: None,
             })
             .collect();
         app.on_msg(Msg::Files {
@@ -1388,7 +1502,7 @@ pub(crate) mod tests {
         type_text(&mut app, "mark");
         press(&mut app, KeyCode::Enter);
         press(&mut app, KeyCode::Enter);
-        let Some((Write::CreateTag { message, .. }, _)) = app.write.take() else {
+        let Some((Write::CreateTag { message, .. }, _)) = taken(&mut app) else {
             panic!("no tag written");
         };
         assert_eq!(message, None);
@@ -1427,7 +1541,7 @@ pub(crate) mod tests {
     fn a_write_done_reloads_and_selects_the_commit_again_once_its_row_arrives() {
         let mut app = loaded_app();
         press(&mut app, KeyCode::Char('j'));
-        app.on_msg(Msg::Written(Ok(())));
+        app.on_msg(Msg::Written(Ok(None)));
         assert_eq!(app.reload, Some(PathBuf::from("/repo")));
         assert_eq!(app.select_again.as_deref(), Some("c"));
         let commits = vec![
@@ -1585,12 +1699,12 @@ pub(crate) mod tests {
             drop,
         };
         assert_eq!(app.confirm(), None, "applying keeps the stash");
-        assert_eq!(app.write.take(), Some((apply(false), Confirmation::Absent)));
+        assert_eq!(taken(&mut app), Some((apply(false), Confirmation::Absent)));
 
         press(&mut app, KeyCode::Char('p'));
         assert_eq!(app.confirm(), Some(&apply(true)));
         press(&mut app, KeyCode::Char('y'));
-        assert_eq!(app.write.take(), Some((apply(true), Confirmation::Given)));
+        assert_eq!(taken(&mut app), Some((apply(true), Confirmation::Given)));
 
         let drop = Write::DropStash {
             index: 1,
@@ -1677,6 +1791,121 @@ pub(crate) mod tests {
             app.tag_prompt().unwrap().name,
             "v@{",
             "a letter with Ctrl+Alt types nothing"
+        );
+    }
+
+    /// The working-directory node on `d`, selected, its files `f` (staged) and
+    /// `g` (not) delivered.
+    fn on_the_working_node() -> App {
+        let mut working = commit(ocelli_core::model::WORKDIR_SHA, 9, &["d"], &[]);
+        working.kind = CommitKind::Working;
+        let mut app = App::new("/repo".into(), Glyphs::Unicode);
+        let chunk = Layout::new().lay_out(vec![working, commit("d", 4, &[], &["main"])]);
+        first_chunk(&mut app, chunk, RepoRefs::default());
+        let file = |path: &str, staged| FileChange {
+            path: path.into(),
+            old_path: None,
+            status: FileStatus::Modified,
+            additions: 1,
+            deletions: 0,
+            staged: Some(staged),
+            shown: Some(Shown {
+                workdir: Some(format!("w{path}")),
+                index: Some(format!("i{path}")),
+            }),
+        };
+        app.on_msg(Msg::Files {
+            sha: ocelli_core::model::WORKDIR_SHA.into(),
+            files: Ok(vec![
+                file("f", ocelli_core::model::Staged::Yes),
+                file("g", ocelli_core::model::Staged::No),
+            ]),
+        });
+        app.file_view = FileView::Flat;
+        app
+    }
+
+    #[test]
+    // Verifies: ADR-0033, G-4
+    fn a_and_u_stage_and_unstage_the_file_under_the_cursor() {
+        let mut app = on_the_working_node();
+        app.focus = Focus::Files;
+        press(&mut app, KeyCode::Char('j'));
+        press(&mut app, KeyCode::Char('a'));
+        let stage = Write::StageFile {
+            path: "g".into(),
+            shown: Some("wg".into()),
+        };
+        assert_eq!(taken(&mut app), Some((stage, Confirmation::Absent)));
+        press(&mut app, KeyCode::Char('k'));
+        press(&mut app, KeyCode::Char('u'));
+        let unstage = Write::UnstageFile {
+            path: "f".into(),
+            shown: Some("if".into()),
+        };
+        assert_eq!(taken(&mut app), Some((unstage, Confirmation::Absent)));
+
+        let mut app = loaded_app();
+        app.files = Some(Files {
+            sha: "d".into(),
+            files: Ok(vec![FileChange {
+                path: "f".into(),
+                old_path: None,
+                status: FileStatus::Modified,
+                additions: 1,
+                deletions: 0,
+                staged: None,
+                shown: None,
+            }]),
+            selected: 0,
+        });
+        app.focus = Focus::Files;
+        press(&mut app, KeyCode::Char('a'));
+        assert_eq!(app.write, None, "a commit's files do not stage");
+    }
+
+    #[test]
+    // Verifies: ADR-0033, G-4
+    fn c_on_the_working_node_commits_the_index_on_its_parent() {
+        let mut app = on_the_working_node();
+        press(&mut app, KeyCode::Char('c'));
+        press(&mut app, KeyCode::Enter);
+        assert!(app.write.is_none(), "no commit without a message");
+        type_text(&mut app, "Change f");
+        press(&mut app, KeyCode::Enter);
+        let commit = Write::Commit {
+            message: "Change f".into(),
+            head: Some("d".into()),
+        };
+        assert_eq!(taken(&mut app), Some((commit, Confirmation::Absent)));
+
+        let mut app = loaded_app();
+        press(&mut app, KeyCode::Char('c'));
+        assert_eq!(app.modal, None, "a commit is no working directory");
+    }
+
+    #[test]
+    // Verifies: ADR-0033
+    fn the_commit_a_write_made_is_selected_after_the_reload() {
+        let mut app = on_the_working_node();
+        app.on_msg(Msg::Written(Ok(Some("new".into()))));
+        assert_eq!(app.select_again.as_deref(), Some("new"));
+    }
+
+    #[test]
+    fn no_second_write_starts_while_one_runs() {
+        let mut app = on_the_working_node();
+        app.focus = Focus::Files;
+        press(&mut app, KeyCode::Char('u'));
+        assert!(app.write.take().is_some());
+        press(&mut app, KeyCode::Char('u'));
+        assert_eq!(app.write, None);
+        assert_eq!(app.status, "A write is still running");
+        app.on_msg(Msg::Written(Err("refused".into())));
+        press(&mut app, KeyCode::Char('u'));
+        assert!(
+            app.write.is_some(),
+            "the result is in, the next write starts"
         );
     }
 

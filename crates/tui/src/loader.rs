@@ -25,8 +25,8 @@ pub enum Msg {
         path: String,
         lines: Result<Vec<DiffLine>, String>,
     },
-    /// A write done, or refused with nothing changed.
-    Written(Result<(), String>),
+    /// A write done, with the commit it made where it made one, or refused with nothing changed.
+    Written(Result<Option<String>, String>),
 }
 
 /// A read the event loop asks the worker for.

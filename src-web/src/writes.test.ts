@@ -1,7 +1,8 @@
 // Verifies: ADR-0033, ADR-0034, G-7, Q-6
 import { describe, expect, test } from 'bun:test';
 import {
-  OneWrite, actionLabel, confirmedWrite, stashRequest, tagRequest, type Write,
+  OneWrite, actionLabel, commitRequest, confirmedWrite, stageToggle, stashRequest, tagRequest,
+  type Write,
 } from './writes.ts';
 
 describe('tagRequest', () => {
@@ -34,11 +35,12 @@ describe('confirmedWrite', () => {
   test('asks in the core\'s words, and writes confirmed only on a yes', async () => {
     const asked: string[] = [];
     const calls: [Write, boolean][] = [];
-    const call = async (w: Write, confirmed: boolean) => { calls.push([w, confirmed]); };
+    const call = async (w: Write, confirmed: boolean) => { calls.push([w, confirmed]); return null; };
     const no = await confirmedWrite(drop, discards, async (lost) => { asked.push(lost); return false; }, call);
-    expect(no).toBe('kept');
+    expect(no).toEqual({ kind: 'kept' });
     expect(calls).toEqual([]);
-    expect(await confirmedWrite(drop, discards, async () => true, call)).toBe('written');
+    expect(await confirmedWrite(drop, discards, async () => true, call))
+      .toEqual({ kind: 'written', made: null });
     expect(calls).toEqual([[drop, true]]);
     expect(asked).toEqual(['the stash stash@{0}']);
     expect(actionLabel(drop)).toBe('Drop stash');
@@ -47,8 +49,12 @@ describe('confirmedWrite', () => {
   test('a write that discards nothing asks nothing and goes unconfirmed', async () => {
     const calls: [Write, boolean][] = [];
     const never = async () => { throw new Error('asked'); };
-    await confirmedWrite(tag, discards, never, async (w, c) => { calls.push([w, c]); });
+    const made = await confirmedWrite(tag, discards, never, async (w, c) => {
+      calls.push([w, c]);
+      return 'new';
+    });
     expect(calls).toEqual([[tag, false]]);
+    expect(made).toEqual({ kind: 'written', made: 'new' });
   });
 });
 
@@ -82,5 +88,22 @@ describe('OneWrite', () => {
     selected = 'd';
     first.answer('refused');
     expect(await running).toBeNull();
+  });
+});
+
+describe('staging and committing', () => {
+  test('the toggle unstages a staged file and stages the rest whole, as shown', () => {
+    const file = (staged: 'no' | 'yes' | 'partly') => ({
+      path: 'f', oldPath: null, status: 'modified' as const, additions: 1, deletions: 0, staged,
+      shown: { workdir: 'w', index: 'i' },
+    });
+    expect(stageToggle(file('yes'))).toEqual({ kind: 'unstageFile', path: 'f', shown: 'i' });
+    expect(stageToggle(file('partly'))).toEqual({ kind: 'stageFile', path: 'f', shown: 'w' });
+    expect(stageToggle(file('no'))).toEqual({ kind: 'stageFile', path: 'f', shown: 'w' });
+  });
+
+  test('a commit needs a message', () => {
+    expect(commitRequest('h', ' \n')).toBeNull();
+    expect(commitRequest('h', 'Change f')).toEqual({ kind: 'commit', message: 'Change f', head: 'h' });
   });
 });

@@ -187,4 +187,9 @@ export interface FileChange {
   status: FileStatus;
   additions: number;
   deletions: number;
+  /** For the working-directory node's files only: how much of the change is staged. */
+  staged?: 'no' | 'yes' | 'partly';
+  /** For the working-directory node's files only: the content shown, by blob id, which staging
+      and unstaging expect to find. */
+  shown?: { workdir: string | null; index: string | null };
 }

@@ -5,16 +5,28 @@
 use anyhow::{Context, Result, bail};
 use git2::build::CheckoutBuilder;
 use git2::{
-    ErrorCode, ObjectType, Oid, Reference, Repository, StashApplyOptions, StashFlags, Status,
-    TreeWalkMode, TreeWalkResult,
+    ErrorCode, ObjectType, Oid, Reference, Repository, RepositoryState, StashApplyOptions,
+    StashFlags, Status, TreeWalkMode, TreeWalkResult,
 };
 use ocelli_core::port::Write;
 use std::path::Path;
 
-/// Performs `write` on the repository at `repo_path`, or refuses it with nothing changed.
-pub fn write(repo_path: &Path, write: &Write) -> Result<()> {
+/// Performs `write` on the repository at `repo_path`, or refuses it with nothing changed; returns
+/// the commit it made, where it made one.
+pub fn write(repo_path: &Path, write: &Write) -> Result<Option<String>> {
     let mut repo = Repository::discover(repo_path)?;
-    match write {
+    let done = match write {
+        Write::Commit { message, head } => {
+            return commit(&repo, message, head.as_deref()).map(Some);
+        }
+        Write::StageFile { path, shown } => {
+            as_shown(&repo, path, shown, |s| s.workdir)?;
+            stage_file(&repo, path)
+        }
+        Write::UnstageFile { path, shown } => {
+            as_shown(&repo, path, shown, |s| s.index)?;
+            unstage_file(&repo, path)
+        }
         Write::CreateTag {
             name,
             commit,
@@ -54,7 +66,8 @@ pub fn write(repo_path: &Path, write: &Write) -> Result<()> {
             repo.stash_drop(*index)?;
             Ok(())
         }
-    }
+    };
+    done.map(|()| None)
 }
 
 const NO_IDENTITY: &str = "no identity is configured to write with: set user.name and user.email";
@@ -72,23 +85,37 @@ fn create_tag(repo: &Repository, name: &str, commit: &str, message: Option<&str>
         .ok()
         .and_then(|oid| repo.find_object(oid, Some(ObjectType::Commit)).ok())
         .with_context(|| format!("the commit {commit} is no longer in the repository"))?;
-    // Cleaned up as `git tag` cleans it: comment lines, surrounding blank lines, and trailing
-    // spaces go, and it ends in a newline.
-    let comment = comment_string(repo)?;
-    let message = message
-        .map(|m| {
-            let kept: Vec<_> = m.lines().filter(|l| !l.starts_with(&comment)).collect();
-            git2::message_prettify(kept.join("\n"), None)
-        })
-        .transpose()?;
+    let message = message.map(|m| clean_message(repo, m)).transpose()?;
     match message.filter(|m| !m.is_empty()) {
         Some(message) => {
+            refuse_where_signing_is_asked(repo, "tag.gpgSign", "an annotated tag")?;
+            refuse_where_signing_is_asked(repo, "tag.forceSignAnnotated", "an annotated tag")?;
             let tagger = repo.signature().context(NO_IDENTITY)?;
             repo.tag(name, &target, &tagger, &message, false)?;
         }
         None => {
             repo.tag_lightweight(name, &target, false)?;
         }
+    }
+    Ok(())
+}
+
+/// `message` cleaned up as `git tag` cleans it: comment lines, surrounding blank
+/// lines, and trailing spaces go, and it ends in a newline; empty where nothing is left.
+fn clean_message(repo: &Repository, message: &str) -> Result<String> {
+    let comment = comment_string(repo)?;
+    let kept: Vec<_> = message
+        .lines()
+        .filter(|l| !l.starts_with(&comment))
+        .collect();
+    Ok(git2::message_prettify(kept.join("\n"), None)?)
+}
+
+/// Refuses `what` where the configuration's `key` asks `git` to sign it, which Ocelli cannot
+/// (ADR-0033).
+fn refuse_where_signing_is_asked(repo: &Repository, key: &str, what: &str) -> Result<()> {
+    if repo.config()?.get_bool(key).unwrap_or(false) {
+        bail!("{key} asks for {what} to be signed, which Ocelli does not do: use git for it");
     }
     Ok(())
 }
@@ -260,4 +287,124 @@ fn check_applies(repo: &Repository, index: usize, commit: &str) -> Result<()> {
         }
     }
     Ok(())
+}
+
+const INDEX: Status = Status::INDEX_NEW
+    .union(Status::INDEX_MODIFIED)
+    .union(Status::INDEX_DELETED)
+    .union(Status::INDEX_RENAMED)
+    .union(Status::INDEX_TYPECHANGE);
+const WORKTREE: Status = Status::WT_NEW
+    .union(Status::WT_MODIFIED)
+    .union(Status::WT_DELETED)
+    .union(Status::WT_RENAMED)
+    .union(Status::WT_TYPECHANGE);
+
+/// Stages the whole file at `path`, as `git add` does, removing it from the index where the
+/// working directory deleted it; refused where it holds no change the index does not.
+fn stage_file(repo: &Repository, path: &str) -> Result<()> {
+    let status = repo.status_file(Path::new(path)).unwrap_or(Status::empty());
+    if !status.intersects(WORKTREE) {
+        bail!("{path} has no change to stage");
+    }
+    let mut index = repo.index()?;
+    if status.contains(Status::WT_DELETED) {
+        index.remove_path(Path::new(path))?;
+    } else {
+        index.add_path(Path::new(path))?;
+    }
+    index.write()?;
+    Ok(())
+}
+
+/// Takes the file at `path` out of the index, back to the checked-out commit's, as
+/// `git restore --staged` does; refused where the index holds no change of it.
+fn unstage_file(repo: &Repository, path: &str) -> Result<()> {
+    let status = repo.status_file(Path::new(path)).unwrap_or(Status::empty());
+    if !status.intersects(INDEX) {
+        bail!("{path} is not staged");
+    }
+    match repo.head().ok().and_then(|h| h.peel_to_commit().ok()) {
+        Some(head) => repo.reset_default(Some(head.as_object()), [path])?,
+        None => {
+            let mut index = repo.index()?;
+            index.remove_path(Path::new(path))?;
+            index.write()?;
+        }
+    }
+    Ok(())
+}
+
+/// Commits the index with `message` by the configured identity, where the checked-out commit is
+/// still `head`, and returns the commit made. libgit2 moves the branch only while it still points
+/// at `head`, so a commit made elsewhere meanwhile is not lost either.
+fn commit(repo: &Repository, message: &str, head: Option<&str>) -> Result<String> {
+    let parent = repo.head().ok().and_then(|h| h.peel_to_commit().ok());
+    if parent.as_ref().map(|c| c.id().to_string()).as_deref() != head {
+        bail!("the checked-out commit is no longer the one shown: reload to see it as it is");
+    }
+    // A bisect leaves commits alone; every other operation in progress records its own.
+    if !matches!(
+        repo.state(),
+        RepositoryState::Clean | RepositoryState::Bisect
+    ) {
+        bail!(
+            "a {} is in progress: finish it with git, which records it as it began it",
+            in_progress(repo.state())
+        );
+    }
+    refuse_where_signing_is_asked(repo, "commit.gpgSign", "a commit")?;
+    let mut index = repo.index()?;
+    if index.has_conflicts() {
+        bail!("the index holds conflicts: resolve them before committing");
+    }
+    let tree = repo.find_tree(index.write_tree()?)?;
+    if parent.as_ref().is_some_and(|p| p.tree_id() == tree.id())
+        || parent.is_none() && tree.is_empty()
+    {
+        bail!("nothing is staged to commit");
+    }
+    // `git commit -m` cleans up whitespace only and keeps lines that look like comments, unless
+    // `commit.cleanup` says otherwise.
+    let cleanup = repo
+        .config()?
+        .get_string("commit.cleanup")
+        .unwrap_or_default();
+    let message = match cleanup.as_str() {
+        "strip" => clean_message(repo, message)?,
+        "verbatim" => message.to_string(),
+        _ => git2::message_prettify(message, None)?,
+    };
+    if message.is_empty() {
+        bail!("a commit needs a message");
+    }
+    let author = repo.signature().context(NO_IDENTITY)?;
+    let parents: Vec<_> = parent.iter().collect();
+    let made = repo.commit(Some("HEAD"), &author, &author, &message, &tree, &parents)?;
+    Ok(made.to_string())
+}
+
+/// Refuses unless `path`'s content, where `side` of [`crate::git::shown`] reads it, is still the
+/// one `expected` names (ADR-0033).
+fn as_shown(
+    repo: &Repository,
+    path: &str,
+    expected: &Option<String>,
+    side: impl Fn(ocelli_core::model::Shown) -> Option<String>,
+) -> Result<()> {
+    if side(crate::git::shown(repo, path)) != *expected {
+        bail!("{path} changed since it was shown: reload to see it as it is");
+    }
+    Ok(())
+}
+
+/// What a repository is in the middle of, in the words `git status` uses.
+fn in_progress(state: RepositoryState) -> &'static str {
+    match state {
+        RepositoryState::Merge => "merge",
+        RepositoryState::Revert | RepositoryState::RevertSequence => "revert",
+        RepositoryState::CherryPick | RepositoryState::CherryPickSequence => "cherry-pick",
+        RepositoryState::ApplyMailbox | RepositoryState::ApplyMailboxOrRebase => "git am",
+        _ => "rebase",
+    }
 }

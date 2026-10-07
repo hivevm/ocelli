@@ -323,6 +323,16 @@ pub struct DiffLine {
     pub new_lineno: Option<u32>,
 }
 
+/// How much of a file's uncommitted change the index holds (G-4).
+#[derive(Debug, Serialize, Clone, Copy, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum Staged {
+    No,
+    Yes,
+    /// The index holds a change, and the working directory changes the file further.
+    Partly,
+}
+
 #[derive(Debug, Serialize, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct FileChange {
@@ -331,6 +341,22 @@ pub struct FileChange {
     pub status: FileStatus,
     pub additions: u32,
     pub deletions: u32,
+    /// For the working-directory node's files only: how much of the change is staged.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub staged: Option<Staged>,
+    /// For the working-directory node's files only: the content shown, which staging and
+    /// unstaging expect to find (ADR-0033).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub shown: Option<Shown>,
+}
+
+/// A file's content in the working directory and in the index, by blob id; `None` where it has
+/// none there.
+#[derive(Debug, Serialize, Clone, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct Shown {
+    pub workdir: Option<String>,
+    pub index: Option<String>,
 }
 
 #[cfg(test)]

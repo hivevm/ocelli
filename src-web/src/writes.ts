@@ -3,13 +3,18 @@
 //
 // All of it is bookkeeping over strings and numbers, so it lives here and is tested directly.
 
+import type { FileChange } from './types.ts';
+
 /** A write as the core's `Write` crosses to the host, its kind in `kind`. */
 export type Write =
   | { kind: 'createTag'; name: string; commit: string; message: string | null }
   | { kind: 'deleteTag'; name: string; commit: string; annotated: boolean }
   | { kind: 'createStash'; message: string | null; untracked: boolean }
   | { kind: 'applyStash'; index: number; commit: string; drop: boolean }
-  | { kind: 'dropStash'; index: number; commit: string };
+  | { kind: 'dropStash'; index: number; commit: string }
+  | { kind: 'stageFile'; path: string; shown: string | null }
+  | { kind: 'unstageFile'; path: string; shown: string | null }
+  | { kind: 'commit'; message: string; head: string | null };
 
 /** A write of one kind. */
 export type WriteOf<K extends Write['kind']> = Extract<Write, { kind: K }>;
@@ -27,6 +32,20 @@ export function stashRequest(message: string, untracked: boolean): WriteOf<'crea
   return { kind: 'createStash', message: blankIsNone(message), untracked };
 }
 
+/** What the stage toggle of a working-directory file asks for: a staged file is unstaged, one
+    staged in part or not at all is staged whole, each expecting the content shown. */
+export function stageToggle(file: FileChange): Write {
+  const { path, shown } = file;
+  return file.staged === 'yes'
+    ? { kind: 'unstageFile', path, shown: shown?.index ?? null }
+    : { kind: 'stageFile', path, shown: shown?.workdir ?? null };
+}
+
+/** The commit the form describes on `head`, or null while it has no message. */
+export function commitRequest(head: string | null, message: string): WriteOf<'commit'> | null {
+  return message.trim() === '' ? null : { kind: 'commit', message, head };
+}
+
 function blankIsNone(text: string): string | null {
   return text.trim() === '' ? null : text;
 }
@@ -41,21 +60,25 @@ export function actionLabel(write: Write): string {
   }
 }
 
+/** How a write ended: kept on a decline, or written, with the commit it made where it made one. */
+export type Outcome = { kind: 'kept' } | { kind: 'written'; made: string | null };
+
 /**
  * Performs `write`: `discards` asks the core what it discards, and where it discards anything,
  * `ask` puts the question naming it and resolves with the answer; `call` asks the host to write,
- * confirmed where the developer said yes. On a decline nothing is written.
+ * confirmed where the developer said yes, and resolves with the commit the write made. On a
+ * decline nothing is written.
  */
 export async function confirmedWrite(
   write: Write,
   discards: (write: Write) => Promise<string | null>,
   ask: (lost: string, write: Write) => Promise<boolean>,
-  call: (write: Write, confirmed: boolean) => Promise<void>,
-): Promise<'kept' | 'written'> {
+  call: (write: Write, confirmed: boolean) => Promise<string | null>,
+): Promise<Outcome> {
   const lost = await discards(write);
-  if (lost !== null && !(await ask(lost, write))) return 'kept';
-  await call(write, lost !== null);
-  return 'written';
+  if (lost !== null && !(await ask(lost, write))) return { kind: 'kept' };
+  const made = await call(write, lost !== null);
+  return { kind: 'written', made };
 }
 
 /** A write's refusal, or null for a write done or kept. */

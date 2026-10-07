@@ -71,6 +71,18 @@ pub enum Write {
     },
     /// Drops the stash at `index`, expected to be `commit`.
     DropStash { index: usize, commit: String },
+    /// Stages the whole file at `path`, whose content in the working directory is expected to be
+    /// `shown`, by blob id, `None` where it is deleted there.
+    StageFile { path: String, shown: Option<String> },
+    /// Takes the file at `path` out of the index, whose content there is expected to be `shown`,
+    /// `None` where the index removes it; the working directory keeps its change.
+    UnstageFile { path: String, shown: Option<String> },
+    /// Commits the index with `message` on `head`, the commit expected to be checked out, `None`
+    /// on a branch without a commit yet.
+    Commit {
+        message: String,
+        head: Option<String>,
+    },
 }
 
 impl Write {
@@ -80,7 +92,10 @@ impl Write {
         match self {
             Write::CreateTag { .. }
             | Write::CreateStash { .. }
-            | Write::ApplyStash { drop: false, .. } => None,
+            | Write::ApplyStash { drop: false, .. }
+            | Write::StageFile { .. }
+            | Write::UnstageFile { .. }
+            | Write::Commit { .. } => None,
             Write::DeleteTag {
                 name,
                 annotated: true,
@@ -108,8 +123,9 @@ pub enum Confirmation {
 
 /// Writes to a repository, running no program the repository names (ADR-0033).
 pub trait RepositoryWriter {
-    /// Performs `write`, or refuses it with nothing changed and says why.
-    fn write(&self, repo: &Path, write: &Write) -> Result<()>;
+    /// Performs `write`, or refuses it with nothing changed and says why. Returns the commit the
+    /// write made, which the load after it selects, where it made one.
+    fn write(&self, repo: &Path, write: &Write) -> Result<Option<String>>;
 }
 
 /// Hands `write` to `writer`, refusing a write that discards work before it reaches the
@@ -120,7 +136,7 @@ pub fn perform(
     repo: &Path,
     write: &Write,
     confirmation: Confirmation,
-) -> Result<()> {
+) -> Result<Option<String>> {
     if let Some(lost) = write.discards()
         && confirmation != Confirmation::Given
     {
@@ -139,9 +155,9 @@ mod tests {
     struct Recorder(RefCell<Vec<Write>>);
 
     impl RepositoryWriter for Recorder {
-        fn write(&self, _: &Path, write: &Write) -> Result<()> {
+        fn write(&self, _: &Path, write: &Write) -> Result<Option<String>> {
             self.0.borrow_mut().push(write.clone());
-            Ok(())
+            Ok(None)
         }
     }
 
