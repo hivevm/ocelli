@@ -14,7 +14,12 @@ export type Write =
   | { kind: 'dropStash'; index: number; commit: string }
   | { kind: 'stageFile'; path: string; shown: string | null }
   | { kind: 'unstageFile'; path: string; shown: string | null }
-  | { kind: 'commit'; message: string; head: string | null };
+  | { kind: 'commit'; message: string; head: string | null }
+  | { kind: 'createBranch'; name: string; commit: string; switch: boolean }
+  | { kind: 'switchBranch'; name: string; tip: string }
+  | { kind: 'detach'; commit: string }
+  | { kind: 'trackRemote'; remote: string; branch: string; tip: string }
+  | { kind: 'deleteBranch'; name: string; tip: string; merged: boolean };
 
 /** A write of one kind. */
 export type WriteOf<K extends Write['kind']> = Extract<Write, { kind: K }>;
@@ -41,6 +46,14 @@ export function stageToggle(file: FileChange): Write {
     : { kind: 'stageFile', path, shown: shown?.workdir ?? null };
 }
 
+/** The branch the form describes at `commit`, or null while it has no name. */
+export function branchRequest(
+  commit: string, name: string, switchTo: boolean,
+): WriteOf<'createBranch'> | null {
+  const trimmed = name.trim();
+  return trimmed === '' ? null : { kind: 'createBranch', name: trimmed, commit, switch: switchTo };
+}
+
 /** The commit the form describes on `head`, or null while it has no message. */
 export function commitRequest(head: string | null, message: string): WriteOf<'commit'> | null {
   return message.trim() === '' ? null : { kind: 'commit', message, head };
@@ -56,6 +69,7 @@ export function actionLabel(write: Write): string {
     case 'deleteTag': return 'Delete tag';
     case 'applyStash': return write.drop ? 'Pop stash' : 'Apply stash';
     case 'dropStash': return 'Drop stash';
+    case 'deleteBranch': return 'Delete branch';
     default: return 'Go ahead';
   }
 }

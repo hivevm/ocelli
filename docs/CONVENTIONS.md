@@ -67,9 +67,15 @@ skimmed. The design revision drops what prevented nothing
 - **A write does what `git` does for the same command, and a refusal changes nothing.** Where
   libgit2 differs from `git`, a name `git` refuses, a message `git` cleans up, a file in the way
   `git` will not overwrite, the writer follows `git`, and its tests run `git` on the same input.
-  A refusal is decided before libgit2 is called, since libgit2 can stop halfway, and its test
-  compares the working directory's status, ignored files included, before and after. Every
-  repository Ocelli touches stays one `git` knows what to do with.
+  What `git` weighs is more than the working directory: the index, an operation in progress such
+  as a merge, and every configuration key its documentation names for the command; libgit2 reads
+  none of them for the caller. What `git` does is read off `git` run on the same input, never
+  recalled, and a write that departs from it on purpose says so where that is decided and is
+  tested against `git` doing otherwise. A refusal is decided before libgit2 is called, since
+  libgit2 can stop halfway; one only libgit2 can find, such as a branch name clashing with
+  another, goes first, and a refusal after it undoes it. Its test compares everything the write
+  can change before and after: `HEAD`, the refs, the index, and the working directory's status,
+  ignored files included. Every repository Ocelli touches stays one `git` knows what to do with.
 - **A control that writes takes no second press while its write runs.** A second click on a write
   that has not answered yet writes twice, or is refused for a state the first one changed.
 - **Configuration that grants a capability carries a test that reads it.** The WebView's content

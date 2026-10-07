@@ -107,6 +107,20 @@ fn split_remote_branch<'a>(full_name: &'a str, remotes: &[String]) -> Option<(St
     Some((remote.to_string(), branch))
 }
 
+/// Whether every commit of `branch` is in its upstream, or in `HEAD` where it has none or that
+/// does not resolve, as `git branch -d` decides.
+pub(crate) fn merged(repo: &Repository, branch: &git2::Branch) -> bool {
+    let Some(tip) = branch.get().target() else {
+        return false;
+    };
+    let into = branch
+        .upstream()
+        .ok()
+        .and_then(|u| u.get().target())
+        .or_else(|| repo.head().ok().and_then(|h| h.target()));
+    into.is_some_and(|into| into == tip || repo.graph_descendant_of(into, tip).unwrap_or(false))
+}
+
 fn load_locals(repo: &Repository) -> Vec<LocalBranch> {
     let Ok(branches) = repo.branches(Some(BranchType::Local)) else {
         return Vec::new();
@@ -139,6 +153,7 @@ fn load_locals(repo: &Repository) -> Vec<LocalBranch> {
 
         let sha = oid.to_string();
         out.push(LocalBranch {
+            merged: merged(repo, &branch),
             name,
             short_sha: short(&sha),
             sha,

@@ -96,6 +96,8 @@ export interface LocalBranch {
   /** Position against the upstream as of the last fetch — the viewer never fetches. */
   ahead: number;
   behind: number;
+  /** Whether every commit of the branch is in its upstream, or in HEAD without one. */
+  merged: boolean;
 }
 
 export interface RemoteBranch {

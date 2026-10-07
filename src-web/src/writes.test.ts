@@ -1,7 +1,7 @@
 // Verifies: ADR-0033, ADR-0034, G-7, Q-6
 import { describe, expect, test } from 'bun:test';
 import {
-  OneWrite, actionLabel, commitRequest, confirmedWrite, stageToggle, stashRequest, tagRequest,
+  OneWrite, actionLabel, branchRequest, commitRequest, confirmedWrite, stageToggle, stashRequest, tagRequest,
   type Write,
 } from './writes.ts';
 
@@ -105,5 +105,18 @@ describe('staging and committing', () => {
   test('a commit needs a message', () => {
     expect(commitRequest('h', ' \n')).toBeNull();
     expect(commitRequest('h', 'Change f')).toEqual({ kind: 'commit', message: 'Change f', head: 'h' });
+  });
+});
+
+describe('branches', () => {
+  test('a branch needs a name, and is switched to as the form says', () => {
+    expect(branchRequest('c', '  ', true)).toBeNull();
+    expect(branchRequest('c', ' topic ', false))
+      .toEqual({ kind: 'createBranch', name: 'topic', commit: 'c', switch: false });
+  });
+
+  test('deleting a branch goes ahead under its own label', () => {
+    expect(actionLabel({ kind: 'deleteBranch', name: 'x', tip: 't', merged: false }))
+      .toBe('Delete branch');
   });
 });
