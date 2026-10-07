@@ -14,12 +14,12 @@ finish-args:
   - --socket=fallback-x11
   - --device=dri
   - --share=ipc
-  # Ocelli opens arbitrary local repositories and — by specification
-  # Non-Goal — never writes to them: read-only host access instead of
-  # per-folder portals, which git2 cannot use for whole-tree reads.
-  - --filesystem=host:ro
-  # Sole network use is the opt-in, default-off Gravatar avatar fetch
-  # (ADR-0023); the WebView CSP allows no other origin.
+  # Ocelli opens arbitrary local repositories and writes to them (ADR-0033):
+  # host access instead of per-folder portals, which git2 cannot use for
+  # whole-tree reads and writes.
+  - --filesystem=host
+  # Fetching, pulling, and pushing (ADR-0035), and the opt-in, default-off
+  # Gravatar avatar fetch (ADR-0023), whose WebView CSP allows no other origin.
   - --share=network
 
 modules:

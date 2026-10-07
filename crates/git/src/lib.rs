@@ -1,13 +1,14 @@
-//! The repository port of `ocelli-core` implemented with git2 (ADR-0009, ADR-0019). git2 runs
-//! no hooks, no `core.fsmonitor`, and no external diff or filter driver, so reading a repository
-//! starts no program the repository names (Q-4).
+//! The repository ports of `ocelli-core` implemented with git2 (ADR-0009, ADR-0019, ADR-0033).
+//! git2 runs no hooks, no `core.fsmonitor`, and no external diff or filter driver, so reading or
+//! writing a repository starts no program the repository names (Q-4).
 
 pub mod git;
 pub mod refs;
+mod write;
 
 use anyhow::Result;
 use ocelli_core::model::{CommitData, DiffLine, FileChange, RepoRefs};
-use ocelli_core::port::RepositoryReader;
+use ocelli_core::port::{RepositoryReader, RepositoryWriter, Write};
 use std::path::Path;
 
 /// The git2 implementation of [`RepositoryReader`].
@@ -50,5 +51,15 @@ impl RepositoryReader for GitReader {
 
     fn load_file_diff(&self, repo: &Path, sha: &str, file_path: &str) -> Result<Vec<DiffLine>> {
         git::load_file_diff(repo, sha, file_path)
+    }
+}
+
+/// The git2 implementation of [`RepositoryWriter`] (ADR-0033).
+#[derive(Debug, Default, Clone, Copy)]
+pub struct GitWriter;
+
+impl RepositoryWriter for GitWriter {
+    fn write(&self, repo: &Path, write: &Write) -> Result<Option<String>> {
+        write::write(repo, write)
     }
 }

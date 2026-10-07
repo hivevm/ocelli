@@ -137,6 +137,9 @@ pub struct History {
     /// into `collided` instead.
     row_of: HashMap<u64, u32>,
     collided: HashMap<String, u32>,
+    /// The place in the stash of each stash node, by its row; few rows have one, so they stay
+    /// out of `Row`.
+    stashes: HashMap<u32, usize>,
     lanes: usize,
 }
 
@@ -231,6 +234,9 @@ impl History {
             };
             self.children
                 .extend(laid.children.iter().map(|&r| r as u32));
+            if let Some(place) = c.stash {
+                self.stashes.insert(row as u32, place);
+            }
             self.rows.push(Row {
                 chunk: chunk_index,
                 sha: put(&c.sha),
@@ -346,6 +352,7 @@ impl History {
             refs: self.texts_of(r, r.refs).map(str::to_string).collect(),
             parent_shas: self.texts_of(r, r.parents).map(str::to_string).collect(),
             kind: r.kind,
+            stash: self.stashes.get(&(row as u32)).copied(),
         };
         let children = self
             .children_of(row)

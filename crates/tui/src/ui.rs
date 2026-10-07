@@ -4,14 +4,15 @@
 //! the visible window of the graph is rasterised each frame (ADR-0017);
 //! everything else is read from the [`App`] state.
 
-use crate::app::{App, Focus};
+use crate::app::{App, Focus, Modal, StashPrompt, TagPrompt};
 use crate::chips::{Planned, RefKind, chip_width, chips, plan};
 use crate::diffsplit::{CellKind, SplitRow, split_rows};
 use crate::files::{FileRow, FileView};
-use crate::raster::{self, rasterize};
+use crate::raster::{self, Glyphs, rasterize};
 use crate::sidebar::{self, Look, RailRow, RowKind};
 use crate::theme::{Palette, lane, palette};
-use ocelli_core::model::{CommitKind, DiffLine, DiffLineKind, FileStatus};
+use ocelli_core::model::{CommitKind, DiffLine, DiffLineKind, FileStatus, Staged};
+use ocelli_core::port::Write;
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::style::{Modifier, Style};
@@ -69,8 +70,46 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
     if app.search.editing {
         draw_search_panel(frame, app, p, graph);
     }
-    if app.prompt.is_some() {
-        draw_prompt(frame, app, p, main);
+    match &app.modal {
+        Some(Modal::Open(path)) => draw_prompt(frame, path, p, main),
+        Some(Modal::Tag(tag)) => draw_tag_prompt(frame, tag, p, main),
+        Some(Modal::Stash(stash)) => draw_stash_prompt(frame, stash, p, main),
+        Some(Modal::Confirm(write)) => draw_confirm(frame, write, p, main),
+        Some(Modal::Branch {
+            commit,
+            name,
+            switch,
+        }) => {
+            let short = &commit[..commit.len().min(7)];
+            let switch = if *switch { "[x]" } else { "[ ]" };
+            let lines = vec![
+                input_line(p, "Name    ", name, true),
+                Line::from(vec![
+                    Span::styled("Switch  ", Style::new().fg(p.text_muted)),
+                    Span::styled(
+                        format!("{switch} switch to it"),
+                        Style::new().fg(p.text_bright),
+                    ),
+                ]),
+                Line::styled(
+                    "Enter create · Tab switch · Esc cancel",
+                    Style::new().fg(p.text_dim),
+                ),
+            ];
+            draw_dialog(frame, p, main, format!(" Branch at {short} "), lines);
+        }
+        Some(Modal::Commit { head, message }) => {
+            let short = &head[..head.len().min(7)];
+            let lines = vec![
+                input_line(p, "Message  ", message, true),
+                Line::styled(
+                    "Enter commit the staged files · Esc cancel",
+                    Style::new().fg(p.text_dim),
+                ),
+            ];
+            draw_dialog(frame, p, main, format!(" Commit on {short} "), lines);
+        }
+        None => {}
     }
     draw_status(frame, app, p, status);
 }
@@ -488,6 +527,28 @@ fn status_letter(p: &Palette, status: &FileStatus) -> Span<'static> {
     )
 }
 
+/// Whether the files shown are the working-directory node's, which stage.
+fn working(app: &App) -> bool {
+    app.files
+        .as_ref()
+        .is_some_and(|f| f.sha == ocelli_core::model::WORKDIR_SHA)
+}
+
+/// How much of a file's change is staged: all, part, or none (G-4).
+fn staged_mark(p: &Palette, glyphs: Glyphs, staged: Staged) -> Span<'static> {
+    let (unicode, ascii, colour) = match staged {
+        Staged::Yes => ("● ", "[x] ", p.accent),
+        Staged::Partly => ("◐ ", "[~] ", p.amber),
+        Staged::No => ("○ ", "[ ] ", p.text_dim),
+    };
+    let mark = if glyphs == Glyphs::Ascii {
+        ascii
+    } else {
+        unicode
+    };
+    Span::styled(mark, Style::new().fg(colour))
+}
+
 fn draw_files(frame: &mut Frame, app: &App, p: &Palette, area: Rect) {
     let focused = app.focus == Focus::Files && app.diff.is_none();
     let view = match app.file_view {
@@ -545,11 +606,11 @@ fn draw_files(frame: &mut Frame, app: &App, p: &Palette, area: Rect) {
                 if open == Some(f.path.as_str()) {
                     name_style = name_style.fg(p.accent).add_modifier(Modifier::BOLD);
                 }
-                let mut spans = vec![
-                    Span::raw("  ".repeat(depth)),
-                    status_letter(p, &f.status),
-                    Span::styled(name, name_style),
-                ];
+                let mut spans = vec![Span::raw("  ".repeat(depth))];
+                if let Some(staged) = f.staged {
+                    spans.push(staged_mark(p, app.glyphs, staged));
+                }
+                spans.extend([status_letter(p, &f.status), Span::styled(name, name_style)]);
                 if f.additions > 0 {
                     spans.push(Span::styled(
                         format!(" +{}", f.additions),
@@ -729,34 +790,109 @@ fn draw_search_panel(frame: &mut Frame, app: &App, p: &Palette, graph: Rect) {
     );
 }
 
-fn draw_prompt(frame: &mut Frame, app: &App, p: &Palette, main: Rect) {
-    let Some(text) = &app.prompt else { return };
+fn draw_prompt(frame: &mut Frame, text: &str, p: &Palette, main: Rect) {
+    let lines = vec![
+        input_line(p, "", text, true),
+        Line::styled("Enter open · Esc cancel", Style::new().fg(p.text_dim)),
+    ];
+    draw_dialog(frame, p, main, " Open repository ".to_string(), lines);
+}
+
+/// The tag prompt (G-7): the name, then the message, the line being typed
+/// carrying the cursor.
+fn draw_tag_prompt(frame: &mut Frame, tag: &TagPrompt, p: &Palette, main: Rect) {
+    let typing_name = tag.message.is_none();
+    let mut lines = vec![input_line(p, "Name     ", &tag.name, typing_name)];
+    if let Some(message) = &tag.message {
+        lines.push(input_line(p, "Message  ", message, true));
+    }
+    lines.push(Line::styled(
+        if typing_name {
+            "Enter next · Esc cancel"
+        } else {
+            "Enter tag, an empty message makes a lightweight tag · Esc cancel"
+        },
+        Style::new().fg(p.text_dim),
+    ));
+    let short = &tag.sha[..tag.sha.len().min(7)];
+    draw_dialog(frame, p, main, format!(" Tag {short} "), lines);
+}
+
+/// The question before a write that discards work, naming what is lost
+/// (ADR-0034).
+fn draw_confirm(frame: &mut Frame, write: &Write, p: &Palette, main: Rect) {
+    let Some(lost) = write.discards() else {
+        return;
+    };
+    let lines = vec![
+        Line::styled(
+            format!("This discards {lost}, and nothing brings it back."),
+            Style::new().fg(p.text_bright),
+        ),
+        Line::from(vec![
+            Span::styled("y", Style::new().fg(p.accent)),
+            Span::styled(
+                " go ahead · any other key keeps it",
+                Style::new().fg(p.text_dim),
+            ),
+        ]),
+    ];
+    draw_dialog(frame, p, main, " Discard? ".to_string(), lines);
+}
+
+/// The stash prompt (G-7): the message, and whether the untracked files go
+/// with the changes.
+fn draw_stash_prompt(frame: &mut Frame, stash: &StashPrompt, p: &Palette, main: Rect) {
+    let untracked = if stash.untracked { "[x]" } else { "[ ]" };
+    let lines = vec![
+        input_line(p, "Message    ", &stash.message, true),
+        Line::from(vec![
+            Span::styled("Untracked  ", Style::new().fg(p.text_muted)),
+            Span::styled(
+                format!("{untracked} include untracked files"),
+                Style::new().fg(p.text_bright),
+            ),
+        ]),
+        Line::styled(
+            "Enter stash · Tab untracked · Esc cancel",
+            Style::new().fg(p.text_dim),
+        ),
+    ];
+    draw_dialog(frame, p, main, " Stash changes ".to_string(), lines);
+}
+
+fn input_line<'a>(p: &Palette, label: &'a str, text: &str, cursor: bool) -> Line<'a> {
+    Line::from(vec![
+        Span::styled(label, Style::new().fg(p.text_muted)),
+        Span::styled(text.to_string(), Style::new().fg(p.text_bright)),
+        Span::styled(if cursor { "▏" } else { "" }, Style::new().fg(p.accent)),
+    ])
+}
+
+/// A box over the panes, a third of the way down.
+fn draw_dialog(frame: &mut Frame, p: &Palette, main: Rect, title: String, lines: Vec<Line>) {
     let width = main.width.min(80);
     let area = Rect {
         x: main.x + (main.width - width) / 2,
         y: main.y + main.height / 3,
         width,
-        height: 4.min(main.height),
+        height: (lines.len() as u16 + 2).min(main.height),
     };
     frame.render_widget(Clear, area);
-    frame.render_widget(
-        Paragraph::new(vec![
-            Line::from(vec![
-                Span::styled(text.clone(), Style::new().fg(p.text_bright)),
-                Span::styled("▏", Style::new().fg(p.accent)),
-            ]),
-            Line::styled("Enter open · Esc cancel", Style::new().fg(p.text_dim)),
-        ])
-        .block(pane(p, " Open repository ", true)),
-        area,
-    );
+    frame.render_widget(Paragraph::new(lines).block(pane(p, title, true)), area);
 }
 
 // ── Status bar ──────────────────────────────────────────────────────────────
 
 fn hints(app: &App) -> &'static str {
-    if app.prompt.is_some() {
-        return "type a path";
+    match &app.modal {
+        Some(Modal::Open(_)) => return "type a path",
+        Some(Modal::Confirm(_)) => return "y goes ahead · any other key keeps it",
+        Some(Modal::Tag(tag)) if tag.message.is_none() => return "type the tag's name",
+        Some(Modal::Tag(_) | Modal::Stash(_)) => return "type a message, or none",
+        Some(Modal::Commit { .. }) => return "type the commit's message",
+        Some(Modal::Branch { .. }) => return "type the branch's name",
+        None => {}
     }
     if app.search.editing {
         return "Enter/⇧Enter next/prev · ↑/↓ · Tab keep · Esc clear";
@@ -769,9 +905,20 @@ fn hints(app: &App) -> &'static str {
     }
     match app.focus {
         Focus::Sidebar if app.side.minimised => "j/k move · Enter expand · 1 expand",
-        Focus::Sidebar => "j/k move · Enter open/toggle · / filter · 1 minimise",
-        Focus::Graph => "j/k move · ]/[ parent/child · }/{ refs · / search · y copy · Esc deselect",
-        Focus::Detail => "j/k link · Enter jump · y copy",
+        Focus::Sidebar => {
+            "j/k move · Enter open/toggle · w switch · d delete · / filter · 1 minimise"
+        }
+        Focus::Graph => match app.selected_node().map(|n| n.kind) {
+            Some(CommitKind::Working) => "j/k move · / search · c commit · s stash · Esc deselect",
+            Some(CommitKind::Stash) => "j/k move · / search · a/p/d apply/pop/drop · Esc deselect",
+            _ => {
+                "j/k move · ]/[ }/{ jump · / search · y copy · t tag · b branch · w switch · s stash"
+            }
+        },
+        Focus::Detail => "j/k link · Enter jump · y copy · t tag · b branch · w switch",
+        Focus::Files if working(app) => {
+            "j/k move · Enter diff/fold · t tree/flat · a stage · u unstage · c commit"
+        }
         Focus::Files => "j/k move · Enter diff/fold · t tree/flat",
     }
 }
@@ -938,6 +1085,8 @@ mod tests {
                 status: FileStatus::Modified,
                 additions: 1,
                 deletions: 1,
+                staged: None,
+                shown: None,
             }]),
         });
         // The pane's own title says both that the list is drawn and which view it starts in.
@@ -990,6 +1139,8 @@ mod tests {
                 status: FileStatus::Modified,
                 additions: 1,
                 deletions: 1,
+                staged: None,
+                shown: None,
             }]),
         });
         app.focus = Focus::Files;
@@ -1047,6 +1198,85 @@ mod tests {
     }
 
     #[test]
+    fn the_tag_prompt_shows_the_commit_the_name_and_then_the_message() {
+        let mut app = loaded_app();
+        press(&mut app, KeyCode::Char('t'));
+        press(&mut app, KeyCode::Char('v'));
+        let text = screen(&mut app, 160, 20).join("\n");
+        assert!(
+            text.contains("Tag d") && text.contains("Name     v▏"),
+            "{text}"
+        );
+        press(&mut app, KeyCode::Enter);
+        let text = screen(&mut app, 160, 20).join("\n");
+        assert!(
+            text.contains("Message  ▏") && text.contains("lightweight"),
+            "{text}"
+        );
+    }
+
+    #[test]
+    // Verifies: ADR-0034
+    fn the_question_before_deleting_names_what_is_lost() {
+        let mut app = loaded_app();
+        app.modal = Some(Modal::Confirm(Write::DeleteTag {
+            name: "v1".into(),
+            commit: "c".into(),
+            annotated: true,
+        }));
+        let text = screen(&mut app, 160, 20).join("\n");
+        assert!(
+            text.contains("This discards the tag v1 and its message")
+                && text.contains("y go ahead · any other key keeps it"),
+            "{text}"
+        );
+    }
+
+    #[test]
+    fn the_stash_prompt_shows_the_message_and_the_untracked_switch() {
+        let mut app = loaded_app();
+        press(&mut app, KeyCode::Char('s'));
+        press(&mut app, KeyCode::Char('w'));
+        press(&mut app, KeyCode::Tab);
+        let text = screen(&mut app, 160, 20).join("\n");
+        assert!(
+            text.contains("Stash changes")
+                && text.contains("Message    w▏")
+                && text.contains("[x] include untracked files"),
+            "{text}"
+        );
+    }
+
+    #[test]
+    fn the_working_nodes_files_show_what_is_staged() {
+        use ocelli_core::model::{FileStatus, Staged};
+        let mut app = loaded_app();
+        let file = |path: &str, staged| FileChange {
+            path: path.into(),
+            old_path: None,
+            status: FileStatus::Modified,
+            additions: 0,
+            deletions: 0,
+            staged: Some(staged),
+            shown: None,
+        };
+        app.files = Some(crate::app::Files {
+            sha: ocelli_core::model::WORKDIR_SHA.into(),
+            files: Ok(vec![
+                file("all", Staged::Yes),
+                file("part", Staged::Partly),
+                file("none", Staged::No),
+            ]),
+            selected: 0,
+        });
+        app.file_view = crate::files::FileView::Flat;
+        let text = screen(&mut app, 160, 20).join("\n");
+        for expected in ["● M all", "◐ M part", "○ M none"] {
+            assert!(text.contains(expected), "{expected:?} missing:\n{text}");
+        }
+    }
+
+    #[test]
     // Verifies: ADR-0028
     fn a_tiny_terminal_does_not_panic() {
         let mut app = loaded_app();
@@ -1054,6 +1284,11 @@ mod tests {
             screen(&mut app, w, h);
         }
         press(&mut app, KeyCode::Char('o'));
+        press(&mut app, KeyCode::Esc);
+        press(&mut app, KeyCode::Char('t'));
+        for (w, h) in [(1, 1), (10, 3), (30, 2)] {
+            screen(&mut app, w, h);
+        }
         press(&mut app, KeyCode::Esc);
         press(&mut app, KeyCode::Char('/'));
         press(&mut app, KeyCode::Char('c'));

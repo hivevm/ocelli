@@ -1,8 +1,8 @@
 use anyhow::Result;
 use git2::{DiffOptions, Repository, Sort, Status, StatusOptions};
 use ocelli_core::model::{
-    CHUNK_COMMITS, CommitData, CommitKind, DiffLine, DiffLineKind, FileChange, FileStatus,
-    WORKDIR_SHA,
+    CHUNK_COMMITS, CommitData, CommitKind, DiffLine, DiffLineKind, FileChange, FileStatus, Shown,
+    Staged, WORKDIR_SHA,
 };
 use std::collections::HashMap;
 use std::path::Path;
@@ -109,6 +109,7 @@ pub fn load_chunks(
             refs,
             parent_shas,
             kind: CommitKind::Commit,
+            stash: None,
         });
 
         count += 1;
@@ -211,6 +212,7 @@ fn load_stashes(repo: &mut Repository, commits: &mut Vec<CommitData>) {
             refs: vec![format!("📦 stash@{{{}}}", index)],
             parent_shas,
             kind: CommitKind::Stash,
+            stash: Some(index),
         });
     }
 }
@@ -245,6 +247,7 @@ fn working_dir_node(repo: &Repository) -> Option<CommitData> {
         refs: Vec::new(),
         parent_shas: vec![head_commit.id().to_string()],
         kind: CommitKind::Working,
+        stash: None,
     })
 }
 
@@ -328,6 +331,8 @@ pub fn load_commit_files(repo_path: &Path, sha: &str) -> Result<Vec<FileChange>>
                 status,
                 additions: 0,
                 deletions: 0,
+                staged: None,
+                shown: None,
             }
         })
         .collect();
@@ -361,7 +366,49 @@ pub fn load_commit_files(repo_path: &Path, sha: &str) -> Result<Vec<FileChange>>
         )?;
     }
 
+    if sha == WORKDIR_SHA {
+        for f in &mut files {
+            f.staged = Some(staged(&repo, &f.path));
+            f.shown = Some(shown(&repo, &f.path));
+        }
+    }
     Ok(files)
+}
+
+/// The content of `path` in the working directory and in the index, by blob id.
+pub(crate) fn shown(repo: &Repository, path: &str) -> Shown {
+    let workdir = repo
+        .workdir()
+        .map(|root| root.join(path))
+        .filter(|file| file.symlink_metadata().is_ok())
+        .and_then(|file| git2::Oid::hash_file(git2::ObjectType::Blob, file).ok())
+        .map(|oid| oid.to_string());
+    let index = repo
+        .index()
+        .ok()
+        .and_then(|index| index.get_path(Path::new(path), 0))
+        .map(|entry| entry.id.to_string());
+    Shown { workdir, index }
+}
+
+/// How much of `path`'s uncommitted change the index holds.
+fn staged(repo: &Repository, path: &str) -> Staged {
+    let status = repo.status_file(Path::new(path)).unwrap_or(Status::empty());
+    let index = Status::INDEX_NEW
+        | Status::INDEX_MODIFIED
+        | Status::INDEX_DELETED
+        | Status::INDEX_RENAMED
+        | Status::INDEX_TYPECHANGE;
+    let worktree = Status::WT_NEW
+        | Status::WT_MODIFIED
+        | Status::WT_DELETED
+        | Status::WT_RENAMED
+        | Status::WT_TYPECHANGE;
+    match (status.intersects(index), status.intersects(worktree)) {
+        (true, true) => Staged::Partly,
+        (true, false) => Staged::Yes,
+        _ => Staged::No,
+    }
 }
 
 /// Returns the unified diff of a single file in a commit as a Vec of DiffLine.
@@ -495,6 +542,7 @@ mod tests {
             refs: vec![],
             parent_shas: vec![],
             kind,
+            stash: None,
         }
     }
 

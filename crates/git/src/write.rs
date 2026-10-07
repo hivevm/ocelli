@@ -1,0 +1,635 @@
+//! The writes of the repository port, with git2 (ADR-0033). libgit2 runs no hook and no program
+//! a repository's configuration names, so writing, like reading, runs no code the repository
+//! brings (Q-4). Every write checks the state it expects before it changes anything.
+
+use anyhow::{Context, Result, bail};
+use git2::build::CheckoutBuilder;
+use git2::{
+    BranchType, CheckoutNotificationType, Commit, ErrorCode, ObjectType, Oid, Reference,
+    Repository, RepositoryState, StashApplyOptions, StashFlags, Status, TreeWalkMode,
+    TreeWalkResult,
+};
+use ocelli_core::port::Write;
+use std::path::Path;
+
+/// Performs `write` on the repository at `repo_path`, or refuses it with nothing changed; returns
+/// the commit it made, where it made one.
+pub fn write(repo_path: &Path, write: &Write) -> Result<Option<String>> {
+    let mut repo = Repository::discover(repo_path)?;
+    let done = match write {
+        Write::Commit { message, head } => {
+            return commit(&repo, message, head.as_deref()).map(Some);
+        }
+        Write::CreateBranch {
+            name,
+            commit,
+            switch,
+        } => create_branch(&repo, name, commit, *switch),
+        Write::SwitchBranch { name, tip } => {
+            let branch = branch_as_shown(&repo, name, tip)?;
+            let target = repo.find_commit(Oid::from_str(tip)?)?;
+            switch_to(&repo, &target, Some(&refname_of(&branch)?))
+        }
+        Write::Detach { commit } => {
+            let target = Oid::from_str(commit)
+                .ok()
+                .and_then(|oid| repo.find_commit(oid).ok())
+                .with_context(|| format!("the commit {commit} is no longer in the repository"))?;
+            switch_to(&repo, &target, None)
+        }
+        Write::TrackRemote {
+            remote,
+            branch,
+            tip,
+        } => track_remote(&repo, remote, branch, tip),
+        Write::DeleteBranch { name, tip, merged } => delete_branch(&repo, name, tip, *merged),
+        Write::StageFile { path, shown } => {
+            as_shown(&repo, path, shown, |s| s.workdir)?;
+            stage_file(&repo, path)
+        }
+        Write::UnstageFile { path, shown } => {
+            as_shown(&repo, path, shown, |s| s.index)?;
+            unstage_file(&repo, path)
+        }
+        Write::CreateTag {
+            name,
+            commit,
+            message,
+        } => create_tag(&repo, name, commit, message.as_deref()),
+        Write::DeleteTag {
+            name,
+            commit,
+            annotated,
+        } => delete_tag(&repo, name, commit, *annotated),
+        Write::CreateStash { message, untracked } => {
+            create_stash(&mut repo, message.as_deref(), *untracked)
+        }
+        Write::ApplyStash {
+            index,
+            commit,
+            drop,
+        } => {
+            stash_as_shown(&mut repo, *index, commit)?;
+            check_applies(&repo, *index, commit)?;
+            // A second guard behind the check: an ignored file is never overwritten.
+            let mut checkout = CheckoutBuilder::new();
+            checkout.overwrite_ignored(false);
+            let mut options = StashApplyOptions::new();
+            options.checkout_options(checkout);
+            repo.stash_apply(*index, Some(&mut options))?;
+            if *drop {
+                // Applied by now: a stash pushed meanwhile moves the entry, which then stays.
+                stash_as_shown(&mut repo, *index, commit)
+                    .context("the stash is applied but not dropped")?;
+                repo.stash_drop(*index)?;
+            }
+            Ok(())
+        }
+        Write::DropStash { index, commit } => {
+            stash_as_shown(&mut repo, *index, commit)?;
+            repo.stash_drop(*index)?;
+            Ok(())
+        }
+    };
+    done.map(|()| None)
+}
+
+const NO_IDENTITY: &str = "no identity is configured to write with: set user.name and user.email";
+
+fn create_tag(repo: &Repository, name: &str, commit: &str, message: Option<&str>) -> Result<()> {
+    let refname = format!("refs/tags/{name}");
+    // `git tag` refuses a leading dash too, which would read as an option.
+    if name.starts_with('-') || !Reference::is_valid_name(&refname) {
+        bail!("'{name}' is not a name a tag can have");
+    }
+    if repo.find_reference(&refname).is_ok() {
+        bail!("a tag named '{name}' exists already");
+    }
+    let target = Oid::from_str(commit)
+        .ok()
+        .and_then(|oid| repo.find_object(oid, Some(ObjectType::Commit)).ok())
+        .with_context(|| format!("the commit {commit} is no longer in the repository"))?;
+    let message = message.map(|m| clean_message(repo, m)).transpose()?;
+    match message.filter(|m| !m.is_empty()) {
+        Some(message) => {
+            refuse_where_signing_is_asked(repo, "tag.gpgSign", "an annotated tag")?;
+            refuse_where_signing_is_asked(repo, "tag.forceSignAnnotated", "an annotated tag")?;
+            let tagger = repo.signature().context(NO_IDENTITY)?;
+            repo.tag(name, &target, &tagger, &message, false)?;
+        }
+        None => {
+            repo.tag_lightweight(name, &target, false)?;
+        }
+    }
+    Ok(())
+}
+
+/// `message` cleaned up as `git tag` cleans it: comment lines, surrounding blank
+/// lines, and trailing spaces go, and it ends in a newline; empty where nothing is left.
+fn clean_message(repo: &Repository, message: &str) -> Result<String> {
+    let comment = comment_string(repo)?;
+    let kept: Vec<_> = message
+        .lines()
+        .filter(|l| !l.starts_with(&comment))
+        .collect();
+    Ok(git2::message_prettify(kept.join("\n"), None)?)
+}
+
+/// Refuses `what` where the configuration's `key` asks `git` to sign it, which Ocelli cannot
+/// (ADR-0033).
+fn refuse_where_signing_is_asked(repo: &Repository, key: &str, what: &str) -> Result<()> {
+    if repo.config()?.get_bool(key).unwrap_or(false) {
+        bail!("{key} asks for {what} to be signed, which Ocelli does not do: use git for it");
+    }
+    Ok(())
+}
+
+/// What starts a comment line in a message, as `git` reads it: `core.commentString` or
+/// `core.commentChar`, whichever the configuration sets last, and `#` where neither is set or
+/// it is `auto`, which `git tag` does not adjust.
+fn comment_string(repo: &Repository) -> Result<String> {
+    let config = repo.config()?.snapshot()?;
+    let mut comment = None;
+    config
+        .entries(Some("core\\.comment(char|string)"))?
+        .for_each(|entry| comment = entry.value().map(str::to_string))?;
+    Ok(comment
+        .filter(|c| !c.is_empty() && c != "auto")
+        .unwrap_or_else(|| "#".to_string()))
+}
+
+/// Deletes the tag, if it is still the one the developer saw: on `commit`, and annotated or not
+/// as `annotated` says. libgit2 deletes the reference only while it still holds the value read
+/// here, so a tag moved in between is not deleted either; it drops the tag's reflog before that
+/// comparison, which only a repository logging every ref update keeps for tags.
+fn delete_tag(repo: &Repository, name: &str, commit: &str, annotated: bool) -> Result<()> {
+    let mut reference = repo
+        .find_reference(&format!("refs/tags/{name}"))
+        .with_context(|| format!("there is no tag named '{name}' any more"))?;
+    let points_at = reference
+        .peel(ObjectType::Commit)
+        .map(|c| c.id().to_string());
+    let is_annotated = reference.peel(ObjectType::Tag).is_ok();
+    if points_at.ok().as_deref() != Some(commit) || is_annotated != annotated {
+        bail!("the tag '{name}' is no longer the one shown: reload to see it as it is");
+    }
+    reference.delete()?;
+    Ok(())
+}
+
+/// Stashes the uncommitted changes, the untracked files with them where `untracked` says so.
+fn create_stash(repo: &mut Repository, message: Option<&str>, untracked: bool) -> Result<()> {
+    let stasher = repo.signature().context(NO_IDENTITY)?;
+    let mut flags = StashFlags::DEFAULT;
+    if untracked {
+        flags |= StashFlags::INCLUDE_UNTRACKED;
+    }
+    let message = message.map(str::trim).filter(|m| !m.is_empty());
+    match repo.stash_save2(&stasher, message, Some(flags)) {
+        Err(e) if e.code() == ErrorCode::NotFound => bail!("there is nothing to stash"),
+        result => result.map(|_| ()).map_err(Into::into),
+    }
+}
+
+/// Refuses unless the stash at `index` is still the entry the developer saw, by its commit.
+fn stash_as_shown(repo: &mut Repository, index: usize, commit: &str) -> Result<()> {
+    let mut found = None;
+    repo.stash_foreach(|i, _, oid| {
+        if i == index {
+            found = Some(oid.to_string());
+        }
+        true
+    })?;
+    if found.as_deref() != Some(commit) {
+        bail!(
+            "stash@{{{index}}} is no longer the stash shown: reload to see the stashes as they are"
+        );
+    }
+    Ok(())
+}
+
+/// Refuses a stash that would not apply cleanly, before anything changes: libgit2 writes the
+/// untracked files first, then the changes, and leaves a conflict in the working directory, so
+/// whatever would stop it halfway or overwrite something is looked for here. The index holds
+/// nothing staged, the stash's changes merge with the checked-out commit without a conflict, and
+/// every path the stash writes is free on disk: a file there is one the checked-out commit tracks
+/// unchanged, by exactly that name, and no file stands where it needs a directory nor a
+/// directory where it writes a file. Untracked and ignored files in its way refuse it too, as
+/// does a file whose name differs only in case on a file system that does not tell the two
+/// apart.
+fn check_applies(repo: &Repository, index: usize, commit: &str) -> Result<()> {
+    let stash = repo.find_commit(Oid::from_str(commit)?)?;
+    let base = stash.parent(0)?.tree()?;
+    let changes = stash.tree()?;
+    let head = repo.head()?.peel_to_tree()?;
+    let root = repo
+        .workdir()
+        .context("a bare repository has no working directory to apply a stash to")?;
+    let staged = repo.diff_tree_to_index(Some(&head), None, None)?;
+    if staged.deltas().len() > 0 {
+        bail!("the index holds staged changes: commit or unstage them before applying a stash");
+    }
+    let name = format!("stash@{{{index}}}");
+    if repo
+        .merge_trees(&base, &head, &changes, None)?
+        .has_conflicts()
+    {
+        bail!("{name} conflicts with the checked-out commit, so it is not applied");
+    }
+
+    let mut written = Vec::new();
+    for delta in repo
+        .diff_tree_to_tree(Some(&base), Some(&changes), None)?
+        .deltas()
+    {
+        for file in [delta.old_file(), delta.new_file()] {
+            if let Some(path) = file.path() {
+                written.push(path.to_path_buf());
+            }
+        }
+    }
+    // The third parent, where there is one, holds the untracked files the stash took along;
+    // one the checked-out commit tracks by now would be overwritten.
+    if let Ok(untracked) = stash.parent(2) {
+        let mut files = Vec::new();
+        untracked
+            .tree()?
+            .walk(TreeWalkMode::PreOrder, |dir, entry| {
+                if entry.kind() == Some(ObjectType::Blob)
+                    && let Some(name) = entry.name()
+                {
+                    files.push(Path::new(dir).join(name));
+                }
+                TreeWalkResult::Ok
+            })?;
+        if let Some(tracked) = files.iter().find(|f| head.get_path(f).is_ok()) {
+            bail!(
+                "{} is tracked by now, so {name} would overwrite it",
+                tracked.display()
+            );
+        }
+        written.extend(files);
+    }
+
+    for path in &written {
+        for dir in path
+            .ancestors()
+            .skip(1)
+            .filter(|d| !d.as_os_str().is_empty())
+        {
+            if root.join(dir).symlink_metadata().is_ok_and(|m| !m.is_dir()) {
+                bail!("{} stands where {name} needs a directory", dir.display());
+            }
+        }
+        let tracked = head.get_path(path).is_ok();
+        match root.join(path).symlink_metadata() {
+            Ok(meta) if meta.is_dir() => {
+                bail!(
+                    "{} is a directory where {name} writes a file",
+                    path.display()
+                )
+            }
+            Ok(_) if !tracked => {
+                bail!(
+                    "{} is not tracked, so {name} would overwrite it",
+                    path.display()
+                )
+            }
+            Ok(_) if repo.status_file(path).ok() != Some(Status::CURRENT) => {
+                bail!(
+                    "{} has changes of its own that {name} would overwrite",
+                    path.display()
+                )
+            }
+            Err(_) if tracked => {
+                bail!(
+                    "{} has changes of its own that {name} would overwrite",
+                    path.display()
+                )
+            }
+            _ => {}
+        }
+    }
+    Ok(())
+}
+
+const INDEX: Status = Status::INDEX_NEW
+    .union(Status::INDEX_MODIFIED)
+    .union(Status::INDEX_DELETED)
+    .union(Status::INDEX_RENAMED)
+    .union(Status::INDEX_TYPECHANGE);
+const WORKTREE: Status = Status::WT_NEW
+    .union(Status::WT_MODIFIED)
+    .union(Status::WT_DELETED)
+    .union(Status::WT_RENAMED)
+    .union(Status::WT_TYPECHANGE);
+
+/// Stages the whole file at `path`, as `git add` does, removing it from the index where the
+/// working directory deleted it; refused where it holds no change the index does not.
+fn stage_file(repo: &Repository, path: &str) -> Result<()> {
+    let status = repo.status_file(Path::new(path)).unwrap_or(Status::empty());
+    if !status.intersects(WORKTREE) {
+        bail!("{path} has no change to stage");
+    }
+    let mut index = repo.index()?;
+    if status.contains(Status::WT_DELETED) {
+        index.remove_path(Path::new(path))?;
+    } else {
+        index.add_path(Path::new(path))?;
+    }
+    index.write()?;
+    Ok(())
+}
+
+/// Takes the file at `path` out of the index, back to the checked-out commit's, as
+/// `git restore --staged` does; refused where the index holds no change of it.
+fn unstage_file(repo: &Repository, path: &str) -> Result<()> {
+    let status = repo.status_file(Path::new(path)).unwrap_or(Status::empty());
+    if !status.intersects(INDEX) {
+        bail!("{path} is not staged");
+    }
+    match repo.head().ok().and_then(|h| h.peel_to_commit().ok()) {
+        Some(head) => repo.reset_default(Some(head.as_object()), [path])?,
+        None => {
+            let mut index = repo.index()?;
+            index.remove_path(Path::new(path))?;
+            index.write()?;
+        }
+    }
+    Ok(())
+}
+
+/// Commits the index with `message` by the configured identity, where the checked-out commit is
+/// still `head`, and returns the commit made. libgit2 moves the branch only while it still points
+/// at `head`, so a commit made elsewhere meanwhile is not lost either.
+fn commit(repo: &Repository, message: &str, head: Option<&str>) -> Result<String> {
+    let parent = repo.head().ok().and_then(|h| h.peel_to_commit().ok());
+    if parent.as_ref().map(|c| c.id().to_string()).as_deref() != head {
+        bail!("the checked-out commit is no longer the one shown: reload to see it as it is");
+    }
+    // A bisect leaves commits alone; every other operation in progress records its own.
+    if !matches!(
+        repo.state(),
+        RepositoryState::Clean | RepositoryState::Bisect
+    ) {
+        bail!(
+            "a {} is in progress: finish it with git, which records it as it began it",
+            in_progress(repo.state())
+        );
+    }
+    refuse_where_signing_is_asked(repo, "commit.gpgSign", "a commit")?;
+    let mut index = repo.index()?;
+    if index.has_conflicts() {
+        bail!("the index holds conflicts: resolve them before committing");
+    }
+    let tree = repo.find_tree(index.write_tree()?)?;
+    if parent.as_ref().is_some_and(|p| p.tree_id() == tree.id())
+        || parent.is_none() && tree.is_empty()
+    {
+        bail!("nothing is staged to commit");
+    }
+    // `git commit -m` cleans up whitespace only and keeps lines that look like comments, unless
+    // `commit.cleanup` says otherwise.
+    let cleanup = repo
+        .config()?
+        .get_string("commit.cleanup")
+        .unwrap_or_default();
+    let message = match cleanup.as_str() {
+        "strip" => clean_message(repo, message)?,
+        "verbatim" => message.to_string(),
+        _ => git2::message_prettify(message, None)?,
+    };
+    if message.is_empty() {
+        bail!("a commit needs a message");
+    }
+    let author = repo.signature().context(NO_IDENTITY)?;
+    let parents: Vec<_> = parent.iter().collect();
+    let made = repo.commit(Some("HEAD"), &author, &author, &message, &tree, &parents)?;
+    Ok(made.to_string())
+}
+
+/// Refuses unless `path`'s content, where `side` of [`crate::git::shown`] reads it, is still the
+/// one `expected` names (ADR-0033).
+fn as_shown(
+    repo: &Repository,
+    path: &str,
+    expected: &Option<String>,
+    side: impl Fn(ocelli_core::model::Shown) -> Option<String>,
+) -> Result<()> {
+    if side(crate::git::shown(repo, path)) != *expected {
+        bail!("{path} changed since it was shown: reload to see it as it is");
+    }
+    Ok(())
+}
+
+/// What a repository is in the middle of, in the words `git status` uses.
+fn in_progress(state: RepositoryState) -> &'static str {
+    match state {
+        RepositoryState::Merge => "merge",
+        RepositoryState::Revert | RepositoryState::RevertSequence => "revert",
+        RepositoryState::CherryPick | RepositoryState::CherryPickSequence => "cherry-pick",
+        RepositoryState::ApplyMailbox | RepositoryState::ApplyMailboxOrRebase => "git am",
+        _ => "rebase",
+    }
+}
+
+/// Refuses a name `git branch` refuses: one no reference can have, one that reads as an option,
+/// and `HEAD`.
+fn valid_branch_name(name: &str) -> Result<()> {
+    if name.starts_with('-')
+        || name == "HEAD"
+        || !Reference::is_valid_name(&format!("refs/heads/{name}"))
+    {
+        bail!("'{name}' is not a name a branch can have");
+    }
+    Ok(())
+}
+
+/// The local branch `name`, refused unless it still points at `tip`.
+fn branch_as_shown<'r>(repo: &'r Repository, name: &str, tip: &str) -> Result<git2::Branch<'r>> {
+    let branch = repo
+        .find_branch(name, BranchType::Local)
+        .with_context(|| format!("there is no branch named '{name}' any more"))?;
+    if branch.get().target().map(|t| t.to_string()).as_deref() != Some(tip) {
+        bail!("the branch '{name}' is no longer where it was shown: reload to see it as it is");
+    }
+    Ok(branch)
+}
+
+/// Refuses where the branch `refname` is checked out in another working tree, as `git` does.
+fn not_checked_out_elsewhere(repo: &Repository, refname: &str) -> Result<()> {
+    for name in repo.worktrees()?.iter().flatten() {
+        let Ok(worktree) = repo.find_worktree(name) else {
+            continue;
+        };
+        let Ok(other) = Repository::open_from_worktree(&worktree) else {
+            continue;
+        };
+        let head = other.head().ok().and_then(|h| h.name().map(str::to_string));
+        if head.as_deref() == Some(refname) {
+            let short = refname.trim_start_matches("refs/heads/");
+            bail!("'{short}' is checked out in the working tree '{name}'");
+        }
+    }
+    Ok(())
+}
+
+/// Checks `target` out and points `HEAD` at the branch `refname`, or at `target` itself where
+/// there is none, as `git switch` does: the uncommitted changes go along where the target touches
+/// none of the paths they touch, and a file deleted in the working directory comes back where the
+/// target changes it. What would stop it is looked for first, so a switch refused changes
+/// nothing: a staged change to a path the target changes, which libgit2 would overwrite, and the
+/// branch checked out in another working tree; libgit2 then finds every other path in the way
+/// before it writes anything, and the refusal names the paths.
+fn switch_to(repo: &Repository, target: &Commit, refname: Option<&str>) -> Result<()> {
+    if !matches!(
+        repo.state(),
+        RepositoryState::Clean | RepositoryState::Bisect
+    ) {
+        bail!(
+            "a {} is in progress: finish it with git before switching",
+            in_progress(repo.state())
+        );
+    }
+    if let Some(refname) = refname {
+        not_checked_out_elsewhere(repo, refname)?;
+    }
+    let head = repo.head().ok().and_then(|h| h.peel_to_tree().ok());
+    let goal = target.tree()?;
+    let paths = |diff: git2::Diff| -> Vec<String> {
+        diff.deltas()
+            .flat_map(|d| [d.old_file().path(), d.new_file().path()])
+            .flatten()
+            .map(|p| p.display().to_string())
+            .collect()
+    };
+    let changed = paths(repo.diff_tree_to_tree(head.as_ref(), Some(&goal), None)?);
+    let mut staged: Vec<_> = paths(repo.diff_tree_to_index(head.as_ref(), None, None)?)
+        .into_iter()
+        .filter(|p| changed.contains(p))
+        .collect();
+    if !staged.is_empty() {
+        staged.sort();
+        staged.dedup();
+        bail!(
+            "staged changes to {} are in the way: commit or stash them first",
+            staged.join(", ")
+        );
+    }
+
+    let mut in_the_way = Vec::new();
+    let mut checkout = CheckoutBuilder::new();
+    checkout
+        .recreate_missing(true)
+        .notify_on(CheckoutNotificationType::CONFLICT)
+        .notify(|_, path, _, _, _| {
+            if let Some(path) = path {
+                in_the_way.push(path.display().to_string());
+            }
+            true
+        });
+    let checked_out = repo.checkout_tree(target.as_object(), Some(&mut checkout));
+    drop(checkout);
+    match checked_out {
+        Err(e) if e.code() == ErrorCode::Conflict => {
+            in_the_way.sort();
+            bail!(
+                "uncommitted changes to {} are in the way: commit or stash them first",
+                in_the_way.join(", ")
+            );
+        }
+        result => result?,
+    }
+    match refname {
+        Some(refname) => repo.set_head(refname)?,
+        None => repo.set_head_detached(target.id())?,
+    }
+    Ok(())
+}
+
+/// The full reference name of a branch.
+fn refname_of(branch: &git2::Branch) -> Result<String> {
+    Ok(branch
+        .get()
+        .name()
+        .context("a branch name git2 cannot read")?
+        .to_string())
+}
+
+/// Switches to the branch `name` just created, deleting it again where the switch is refused,
+/// so that a refusal leaves nothing behind.
+fn switch_to_new(repo: &Repository, name: &str, target: &Commit) -> Result<()> {
+    let created = repo.find_branch(name, BranchType::Local)?;
+    let refname = refname_of(&created)?;
+    switch_to(repo, target, Some(&refname)).inspect_err(|_| {
+        if let Ok(mut created) = repo.find_branch(name, BranchType::Local) {
+            let _ = created.delete();
+        }
+    })
+}
+
+/// Creates the branch `name` at `commit`, and switches to it where `switch` says so. Created
+/// first, so that a name `git` would refuse beside another branch, such as `a` beside `a/b`, is
+/// refused before anything else changes.
+fn create_branch(repo: &Repository, name: &str, commit: &str, switch: bool) -> Result<()> {
+    valid_branch_name(name)?;
+    if repo.find_branch(name, BranchType::Local).is_ok() {
+        bail!("a branch named '{name}' exists already");
+    }
+    let target = Oid::from_str(commit)
+        .ok()
+        .and_then(|oid| repo.find_commit(oid).ok())
+        .with_context(|| format!("the commit {commit} is no longer in the repository"))?;
+    repo.branch(name, &target, false)
+        .with_context(|| format!("a branch named '{name}' cannot be created here"))?;
+    if switch {
+        switch_to_new(repo, name, &target)?;
+    }
+    Ok(())
+}
+
+/// Creates `branch` tracking `remote`'s branch of that name, still at `tip`, and switches to it;
+/// a refusal on the way deletes the branch again.
+fn track_remote(repo: &Repository, remote: &str, branch: &str, tip: &str) -> Result<()> {
+    let upstream = format!("{remote}/{branch}");
+    let remote_branch = repo
+        .find_branch(&upstream, BranchType::Remote)
+        .with_context(|| format!("there is no branch '{upstream}' any more"))?;
+    if remote_branch
+        .get()
+        .target()
+        .map(|t| t.to_string())
+        .as_deref()
+        != Some(tip)
+    {
+        bail!("'{upstream}' is no longer where it was shown: reload to see it as it is");
+    }
+    if repo.find_branch(branch, BranchType::Local).is_ok() {
+        bail!("a local branch named '{branch}' exists already: switch to it instead");
+    }
+    valid_branch_name(branch)?;
+    let target = repo.find_commit(Oid::from_str(tip)?)?;
+    let mut local = repo
+        .branch(branch, &target, false)
+        .with_context(|| format!("a branch named '{branch}' cannot be created here"))?;
+    if let Err(e) = local.set_upstream(Some(&upstream)) {
+        let _ = local.delete();
+        return Err(e.into());
+    }
+    switch_to_new(repo, branch, &target)
+}
+
+/// Deletes the branch `name`, if it is still the one shown: at `tip`, and merged or not as
+/// `merged` says. The checked-out branch is never deleted.
+fn delete_branch(repo: &Repository, name: &str, tip: &str, merged: bool) -> Result<()> {
+    let mut branch = branch_as_shown(repo, name, tip)?;
+    if branch.is_head() {
+        bail!("'{name}' is checked out: switch to another branch before deleting it");
+    }
+    not_checked_out_elsewhere(repo, &refname_of(&branch)?)?;
+    if crate::refs::merged(repo, &branch) != merged {
+        bail!("whether '{name}' is merged changed since it was shown: reload to see it as it is");
+    }
+    branch.delete()?;
+    Ok(())
+}

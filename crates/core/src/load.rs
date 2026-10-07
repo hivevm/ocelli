@@ -82,6 +82,8 @@ pub struct LoadSession {
     history: History,
     chunks: usize,
     ended: Option<Result<(), String>>,
+    /// The commit to select again once a chunk lays it out, after a write (ADR-0033).
+    select_again: Option<String>,
 }
 
 impl LoadSession {
@@ -98,9 +100,29 @@ impl LoadSession {
         from
     }
 
-    /// Ends the session, the whole history read or the reason it stopped.
+    /// Ends the session, the whole history read or the reason it stopped. A commit to select
+    /// again that no chunk laid out is given up.
     pub fn end(&mut self, result: Result<(), String>) {
         self.ended = Some(result);
+        self.select_again = None;
+    }
+
+    /// Asks for `sha` to be selected again once a chunk lays it out: the commit selected when a
+    /// write was done, which the load after it shows again (ADR-0033).
+    pub fn select_again(&mut self, sha: String) {
+        self.select_again = Some(sha);
+    }
+
+    /// Gives the commit to select again up, as when the developer selects another.
+    pub fn keep_selection(&mut self) {
+        self.select_again = None;
+    }
+
+    /// The row of the commit to select again, once a chunk has laid it out; answered once.
+    pub fn row_to_select(&mut self) -> Option<usize> {
+        let row = self.history.row_of(self.select_again.as_deref()?)?;
+        self.select_again = None;
+        Some(row)
     }
 
     pub fn history(&self) -> &History {
@@ -305,5 +327,43 @@ mod tests {
         };
         run(&fake, 3);
         assert_eq!(fake.taken.get(), 1, "the walk stopped after the refs");
+    }
+
+    /// A session with `select_again` asked for, fed `chunks` one after another, the developer
+    /// choosing a commit before chunk `keep_after`; the rows it names after each.
+    fn rows_named(
+        select_again: &str,
+        chunks: &[usize],
+        keep_after: Option<usize>,
+    ) -> Vec<Option<usize>> {
+        let mut session = LoadSession::new();
+        let mut layout = Layout::new();
+        session.select_again(select_again.to_string());
+        let mut named = Vec::new();
+        for (i, &top) in chunks.iter().enumerate() {
+            if keep_after == Some(i) {
+                session.keep_selection();
+            }
+            session.append(layout.lay_out(three(top)));
+            named.push(session.row_to_select());
+        }
+        named
+    }
+
+    #[test]
+    // Verifies: ADR-0033
+    fn the_commit_to_select_again_is_named_once_its_chunk_lays_it_out() {
+        assert_eq!(rows_named("c4", &[9, 6, 3], None), [None, Some(5), None]);
+    }
+
+    #[test]
+    // Verifies: ADR-0033
+    fn the_developers_own_choice_or_the_end_gives_the_commit_up() {
+        assert_eq!(rows_named("c4", &[9, 6], Some(1)), [None, None]);
+        let mut session = LoadSession::new();
+        session.select_again("c1".to_string());
+        session.append(Layout::new().lay_out(three(9)));
+        session.end(Ok(()));
+        assert_eq!(session.row_to_select(), None);
     }
 }

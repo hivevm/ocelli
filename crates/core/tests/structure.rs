@@ -8,6 +8,7 @@
 //! reads the history or the repository runs off its main thread.
 
 use std::fs;
+use std::path::{Path, PathBuf};
 
 /// The libraries the core may depend on: none of them performs I/O or names a technology.
 const ALLOWED: &[&str] = &["anyhow", "chrono", "serde", "sha2"];
@@ -61,7 +62,9 @@ fn dependencies(manifest: &str) -> Vec<String> {
             && !line.starts_with('#')
             && let Some((name, _)) = line.split_once('=')
         {
-            names.push(name.trim().trim_matches('"').to_string());
+            // `name.workspace = true` names the dependency `name`.
+            let name = name.trim().trim_matches('"');
+            names.push(name.split('.').next().unwrap_or(name).to_string());
         }
     }
     names
@@ -89,10 +92,10 @@ fn the_core_depends_on_no_technology_and_no_adapter() {
 fn the_dependency_reader_sees_a_technology() {
     let manifest = concat!(
         "[package]\nname = \"x\"\n\n[dependencies]\nserde = \"1\"\n\n",
-        "[target.'cfg(unix)'.dependencies]\ngit2 = \"0.20\"\n\n",
+        "[target.'cfg(unix)'.dependencies]\ngit2 = \"0.20\"\nchrono.workspace = true\n\n",
         "[dev-dependencies]\nserde_json = \"1\"\n",
     );
-    assert_eq!(dependencies(manifest), ["serde", "git2"]);
+    assert_eq!(dependencies(manifest), ["serde", "git2", "chrono"]);
 }
 
 #[test]
@@ -222,15 +225,17 @@ fn commands_on_the_main_thread(source: &str) -> Vec<String> {
                 .to_string();
             let off_main =
                 attribute.contains("async") || rest.split('{').next()?.contains("async fn");
-            let reads = rest.contains("session") || rest.contains("GitReader");
+            let reads = ["session", "GitReader", "GitWriter"]
+                .iter()
+                .any(|uses| rest.contains(uses));
             (reads && !off_main).then_some(name)
         })
         .collect()
 }
 
 #[test]
-// Verifies: ADR-0019, G-13
-fn every_command_that_reads_the_history_or_the_repository_runs_off_the_main_thread() {
+// Verifies: ADR-0019, ADR-0033, G-13
+fn every_command_that_reads_or_writes_the_repository_runs_off_the_main_thread() {
     let source = read("../../src-tauri/src/commands.rs");
     assert_eq!(commands_on_the_main_thread(&source), Vec::<String>::new());
 }
@@ -240,6 +245,91 @@ fn every_command_that_reads_the_history_or_the_repository_runs_off_the_main_thre
 fn the_command_scan_sees_a_command_on_the_main_thread() {
     let source = "#[tauri::command]\npub fn read(state: State) -> W { state.session.window(0, 1) }\n\
                   #[tauri::command(async)]\npub fn fine(state: State) { state.session.x() }\n\
-                  #[tauri::command]\npub async fn also(state: State) { GitReader.x() }\n";
-    assert_eq!(commands_on_the_main_thread(source), ["read"]);
+                  #[tauri::command]\npub async fn also(state: State) { GitReader.x() }\n\
+                  #[tauri::command]\npub fn write(state: State) { GitWriter.write() }\n";
+    assert_eq!(commands_on_the_main_thread(source), ["read", "write"]);
+}
+
+/// The workspace's members, as the root manifest lists them.
+fn members(manifest: &str) -> Vec<String> {
+    let list = manifest
+        .split_once("members = [")
+        .and_then(|(_, rest)| rest.split_once(']'))
+        .map_or("", |(list, _)| list);
+    list.split(',')
+        .map(|m| m.trim().trim_matches('"').to_string())
+        .filter(|m| !m.is_empty())
+        .collect()
+}
+
+/// Every Rust source under `dir`, with its path.
+fn sources(dir: &Path) -> Vec<(PathBuf, String)> {
+    let mut out = Vec::new();
+    for entry in fs::read_dir(dir).unwrap().flatten() {
+        let path = entry.path();
+        if path.is_dir() {
+            out.extend(sources(&path));
+        } else if path.extension().is_some_and(|e| e == "rs") {
+            out.push((path.clone(), fs::read_to_string(&path).unwrap()));
+        }
+    }
+    out
+}
+
+/// What a front end's shipped source names that would write past the core's confirmation rule:
+/// the writer port's trait, without which no writer's `write` can be called, a glob import of the
+/// port that brings it in unnamed, or the git adapter's write module.
+fn writes_past_the_confirmation(source: &str) -> Vec<&'static str> {
+    let code = shipped(source);
+    ["RepositoryWriter", "port::*", "ocelli_git::write"]
+        .into_iter()
+        .filter(|name| code.contains(name))
+        .collect()
+}
+
+#[test]
+// Verifies: ADR-0034, Q-6
+fn every_front_end_writes_through_the_cores_confirmation_rule() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let mut front_ends = Vec::new();
+    for member in members(&read("../../Cargo.toml")) {
+        let manifest = fs::read_to_string(root.join(&member).join("Cargo.toml")).unwrap();
+        if member == "crates/git" || !dependencies(&manifest).contains(&"ocelli-git".into()) {
+            continue;
+        }
+        for (path, source) in sources(&root.join(&member).join("src")) {
+            let past = writes_past_the_confirmation(&source);
+            assert!(past.is_empty(), "{} names {past:?}", path.display());
+        }
+        front_ends.push(member);
+    }
+    assert!(
+        ["src-tauri", "crates/tui"]
+            .iter()
+            .all(|f| front_ends.iter().any(|m| m == f)),
+        "both front ends are scanned: {front_ends:?}"
+    );
+    for writer in ["../../src-tauri/src/commands.rs", "../tui/src/loader.rs"] {
+        assert!(
+            read(writer).contains("port::perform(&GitWriter"),
+            "{writer} writes at all"
+        );
+    }
+}
+
+#[test]
+// Verifies: ADR-0034
+fn the_write_scan_sees_a_write_past_the_confirmation() {
+    let through = "use ocelli_git::{GitReader, GitWriter};\n\
+                   fn a() { port::perform(&GitWriter, p, w, c) }\n";
+    assert_eq!(writes_past_the_confirmation(through), Vec::<&str>::new());
+    let renamed =
+        "use ocelli_core::port::RepositoryWriter as W;\nfn b() { GitWriter.write(p, w) }\n";
+    assert_eq!(writes_past_the_confirmation(renamed), ["RepositoryWriter"]);
+    let glob = "use ocelli_core::port::*;\nfn e() { GitWriter.write(p, w) }\n";
+    assert_eq!(writes_past_the_confirmation(glob), ["port::*"]);
+    let module = "fn c() { ocelli_git::write::write(p, w) }\n";
+    assert_eq!(writes_past_the_confirmation(module), ["ocelli_git::write"]);
+    let in_tests = "fn d() {}\n#[cfg(test)]\nmod tests { use super::RepositoryWriter; }\n";
+    assert_eq!(writes_past_the_confirmation(in_tests), Vec::<&str>::new());
 }

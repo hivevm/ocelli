@@ -8,9 +8,12 @@
   import CommitDetail from './CommitDetail.svelte';
   import RepoSidebar from './RepoSidebar.svelte';
   import StatusBar, { READY_STATUS } from './StatusBar.svelte';
+  import ConfirmDialog from './ConfirmDialog.svelte';
   import { refShas } from './refTree.ts';
   import type { RowRange } from './rowWindow.ts';
   import { Newest } from './hostAnswers.ts';
+  import { actionLabel, confirmedWrite, type Outcome, type Write } from './writes.ts';
+  import StashDialog from './StashDialog.svelte';
   import type {
     NodeJson, FileChange, DiffLine, RepoRefs, Growth, RowWindow, Relative, Selected, Found,
   } from './types.ts';
@@ -73,6 +76,26 @@
   const selects = new Newest();
   const refreshes = new Newest();
   const currentLoad = (): number | undefined => growth?.generation;
+  // The question open before a write that discards work, and how it is answered (ADR-0034).
+  let question = $state<
+    { lost: string; action: string; answer: (confirmed: boolean) => void } | null
+  >(null);
+  // Whether the dialog that describes a new stash is open.
+  let stashing = $state(false);
+  const selectedTags = $derived(
+    selectedNode ? (repoRefs?.tags ?? []).filter(t => t.sha === selectedNode?.sha) : [],
+  );
+  // The local and remote branches on the selected commit, which its chips switch to or delete.
+  const selectedLocals = $derived(
+    selectedNode ? (repoRefs?.locals ?? []).filter(b => b.sha === selectedNode?.sha) : [],
+  );
+  const selectedRemotes = $derived(
+    selectedNode
+      ? (repoRefs?.remotes ?? []).flatMap(r => r.branches
+        .filter(b => b.sha === selectedNode?.sha)
+        .map(b => ({ remote: r.name, branch: b.name, tip: b.sha })))
+      : [],
+  );
 
   /** A command that failed: the status bar says so. */
   function report(e: unknown): void {
@@ -127,6 +150,8 @@
     void updateLoadedRefs();
     // The selection's parents and lineage may reach into the rows just added.
     if (selectedNode) void refreshRelatives(selectedNode.sha);
+    // The commit a write left selected, which the core names once this load has laid it out.
+    if (next.select !== null) jumpToRow(next.select);
   }
 
   async function refreshRelatives(sha: string): Promise<void> {
@@ -253,10 +278,20 @@
     await invoke('browse_repo').catch((e: unknown) => { status = 'Error: ' + e; });
   }
 
-  async function refreshRepo(): Promise<void> {
+  /** Loads the current repository again; `select` names a commit for the core to select again
+      once the load lays it out (ADR-0033). */
+  async function refreshRepo(select: string | null = null): Promise<void> {
     if (!currentRepoPath) return;
     status = 'Refreshing…';
-    await invoke('open_repo', { path: currentRepoPath }).catch((e: unknown) => { status = 'Error: ' + e; });
+    await invoke('open_repo', { path: currentRepoPath, select }).catch((e: unknown) => {
+      status = 'Error: ' + e;
+    });
+  }
+
+  /** Loads again after a write, selecting the commit it made, else the one selected now: the
+      developer may have selected another while the write ran. */
+  async function reloadAfterWrite(made: string | null): Promise<void> {
+    await refreshRepo(made ?? selectedNode?.sha ?? null);
   }
 
   /// Switches to another repository the sidebar points at — a submodule, a
@@ -266,6 +301,41 @@
     if (!path) return;
     status = 'Opening…';
     await invoke('open_repo', { path }).catch((e: unknown) => { status = 'Error: ' + e; });
+  }
+
+  /** Performs a write (G-7), asking first where the core says it discards work: the reload
+      after it shows the result, the commit selected again. Resolves with why the host refused
+      it, or null once written or kept. */
+  async function performWrite(write: Write): Promise<string | null> {
+    let done: Outcome;
+    try {
+      done = await confirmedWrite(
+        write,
+        (w) => invoke<string | null>('write_discards', { write: w }),
+        ask,
+        (w, confirmed) => invoke<string | null>('perform_write', { write: w, confirmed }),
+      );
+    } catch (e) {
+      return String(e);
+    }
+    if (done.kind === 'written') await reloadAfterWrite(done.made);
+    return null;
+  }
+
+  /** Puts the question before a write that discards work; resolves with the answer. */
+  function ask(lost: string, write: Write): Promise<boolean> {
+    // A question still open is answered no: only one stands at a time.
+    question?.answer(false);
+    return new Promise(resolve => {
+      question = {
+        lost,
+        action: actionLabel(write),
+        answer: (confirmed) => {
+          question = null;
+          resolve(confirmed);
+        },
+      };
+    });
   }
 
   /** Selects the commit in `row`: the host computes its lineage, which the window read after
@@ -348,12 +418,16 @@
       </svg>
       Open Repo
     </button>
-    <button class="tb-btn" onclick={refreshRepo}>
+    <button class="tb-btn" onclick={() => refreshRepo()}>
       <svg viewBox="0 0 16 16" fill="currentColor">
         <path d="M11.534 7h3.932a.25.25 0 01.192.41l-1.966 2.36a.25.25 0 01-.384 0l-1.966-2.36a.25.25 0 01.192-.41zm-11 2h3.932a.25.25 0 00.192-.41L2.692 6.23a.25.25 0 00-.384 0L.342 8.59A.25.25 0 00.534 9z"/>
         <path fill-rule="evenodd" d="M8 3c-1.552 0-2.94.707-3.857 1.818a.5.5 0 11-.771-.636A6.002 6.002 0 0113.917 7H12.9A5.002 5.002 0 008 3zM3.1 9a5.002 5.002 0 008.757 2.182.5.5 0 11.771.636A6.002 6.002 0 012.083 9H3.1z"/>
       </svg>
       Refresh
+    </button>
+    <button class="tb-btn" onclick={() => (stashing = true)} disabled={!currentRepoPath}
+            title="Put the uncommitted changes aside as a stash">
+      Stash…
     </button>
 
     <div class="repo-breadcrumb">
@@ -427,9 +501,21 @@
       {diffFile}
       {onSelectFile}
       onJumpToRow={jumpToRow}
+      tags={selectedTags}
+      locals={selectedLocals}
+      remotes={selectedRemotes}
+      onWrite={performWrite}
     />
   </div><!-- end #top-pane -->
 </div><!-- end #main -->
+
+{#if stashing}
+  <StashDialog onStash={performWrite} onClose={() => (stashing = false)} />
+{/if}
+
+{#if question}
+  <ConfirmDialog lost={question.lost} action={question.action} onAnswer={question.answer} />
+{/if}
 
 <StatusBar
   {status}

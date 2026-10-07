@@ -49,6 +49,8 @@ pub struct Item {
     pub mark: Option<&'static str>,
     pub look: Look,
     pub action: Action,
+    /// The remote a remote branch belongs to; `None` for every other entry.
+    pub remote: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -113,6 +115,7 @@ fn item(name: &str, badge: impl Into<String>, look: Look, action: Action) -> Ite
         mark: None,
         look,
         action,
+        remote: None,
     }
 }
 
@@ -164,7 +167,10 @@ impl Data {
                 let items = r
                     .branches
                     .iter()
-                    .map(|b| item(&b.name, "", Look::Remote, Action::Reveal(b.sha.clone())))
+                    .map(|b| Item {
+                        remote: Some(r.name.clone()),
+                        ..item(&b.name, "", Look::Remote, Action::Reveal(b.sha.clone()))
+                    })
                     .collect();
                 (r.name.clone(), items)
             })
@@ -535,6 +541,7 @@ pub(crate) mod tests {
 
     fn local(name: &str, sha: &str, head: bool) -> LocalBranch {
         LocalBranch {
+            merged: true,
             name: name.into(),
             sha: sha.into(),
             short_sha: sha.into(),
@@ -595,6 +602,7 @@ pub(crate) mod tests {
                 name: "v1".into(),
                 sha: "c".into(),
                 short_sha: "c".into(),
+                annotated: true,
             }],
             submodules: vec![
                 submodule("lib/a", SubmoduleState::InSync),

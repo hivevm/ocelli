@@ -2,14 +2,18 @@
   import type { TreeNode } from './fileTree.ts';
   import type { FileChange } from './types.ts';
   import Self from './FileTree.svelte';
+  import StageToggle from './StageToggle.svelte';
 
   interface Props {
     nodes: TreeNode[];
     depth?: number;
     diffFile: string | null;
     onSelectFile: (file: FileChange) => void;
+    /** Stages or unstages a file of the uncommitted changes; absent for a commit's files. */
+    onStage?: (file: FileChange) => void;
+    staging?: boolean;
   }
-  let { nodes, depth = 0, diffFile, onSelectFile }: Props = $props();
+  let { nodes, depth = 0, diffFile, onSelectFile, onStage, staging = false }: Props = $props();
 
   // Collapsed directory paths (expanded by default).
   let collapsed = $state<Record<string, boolean>>({});
@@ -40,7 +44,7 @@
       <span class="dir-count">{node.fileCount}</span>
     </div>
     {#if !collapsed[node.path]}
-      <Self nodes={node.children} depth={depth + 1} {diffFile} {onSelectFile} />
+      <Self nodes={node.children} depth={depth + 1} {diffFile} {onSelectFile} {onStage} {staging} />
     {/if}
   {:else}
     <div
@@ -52,6 +56,9 @@
       onkeydown={(e) => e.key === 'Enter' && onSelectFile(node.file)}
     >
       <span class="file-spacer"></span>
+      {#if onStage && node.file.staged}
+        <StageToggle file={node.file} disabled={staging} {onStage} />
+      {/if}
       <span class="file-status {node.file.status}">{node.file.status[0]}</span>
       <span class="file-path" title={node.file.path}>
         {#if node.file.oldPath}

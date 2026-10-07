@@ -1,7 +1,7 @@
 use crate::session::{Found, Selected, Session, WindowJson};
 use ocelli_core::load::{self, Event};
-use ocelli_core::port::RepositoryReader;
-use ocelli_git::GitReader;
+use ocelli_core::port::{self, Confirmation, RepositoryReader, Write};
+use ocelli_git::{GitReader, GitWriter};
 use serde::Serialize;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
@@ -27,9 +27,12 @@ pub fn startup_repo(state: State<'_, AppState>) -> Option<String> {
 /// Loads a repository by path. Returns as soon as the load is spawned; the history arrives chunk
 /// by chunk, each announced by a `history-grew` event, and the refs as a `load-refs` event right
 /// after the first chunk, read with it so the two describe the same state (ADR-0016, ADR-0031).
+/// `select` names the commit a write left selected, which a `history-grew` event names the row
+/// of once it is laid out (ADR-0033).
 #[tauri::command]
 pub async fn open_repo(
     path: String,
+    select: Option<String>,
     window: Window,
     state: State<'_, AppState>,
 ) -> Result<(), String> {
@@ -49,7 +52,7 @@ pub async fn open_repo(
     // The load session begins here, before the load is spawned, so loads begin in the order
     // they were asked for and the newest is the one shown.
     let session = Arc::clone(&state.session);
-    let generation = session.begin();
+    let generation = session.begin(select);
     tokio::task::spawn_blocking(move || load(&GitReader, &path, &session, generation, &window));
     Ok(())
 }
@@ -200,7 +203,7 @@ pub async fn browse_repo(
     if let Some(folder) = path {
         let path_str = folder.to_string();
         // Load the chosen folder directly
-        let _ = open_repo(path_str.clone(), window, state).await;
+        let _ = open_repo(path_str.clone(), None, window, state).await;
         Ok(Some(path_str))
     } else {
         Ok(None)
@@ -229,6 +232,47 @@ pub async fn select_commit(
     let json = serde_json::to_string(&files).map_err(|e| e.to_string())?;
     let _ = window.emit("commit-files", json);
     Ok(())
+}
+
+/// What `write` discards, in the core's words for the question the web interface puts before it,
+/// or null for a write that discards nothing (ADR-0034).
+#[tauri::command]
+pub fn write_discards(write: Write) -> Option<String> {
+    write.discards()
+}
+
+/// Performs `write` (G-7): a write that discards work only where the developer `confirmed` it in
+/// the web interface's dialog, which the core decides (ADR-0034). A write refused changes nothing
+/// and says why; the web interface reloads after a write done, the commit selected again, or the
+/// commit the write made, which this returns (ADR-0033).
+#[tauri::command]
+pub async fn perform_write(
+    write: Write,
+    confirmed: bool,
+    state: State<'_, AppState>,
+) -> Result<Option<String>, String> {
+    let confirmation = if confirmed {
+        Confirmation::Given
+    } else {
+        Confirmation::Absent
+    };
+    perform(write, confirmation, &state).await
+}
+
+/// Performs `write` on the open repository through the core, on the blocking pool.
+async fn perform(
+    write: Write,
+    confirmation: Confirmation,
+    state: &State<'_, AppState>,
+) -> Result<Option<String>, String> {
+    let repo_path = match state.current_repo.lock().unwrap().clone() {
+        Some(p) => p,
+        None => return Err("No repository open".into()),
+    };
+    tokio::task::spawn_blocking(move || port::perform(&GitWriter, &repo_path, &write, confirmation))
+        .await
+        .map_err(|e| e.to_string())?
+        .map_err(|e| e.to_string())
 }
 
 /// Returns the diff lines for a single file in a commit.
@@ -305,7 +349,7 @@ mod tests {
                 if let Some((at, session)) = &self.newer_at
                     && i == *at
                 {
-                    session.begin();
+                    session.begin(None);
                 }
                 if !on_chunk(chunk.clone()) {
                     return Ok(());
@@ -344,7 +388,7 @@ mod tests {
             fake,
             Path::new("/repo"),
             session,
-            session.begin(),
+            session.begin(None),
             &recorder,
         );
         recorder.0.into_inner()
@@ -423,8 +467,8 @@ mod tests {
     // Verifies: ADR-0016
     fn a_load_superseded_before_its_first_chunk_reports_nothing() {
         let session = Session::default();
-        let older = session.begin();
-        session.begin();
+        let older = session.begin(None);
+        session.begin(None);
         let fake = Fake {
             chunks: vec![three(9)],
             walk_fails: true,

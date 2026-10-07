@@ -40,6 +40,8 @@ pub fn run() {
             commands::deselect,
             commands::search_history,
             commands::rows_of,
+            commands::write_discards,
+            commands::perform_write,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

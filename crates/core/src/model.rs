@@ -31,6 +31,8 @@ pub struct CommitData {
     pub refs: Vec<String>,
     pub parent_shas: Vec<String>,
     pub kind: CommitKind,
+    /// A stash node's place `n` in the stash, `stash@{n}` (ADR-0024); `None` for every other node.
+    pub stash: Option<usize>,
 }
 
 /// A connection between a child commit and one of its parents.
@@ -140,6 +142,9 @@ pub struct NodeJson {
     pub committer_avatar: String,
     pub refs: Vec<String>,
     pub kind: CommitKind,
+    /// A stash node's place in the stash, which a stash write names; absent for every other node.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub stash: Option<usize>,
     pub parents: Vec<String>, // parent SHAs in commit order (first parent first); may include SHAs outside the loaded set
     pub children: Vec<String>, // SHAs of loaded children, newest (lowest row) first
 }
@@ -159,7 +164,7 @@ pub struct Graph {
 /// A local branch and where it stands relative to its configured upstream.
 /// `ahead`/`behind` are computed from refs already on disk and are therefore as
 /// current as the last fetch — the viewer never fetches (specification Non-Goals).
-#[derive(Debug, Serialize)]
+#[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct LocalBranch {
     pub name: String,
@@ -171,6 +176,9 @@ pub struct LocalBranch {
     pub upstream: Option<String>,
     pub ahead: usize,
     pub behind: usize,
+    /// Whether every commit of the branch is in its upstream, or in `HEAD` where it has none, as
+    /// `git branch -d` asks before deleting it.
+    pub merged: bool,
 }
 
 /// A remote-tracking branch, named without its remote prefix (`feature/x`, not
@@ -265,12 +273,14 @@ pub struct ParentRepo {
 }
 
 /// A tag, peeled so an annotated tag resolves to the commit it marks.
-#[derive(Debug, Serialize)]
+#[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Tag {
     pub name: String,
     pub sha: String,
     pub short_sha: String,
+    /// Whether the tag is a tag object with a message of its own, rather than a bare reference.
+    pub annotated: bool,
 }
 
 /// Everything the repository sidebar lists for one repository read.
@@ -316,6 +326,16 @@ pub struct DiffLine {
     pub new_lineno: Option<u32>,
 }
 
+/// How much of a file's uncommitted change the index holds (G-4).
+#[derive(Debug, Serialize, Clone, Copy, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum Staged {
+    No,
+    Yes,
+    /// The index holds a change, and the working directory changes the file further.
+    Partly,
+}
+
 #[derive(Debug, Serialize, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct FileChange {
@@ -324,6 +344,22 @@ pub struct FileChange {
     pub status: FileStatus,
     pub additions: u32,
     pub deletions: u32,
+    /// For the working-directory node's files only: how much of the change is staged.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub staged: Option<Staged>,
+    /// For the working-directory node's files only: the content shown, which staging and
+    /// unstaging expect to find (ADR-0033).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub shown: Option<Shown>,
+}
+
+/// A file's content in the working directory and in the index, by blob id; `None` where it has
+/// none there.
+#[derive(Debug, Serialize, Clone, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct Shown {
+    pub workdir: Option<String>,
+    pub index: Option<String>,
 }
 
 #[cfg(test)]

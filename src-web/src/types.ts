@@ -14,6 +14,8 @@ export interface NodeJson {
   date: string;
   committerAvatar: string;
   refs: string[];
+  /** A stash node's place `n` in the stash, `stash@{n}`, which a stash write names. */
+  stash?: number;
   /** Parent SHAs in commit order (first parent first); may include SHAs outside the loaded set. */
   parents: string[];
   /** SHAs of loaded children, newest (lowest row) first. */
@@ -56,6 +58,8 @@ export interface Growth {
   lanes: number;
   loading: boolean;
   status: string;
+  /** The row to select now: the commit a write left selected, laid out by this growth. */
+  select: number | null;
 }
 
 /** A parent or child of the selected commit; `row` is null until it is laid out. */
@@ -92,6 +96,8 @@ export interface LocalBranch {
   /** Position against the upstream as of the last fetch — the viewer never fetches. */
   ahead: number;
   behind: number;
+  /** Whether every commit of the branch is in its upstream, or in HEAD without one. */
+  merged: boolean;
 }
 
 export interface RemoteBranch {
@@ -150,6 +156,8 @@ export interface Tag {
   name: string;
   sha: string;
   shortSha: string;
+  /** A tag object with a message of its own, rather than a bare reference. */
+  annotated: boolean;
 }
 
 export interface RepoRefs {
@@ -181,4 +189,9 @@ export interface FileChange {
   status: FileStatus;
   additions: number;
   deletions: number;
+  /** For the working-directory node's files only: how much of the change is staged. */
+  staged?: 'no' | 'yes' | 'partly';
+  /** For the working-directory node's files only: the content shown, by blob id, which staging
+      and unstaging expect to find. */
+  shown?: { workdir: string | null; index: string | null };
 }

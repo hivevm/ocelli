@@ -30,6 +30,7 @@ fn commits(seed: u64) -> Vec<CommitData> {
                 1 => CommitKind::Stash,
                 _ => CommitKind::Working,
             },
+            stash: None,
         })
         .collect()
 }
