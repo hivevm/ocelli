@@ -19,10 +19,13 @@ than anywhere else, and none beats one that has stopped being true.
 
 ```
  developer ──▶ desktop application (src-tauri + src-web) ─┐
+ browser ═WS═▶ remote server (crates/server + src-web) ───┤──▶ ocelli-commands
  developer ──▶ terminal application (crates/tui) ─────────┤──▶ ocelli-core ◀── ocelli-git ──▶ repository
                                                           │    (layout, history,  (git2)     on disk
                                                           │     port)
-                                                          └─ both depend on ocelli-core and ocelli-git
+                                                          └─ all depend on ocelli-core and ocelli-git,
+                                                             the two hosts of the web interface
+                                                             through ocelli-commands
 ```
 
 Ocelli reads repositories on the local file system through git2, and writes to them through git2
@@ -34,7 +37,13 @@ the developer's own setup
 ([ADR-0035](adr/0035-remotes-through-libgit2-transports.md)),
 and makes no other network request but Gravatar avatars in the desktop application, off until the
 developer turns them on ([ADR-0023](adr/0023-no-egress-hardened-webview.md)). The web interface runs
-only inside the desktop host; the remote server of the specification does not exist yet. The
+inside the desktop host, or in a browser served by the remote server, which listens on the
+loopback addresses of the machine holding the repositories and answers only a browser that
+logged in with the connection token it printed
+([ADR-0038](adr/0038-remote-server-localhost-tls-session-cookie.md)),
+and only about the repositories below its server root
+([ADR-0039](adr/0039-git-adapter-confined-to-the-server-root.md)); it only
+reads so far. The
 measurement of the quality goals, which ships to nobody, is the one part that runs the git binary
 and fetches over the network: the corpus of public repositories, in the Measure workflow.
 
@@ -120,16 +129,38 @@ golden path and the test pattern an agent copies from are named here.
   histories of Q-2 and Q-3. All
   three run weekly and on demand in `.github/workflows/measure.yml`, not in the checks
   ([ADR-0008](adr/0008-toolchain-rust-and-typescript.md)); the checks run only their self-tests.
-- **Desktop host** (`src-tauri`, `ocelli`) — the Tauri shell: it loads the history through
-  `GitReader` on the blocking pool into the `History` of a load session (`session.rs`), and its
-  commands answer the web interface's reads of it, windows of rows, search, and the selected
-  commit with its lineage, as JSON, and writes through `GitWriter` on the same pool, one write at
-  a time, telling the web interface a transfer's progress as `write-progress` events at most every
-  tenth of a second and stopping it on `cancel_write`
-  ([ADR-0018](adr/0018-tauri-desktop-host.md),
-  [ADR-0031](adr/0031-front-ends-read-row-windows.md)). Once a load ends it hands the memory the
-  load freed back to the system through glibc's `malloc_trim`, one of the workspace's two `unsafe`
-  blocks outside its tests, libgit2's timeouts the other.
+- **Host commands** (`crates/commands`, `ocelli-commands`) — the commands and events of a host of
+  the web interface, once for the desktop host and the remote server, free of any transport
+  ([ADR-0037](adr/0037-remote-server-websocket-per-tab.md)). A
+  `Host` holds what one window or tab has open: it loads the history through `GitReader` on
+  Tokio's blocking pool into the `History` of a load session (`session.rs`), answers the web
+  interface's reads of it, windows of rows, search, and the selected commit with its lineage,
+  and writes through `GitWriter` on the same pool, one write at a time, telling the web interface
+  a transfer's progress as `write-progress` events at most every tenth of a second and stopping it
+  on `cancel_write` ([ADR-0031](adr/0031-front-ends-read-row-windows.md)). Its events go to a
+  `Report`, the window or the socket. Once a load ends it hands the memory the load freed back to
+  the system through glibc's `malloc_trim`, one of the workspace's two `unsafe` blocks outside
+  its tests, libgit2's timeouts the other.
+- **Desktop host** (`src-tauri`, `ocelli`) — the Tauri shell: its commands hand their arguments
+  to the shared `Host` and its events to the window, and it adds the native folder dialog
+  ([ADR-0018](adr/0018-tauri-desktop-host.md)).
+- **Remote server** (`crates/server`, `ocelli-server`) — serves the web interface's build,
+  embedded in the binary by `build.rs`, and carries the desktop host's commands and events with
+  the same names and payloads over one WebSocket per browser tab, each connection a shared
+  `Host` of its own whose load stops when the connection closes (`socket.rs`); it links no part
+  of Tauri or WebKit
+  ([ADR-0037](adr/0037-remote-server-websocket-per-tab.md)).
+  `auth.rs` holds the connection token drawn at each start and the session ids it is exchanged
+  for, and decides which `Host` and `Origin` a request may carry; `lib.rs` refuses every request
+  without a valid session cookie before it serves a file or reads a command, and sets the
+  Content-Security-Policy, with the hash of `index.html`'s inline script, and the referrer
+  policy on every answer
+  ([ADR-0038](adr/0038-remote-server-localhost-tls-session-cookie.md)).
+  `root.rs` resolves a path from the browser against the server root and opens only a folder
+  below it that holds its repository's `.git`
+  ([ADR-0039](adr/0039-git-adapter-confined-to-the-server-root.md)). It refuses
+  every write, and the folder dialog's command, with a reason the web interface shows. HTTP and
+  the WebSocket run on axum over Tokio.
 - **Web interface** (`src-web`) — Svelte and TypeScript: the canvas, which holds only the window of
   rows it draws, the sidebar, the commit detail with its tag and branch forms, its stash actions,
   its ref chips' switch and delete, its merge, rebase, cherry-pick, revert, and reset onto the
@@ -139,8 +170,12 @@ golden path and the test pattern an agent copies from are named here.
   Fetch, Pull, and Push, which give way to a Cancel while a fetch or a pull runs, and themes;
   `writes.ts` holds the writes it hands the host, one at a time; the toolbar draws the transfers
   the host sends with the refs and the commit detail the history operations it sends with the
-  selection, and `refChips.ts` decides which ref each chip switches to or deletes
-  ([ADR-0022](adr/0022-svelte-web-interface.md), [ADR-0017](adr/0017-virtual-rendering.md),
+  selection, and `refChips.ts` decides which ref each chip switches to or deletes. It reaches
+  its host only through `host.ts`, which picks at start-up Tauri's `invoke` and `listen` inside
+  the desktop host's WebView or else the remote server's WebSocket, whose `SocketTransport` in
+  `transport.ts` matches each answer to its command by id and hands events to their listeners
+  ([ADR-0037](adr/0037-remote-server-websocket-per-tab.md),
+  [ADR-0022](adr/0022-svelte-web-interface.md), [ADR-0017](adr/0017-virtual-rendering.md),
   [ADR-0020](adr/0020-diff-overlay-and-file-list.md),
   [ADR-0021](adr/0021-themes-tokens-and-palettes.md), [ADR-0026](adr/0026-repository-sidebar.md)).
 
@@ -182,6 +217,12 @@ lives between them. Only what a newcomer would otherwise reconstruct from code.
   the same way: `ocelli-cli [PATH]` from the start, and the desktop host hands its path to the web
   interface through the `startup_repo` command once the interface's listeners stand, so the load
   runs as one the developer started.
+- **Opening a repository in a browser.** `ocelli-server --root <folder>` prints a URL with its
+  connection token; the browser's first request exchanges it for a session cookie and is
+  redirected to the URL without it, the web interface is served, and it opens a WebSocket to
+  `/ws` from the server's own origin. Its `startup_repo` answers the server root, `.`, where the
+  root is a repository, and `open_repo` takes paths relative to the root; the load then runs as
+  in the desktop host, its events going to that tab's socket.
 - **Selecting a commit.** The core computes the commit's lineage, which the windows read after
   light up, and the history operations it offers, which the desktop host answers with the
   selection once its load's refs are read, and the front end asks `GitReader` for the changed

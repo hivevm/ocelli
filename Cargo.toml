@@ -1,9 +1,11 @@
 [workspace]
 resolver = "2"
 members = [
+    "crates/commands",
     "crates/core",
     "crates/git",
     "crates/measure",
+    "crates/server",
     "crates/tui",
     "src-tauri",
 ]
@@ -18,5 +20,6 @@ rust-version = "1.96"
 unsafe_code = "deny"
 
 [workspace.dependencies]
+ocelli-commands = { path = "crates/commands" }
 ocelli-core = { path = "crates/core" }
 ocelli-git = { path = "crates/git" }

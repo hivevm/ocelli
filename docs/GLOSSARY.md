@@ -19,6 +19,9 @@ to invent.
 - **Commit graph** — the commits of a repository drawn as nodes, each joined by an edge to its
   parents, with every branch and tag shown.
   _Avoid:_ tree, history graph, log graph.
+- **Connection token** — the random secret the remote server prints at each start, in a URL,
+  which a browser's first request exchanges for a session cookie.
+  _Avoid:_ password, API key.
 - **Conflict** — a file the index holds in more than one stage after an operation in progress
   stopped on it; resolved by taking ours, taking theirs, or as the developer edited it.
   _Avoid:_ clash, collision.
@@ -87,6 +90,9 @@ to invent.
 - **Remote server** — the part of Ocelli that runs on the machine holding a repository and serves
   the web interface to the developer's browser, as VS Code's remote development does.
   _Avoid:_ backend, daemon, agent.
+- **Server root** — the folder the remote server is started with; a browser opens only the
+  repositories below it.
+  _Avoid:_ workspace, base directory.
 - **Stash node** — the node of the commit graph that stands for one entry of the stash, joined to
   the commit it was made on, and carrying its place `n` of `stash@{n}`.
   _Avoid:_ stash commit, stash entry node.
