@@ -23,10 +23,16 @@ pub trait Report {
     fn report<S: Serialize + Clone>(&self, event: &str, payload: S);
 }
 
+/// What a host checks a repository's path against before every command that reaches it: the
+/// remote server's server root (ADR-0039). It answers why it refuses.
+pub type Guard = Arc<dyn Fn(&Path) -> Result<(), String> + Send + Sync>;
+
 /// What one window or tab has open.
 #[derive(Default)]
 pub struct Host {
     current_repo: Mutex<Option<PathBuf>>,
+    /// Checked before every command that reaches the repository; none in the desktop host.
+    guard: Option<Guard>,
     /// The history of the newest load (ADR-0031).
     session: Arc<Session>,
     /// The flag that stops the write that runs, replaced for each write.
@@ -36,12 +42,29 @@ pub struct Host {
 }
 
 impl Host {
+    /// A host that checks the repository's path with `guard` before the load and before every
+    /// command that reads or writes it, so that what changed on disk since it was opened is
+    /// checked again (ADR-0039).
+    pub fn guarded(guard: Guard) -> Host {
+        Host {
+            guard: Some(guard),
+            ..Host::default()
+        }
+    }
+
+    fn check(&self, path: &Path) -> Result<(), String> {
+        checked(&self.guard, path)
+    }
+
     /// Loads the repository at `path`, labelled `label` for the web interface. Returns as soon as
     /// the load is spawned; the history arrives chunk by chunk, each announced by a
     /// `history-grew` event, and the refs as a `load-refs` event right after the first chunk,
     /// read with it so the two describe the same state (ADR-0016, ADR-0031). `select` names the
     /// commit a write left selected, which a `history-grew` event names the row of once it is
     /// laid out (ADR-0033).
+    ///
+    /// A guarded host checks `path` here, reading the file system: a caller on an async runtime
+    /// calls this on its blocking pool.
     pub fn open_repo<R: Report + Send + 'static>(
         &self,
         path: PathBuf,
@@ -52,6 +75,7 @@ impl Host {
         if !path.exists() {
             return Err(format!("Path does not exist: {label}"));
         }
+        self.check(&path)?;
         *self.current_repo.lock().unwrap() = Some(path.clone());
 
         // Status and label first, before the background load starts.
@@ -104,22 +128,29 @@ impl Host {
         self.session.rows_of(shas)
     }
 
-    fn repo(&self) -> Result<PathBuf, String> {
-        self.current_repo
+    /// The open repository and the guard to check it with, on the blocking pool with the read
+    /// it guards, since the check reads the file system.
+    fn repo(&self) -> Result<(PathBuf, Option<Guard>), String> {
+        let path = self
+            .current_repo
             .lock()
             .unwrap()
             .clone()
-            .ok_or_else(|| "No repository open".into())
+            .ok_or_else(|| "No repository open".to_string())?;
+        Ok((path, self.guard.clone()))
     }
 
     /// Loads the files `sha` changed and sends them as a `commit-files` event.
     pub async fn select_commit<R: Report>(&self, sha: String, to: &R) -> Result<(), String> {
-        let repo_path = self.repo()?;
-        let files =
-            tokio::task::spawn_blocking(move || GitReader.load_commit_files(&repo_path, &sha))
-                .await
-                .map_err(|e| e.to_string())?
-                .map_err(|e| e.to_string())?;
+        let (repo_path, guard) = self.repo()?;
+        let files = tokio::task::spawn_blocking(move || {
+            checked(&guard, &repo_path)?;
+            GitReader
+                .load_commit_files(&repo_path, &sha)
+                .map_err(|e| e.to_string())
+        })
+        .await
+        .map_err(|e| e.to_string())??;
         let json = serde_json::to_string(&files).map_err(|e| e.to_string())?;
         to.report("commit-files", json);
         Ok(())
@@ -127,13 +158,15 @@ impl Host {
 
     /// The diff lines of one file in a commit, as JSON.
     pub async fn get_file_diff(&self, sha: String, file_path: String) -> Result<String, String> {
-        let repo_path = self.repo()?;
+        let (repo_path, guard) = self.repo()?;
         let lines = tokio::task::spawn_blocking(move || {
-            GitReader.load_file_diff(&repo_path, &sha, &file_path)
+            checked(&guard, &repo_path)?;
+            GitReader
+                .load_file_diff(&repo_path, &sha, &file_path)
+                .map_err(|e| e.to_string())
         })
         .await
-        .map_err(|e| e.to_string())?
-        .map_err(|e| e.to_string())?;
+        .map_err(|e| e.to_string())??;
         serde_json::to_string(&lines).map_err(|e| e.to_string())
     }
 
@@ -158,7 +191,7 @@ impl Host {
         } else {
             Confirmation::Absent
         };
-        let repo_path = self.repo()?;
+        let (repo_path, guard) = self.repo()?;
         // One write at a time, so that a cancel reaches the write it was meant for.
         if self.writing.swap(true, Ordering::AcqRel) {
             return Err("A write is still running".into());
@@ -169,6 +202,7 @@ impl Host {
         let cancel = Arc::new(AtomicBool::new(false));
         *self.cancel.lock().unwrap() = Arc::clone(&cancel);
         let written = tokio::task::spawn_blocking(move || {
+            checked(&guard, &repo_path)?;
             let mut told: Option<std::time::Instant> = None;
             let mut progress = |p: &str| {
                 if told.is_none_or(|t| t.elapsed() >= PROGRESS_EVERY) {
@@ -178,18 +212,22 @@ impl Host {
                 !cancel.load(Ordering::Relaxed)
             };
             port::perform(&GitWriter, &repo_path, &write, confirmation, &mut progress)
+                .map_err(|e| e.to_string())
         })
         .await;
         self.writing.store(false, Ordering::Release);
-        written
-            .map_err(|e| e.to_string())?
-            .map_err(|e| e.to_string())
+        written.map_err(|e| e.to_string())?
     }
 
     /// Stops the write that runs, where it reports its progress.
     pub fn cancel_write(&self) {
         self.cancel.lock().unwrap().store(true, Ordering::Relaxed);
     }
+}
+
+/// `path` checked with `guard`, where the host has one.
+fn checked(guard: &Option<Guard>, path: &Path) -> Result<(), String> {
+    guard.as_ref().map_or(Ok(()), |guard| guard(path))
 }
 
 /// The most matches the results panel lists; every match is reachable by cycling through them.
@@ -543,5 +581,54 @@ mod tests {
         let picked = session.select(1).unwrap();
         assert_eq!(picked.node.sha, "c8");
         assert_eq!(picked.operations, Some(refs.offered("c8")));
+    }
+
+    /// A sink that drops what it is told.
+    struct Nowhere;
+
+    impl Report for Nowhere {
+        fn report<S: Serialize + Clone>(&self, _: &str, _: S) {}
+    }
+
+    #[test]
+    // Verifies: ADR-0039
+    fn a_guarded_host_checks_the_repository_again_before_every_command_that_reaches_it() {
+        let refusing = Arc::new(AtomicBool::new(false));
+        let refuses = Arc::clone(&refusing);
+        let host = Host::guarded(Arc::new(move |_| {
+            if refuses.load(Ordering::SeqCst) {
+                Err("refused".into())
+            } else {
+                Ok(())
+            }
+        }));
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .build()
+            .unwrap();
+        let _in = runtime.enter();
+        // An empty folder: no repository, so a command let through fails in the git adapter.
+        let dir = std::env::temp_dir().join(format!("ocelli-guard-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        assert_eq!(
+            host.open_repo(dir.clone(), "d".into(), None, Nowhere),
+            Ok(())
+        );
+        let let_through = runtime.block_on(host.get_file_diff("c".into(), "f".into()));
+        assert!(let_through.is_err_and(|e| e != "refused"));
+
+        refusing.store(true, Ordering::SeqCst);
+        assert_eq!(
+            runtime.block_on(host.get_file_diff("c".into(), "f".into())),
+            Err("refused".into())
+        );
+        assert_eq!(
+            runtime.block_on(host.select_commit("c".into(), &Nowhere)),
+            Err("refused".into())
+        );
+        assert_eq!(
+            host.open_repo(dir.clone(), "d".into(), None, Nowhere),
+            Err("refused".into())
+        );
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

@@ -10,9 +10,13 @@ const tauri: Transport = {
   listen: (event, handler) => tauriListen(event, handler),
 };
 
-const transport: Transport = isTauri()
-  ? tauri
-  : new SocketTransport(new WebSocket(socketUrl(window.location)));
+/** Whether the host is the remote server, which chooses a folder from its own listing in place of
+    the desktop's folder dialog (ADR-0039). */
+export const remote = !isTauri();
+
+const transport: Transport = remote
+  ? new SocketTransport(new WebSocket(socketUrl(window.location)))
+  : tauri;
 
 export const invoke: Transport['invoke'] = (cmd, args) => transport.invoke(cmd, args);
 

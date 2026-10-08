@@ -66,15 +66,17 @@ pub fn inline_script_hashes(html: &str) -> Vec<String> {
 
 /// The Content-Security-Policy of every answer to a request made to `host`: the bundle's own
 /// scripts and styles, a connection to the server itself, avatars from Gravatar and nothing else
-/// beyond it (ADR-0023, ADR-0037), and no page that frames the server (ADR-0038).
-pub fn csp(host: &str, script_hashes: &[String]) -> String {
+/// beyond it (ADR-0023, ADR-0037), and no page that frames the server (ADR-0038). Over TLS the
+/// socket is `wss`.
+pub fn csp(host: &str, tls: bool, script_hashes: &[String]) -> String {
     let scripts = std::iter::once("'self'".to_string())
         .chain(script_hashes.iter().cloned())
         .collect::<Vec<_>>()
         .join(" ");
+    let ws = if tls { "wss" } else { "ws" };
     format!(
         "default-src 'self'; script-src {scripts}; style-src 'self' 'unsafe-inline'; \
-         img-src 'self' https://www.gravatar.com; connect-src 'self' ws://{host}; \
+         img-src 'self' https://www.gravatar.com; connect-src 'self' {ws}://{host}; \
          frame-ancestors 'none'; base-uri 'none'; form-action 'none'; object-src 'none'"
     )
 }
@@ -86,7 +88,8 @@ mod tests {
     #[test]
     // Verifies: ADR-0037, ADR-0038, ADR-0023
     fn the_policy_grants_one_origin_beyond_the_server_and_no_framing() {
-        let policy = csp("localhost:8000", &["'sha256-x'".into()]);
+        assert!(csp("h:1", true, &[]).contains("; connect-src 'self' wss://h:1;"));
+        let policy = csp("localhost:8000", false, &["'sha256-x'".into()]);
         let directives: Vec<_> = policy.split(';').map(str::trim).collect();
         assert!(directives.contains(&"script-src 'self' 'sha256-x'"));
         assert!(directives.contains(&"frame-ancestors 'none'"));

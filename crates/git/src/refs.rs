@@ -25,7 +25,7 @@ use std::path::Path;
 /// of `main`, else of `master`, else the checked-out commit; none where `HEAD` does not resolve
 /// either. A remote branch alone does not make a main line.
 pub fn load_main_tip(repo_path: &Path) -> Result<Option<String>> {
-    let repo = Repository::discover(repo_path)?;
+    let repo = crate::confine::open(repo_path)?;
     let local = |name: &str| {
         repo.find_branch(name, BranchType::Local)
             .ok()
@@ -56,7 +56,7 @@ pub fn load_main_tip(repo_path: &Path) -> Result<Option<String>> {
 
 /// Loads every ref category the sidebar shows, in one pass over the repository.
 pub fn load_repo_refs(repo_path: &Path) -> Result<RepoRefs> {
-    let repo = Repository::discover(repo_path)?;
+    let repo = crate::confine::open(repo_path)?;
     let remote_names = remote_names(&repo);
 
     Ok(RepoRefs {
@@ -381,7 +381,18 @@ fn load_submodules(repo: &Repository) -> Vec<Submodule> {
 
         // `workdir_id` is only set once the submodule has a working copy; an
         // absent one is exactly what "uninitialized" means.
-        let checked_out = submodule.workdir_id().map(|oid| oid.to_string());
+        // Confined, a submodule is opened only where it lies below the root (ADR-0039); one
+        // that reaches out of it reads as one without a working copy, a row without its switch.
+        let full = workdir.join(&path);
+        let readable = match crate::confine::root_of(&full) {
+            Ok(None) => true,
+            Ok(Some(root)) => crate::confine::lies_below(&full, &root),
+            Err(()) => false,
+        };
+        let checked_out = readable
+            .then(|| submodule.workdir_id())
+            .flatten()
+            .map(|oid| oid.to_string());
         let pinned = submodule.head_id().map(|oid| oid.to_string());
         let state = submodule_state(pinned.as_deref(), checked_out.as_deref());
 
@@ -430,7 +441,30 @@ fn find_parent(repo: &Repository) -> Option<ParentRepo> {
 
     let workdir = repo.workdir()?;
     let above = workdir.parent()?;
-    let candidate = Repository::discover(above).ok()?;
+    let candidate = match crate::confine::root_of(workdir).ok()? {
+        None => Repository::discover(above).ok()?,
+        // Confined, the search upwards stops at the root, and a superproject that reaches out of
+        // it is none (ADR-0039).
+        Some(root) => {
+            let root = root.as_path();
+            let found = above
+                .ancestors()
+                .take_while(|dir| dir.starts_with(root))
+                .find_map(|dir| {
+                    Repository::open_ext(
+                        dir,
+                        git2::RepositoryOpenFlags::NO_SEARCH,
+                        std::iter::empty::<&std::ffi::OsStr>(),
+                    )
+                    .ok()
+                })?;
+            let found_workdir = found.workdir()?.to_path_buf();
+            if !crate::confine::lies_below(&found_workdir, root) {
+                return None;
+            }
+            found
+        }
+    };
     let candidate_workdir = candidate.workdir()?.to_path_buf();
 
     let configures_us = candidate

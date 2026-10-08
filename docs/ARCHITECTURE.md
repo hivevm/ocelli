@@ -6,7 +6,7 @@
 > is updated in the same change as the structure it describes
 > ([ADR-0001](adr/0001-agent-governance-model.md)).
 >
-> **Last design revision:** 2026-10-08 (no. 7), due after 20 changes. The revision that ran
+> **Last design revision:** 2026-10-08 (no. 8), due after 20 changes. The revision that ran
 > moves the date and raises the revision number by one; the number of changes is this project's
 > to set; a sensor counts the changes outside `docs/` since the commit that set the revision
 > number and says when the next is due
@@ -68,8 +68,9 @@ golden path and the test pattern an agent copies from are named here.
   edges crossing it, search, and lineage ([ADR-0031](adr/0031-front-ends-read-row-windows.md)).
   `transfer.rs` decides the fetch, pull, and push of the checked-out branch the refs make possible,
   or why there is none, and which transfer can be stopped, and `operations.rs` which operations of
-  G-5 a commit offers on the checked-out branch, for both front ends to draw; the desktop host
-  sends these answers to the web interface, which restates none of them
+  G-5 a commit offers on the checked-out branch, for both front ends to draw; the shared `Host`
+  of `ocelli-commands` sends these answers to the web interface in both hosts, which restates
+  none of them
   ([ADR-0036](adr/0036-desktop-host-answers-what-the-core-decides.md)).
   `load.rs` runs a load session through the port, and a `LoadSession` is what a front end keeps of
   it, its `History` and its status line, for both front ends and the measurement alike.
@@ -99,7 +100,21 @@ golden path and the test pattern an agent copies from are named here.
   for the process, the git adapter's one `unsafe` block
   ([ADR-0035](adr/0035-remotes-through-libgit2-transports.md)). The refs
   name the default remote. Neither `GitReader` nor `GitWriter` starts a program a repository
-  names, a hook included (Q-4).
+  names, a hook included (Q-4). `confine.rs` decides for the remote server whether a repository
+  opened without searching upwards lies wholly below its server root: its git, common, and
+  working directories and every object store its alternates borrow, read as libgit2 reads them,
+  with no link anywhere inside its git and common directories, a walk bounded by a count of
+  entries past which the repository is refused as too large to check; a link made there after
+  the repository was opened, and a hard link, are not seen. Once the remote server confines the
+  process to its root, every read opens the folder it is given without searching upwards, the
+  parent row is looked for only up to the root, a submodule is read only where it lies below
+  it, and the working-directory node carries no author, which would come from configuration;
+  the desktop and terminal applications never confine it. The configuration libgit2 reads, the
+  developer's global and system files and what a repository's own includes with `include.path`
+  and `includeIf`, lies outside what ADR-0039 confines. Ocelli reads a working file itself only
+  to hash it for staging (`working_blob` in `git.rs`), as `git` does: a link as its target's
+  text, and nothing through a linked folder
+  ([ADR-0039](adr/0039-git-adapter-confined-to-the-server-root.md)).
 - **Terminal application** (`crates/tui`, `ocelli-cli`) — draws the core's graph with box-drawing
   characters on ratatui; it loads and lays out the history chunk by chunk on a loader thread, keeps
   the core's `History` at its event loop, reads files and diffs through `GitReader` on a worker
@@ -147,20 +162,41 @@ golden path and the test pattern an agent copies from are named here.
 - **Remote server** (`crates/server`, `ocelli-server`) — serves the web interface's build,
   embedded in the binary by `build.rs`, and carries the desktop host's commands and events with
   the same names and payloads over one WebSocket per browser tab, each connection a shared
-  `Host` of its own whose load stops when the connection closes (`socket.rs`); it links no part
-  of Tauri or WebKit
+  `Host` of its own whose load stops when the connection closes, or when it does not read the
+  bounded queue of what it is sent in time (`socket.rs`), and whose load session `Sessions`
+  counts until the connection, its commands, and its load have let go; it links no part of
+  Tauri or WebKit
   ([ADR-0037](adr/0037-remote-server-websocket-per-tab.md)).
-  `auth.rs` holds the connection token drawn at each start and the session ids it is exchanged
-  for, and decides which `Host` and `Origin` a request may carry; `lib.rs` refuses every request
-  without a valid session cookie before it serves a file or reads a command, and sets the
-  Content-Security-Policy, with the hash of `index.html`'s inline script, and the referrer
-  policy on every answer
+  `auth.rs` holds the connection token drawn at each start, the session ids it is exchanged
+  for, a bounded number with the oldest giving way, and the count of wrong tokens, past a few of
+  which every wrong token's answer waits, doubling up to a cap, one at a time for the whole
+  server, while the right one is answered at once; it decides which `Host` and `Origin` a
+  request may carry. `lib.rs` confines the git adapter to the root at start, serves a bounded
+  number of connections and of tabs at once, each connection through hyper with a timeout on
+  reading a request's headers, refuses every request without a valid session cookie
+  before it serves a file or reads a command, and sets the Content-Security-Policy, with the
+  hash of `index.html`'s inline script, and the referrer policy on every answer
   ([ADR-0038](adr/0038-remote-server-localhost-tls-session-cookie.md)).
-  `root.rs` resolves a path from the browser against the server root and opens only a folder
-  below it that holds its repository's `.git`
+  `root.rs` resolves a path from the browser against the server root and opens a repository
+  only where the git adapter's `confine` finds it wholly below the root, on the blocking pool,
+  and the tab's `Host` checks its directories and alternates again on the blocking pool before
+  every command that reaches it; the
+  sidebar's paths leave the server relative to the root, or empty where they lie outside, which
+  the web interface's `repoSwitch.ts` shows as a row without its switch and says why, and
+  whatever git says about a failed read reaches the browser only as "Reading the repository
+  failed"
   ([ADR-0039](adr/0039-git-adapter-confined-to-the-server-root.md)). It refuses
-  every write, and the folder dialog's command, with a reason the web interface shows. HTTP and
-  the WebSocket run on axum over Tokio.
+  every write with a reason the web interface shows, and answers in place of the desktop's
+  folder dialog `list_folders`, the folders below a folder of the root, those holding a `.git`
+  marked, no link out of the root followed, a bounded number read. With `--listen` it binds that
+  address alone and speaks TLS alone through rustls with ring (`tls.rs`): the developer's
+  certificate and key, or a self-signed one rcgen makes on the first start and keeps with its key
+  in the user's configuration directory, readable by the account alone, reused and refused
+  rather than replaced where it does not name the address, or the host name for an unspecified
+  one, where half of it is kept, or where its key is readable by others; its fingerprint is
+  printed, a `Host`
+  is admitted only where the certificate names it, the origin is `https`, and the session cookie
+  `Secure` with the `__Host-` prefix. HTTP and the WebSocket run on axum and hyper over Tokio.
 - **Web interface** (`src-web`) — Svelte and TypeScript: the canvas, which holds only the window of
   rows it draws, the sidebar, the commit detail with its tag and branch forms, its stash actions,
   its ref chips' switch and delete, its merge, rebase, cherry-pick, revert, and reset onto the
@@ -209,7 +245,8 @@ lives between them. Only what a newcomer would otherwise reconstruct from code.
   handed over, and hands progress, chunks, refs, and the end over as
   events, each chunk to be appended to a `LoadSession`. The terminal application receives the
   events at its event loop as messages and reads the window of rows in view from its session. The
-  desktop host runs the load on Tokio's blocking pool, appends the chunks to the `LoadSession` of
+  shared `Host` of `ocelli-commands`, in the desktop host and in each tab of the remote server,
+  runs the load on Tokio's blocking pool, appends the chunks to the `LoadSession` of
   its current load, and tells the web interface as `history-grew` and `load-refs` events, the
   refs with the transfers the core decides from them; the web
   interface then reads the window of rows in view, searches, and selects through commands, and a
@@ -221,10 +258,12 @@ lives between them. Only what a newcomer would otherwise reconstruct from code.
   connection token; the browser's first request exchanges it for a session cookie and is
   redirected to the URL without it, the web interface is served, and it opens a WebSocket to
   `/ws` from the server's own origin. Its `startup_repo` answers the server root, `.`, where the
-  root is a repository, and `open_repo` takes paths relative to the root; the load then runs as
-  in the desktop host, its events going to that tab's socket.
+  root is a repository, and `open_repo` takes paths relative to the root, which the web
+  interface's `FolderDialog` lets the developer choose from `list_folders` where the desktop
+  shows its folder dialog; the load then runs as in the desktop host, its events going to that
+  tab's socket.
 - **Selecting a commit.** The core computes the commit's lineage, which the windows read after
-  light up, and the history operations it offers, which the desktop host answers with the
+  light up, and the history operations it offers, which the `Host` answers with the
   selection once its load's refs are read, and the front end asks `GitReader` for the changed
   files, and for the diff of a file once one is opened; the working-directory node's sentinel SHA
   reads the uncommitted
@@ -233,8 +272,9 @@ lives between them. Only what a newcomer would otherwise reconstruct from code.
   draws, which passes it to `GitWriter`; a write that discards work, as `Write::discards` names
   it, passes only with the developer's confirmation, which the front end asked for in words that
   name what is lost ([ADR-0034](adr/0034-discarding-work-only-after-confirmation.md)); the web
-  interface sends every write as the core's `Write` in JSON, asking the desktop host's
-  `write_discards` what it discards and handing it to `perform_write`. A write refused changes
+  interface sends every write as the core's `Write` in JSON, asking the `Host`'s
+  `write_discards` what it discards and handing it to `perform_write`, which the remote server
+  refuses. A write refused changes
   nothing and its reason goes to the developer. A write done starts a new load session of the
   same repository, which takes the commit the write made, or else the commit selected before, and
   names its row once a chunk lays it out, unless the developer has chosen another by then; the

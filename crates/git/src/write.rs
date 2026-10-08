@@ -21,7 +21,7 @@ pub fn write(
     write: &Write,
     progress: &mut dyn FnMut(&str) -> bool,
 ) -> Result<Option<String>> {
-    let mut repo = Repository::discover(repo_path)?;
+    let mut repo = crate::confine::open(repo_path)?;
     let done = match write {
         Write::Fetch { remote } => crate::remote::fetch(&repo, remote, progress),
         Write::Pull { branch, tip } => crate::remote::pull(&repo, branch, tip, progress),

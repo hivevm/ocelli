@@ -22,6 +22,10 @@ to invent.
 - **Connection token** — the random secret the remote server prints at each start, in a URL,
   which a browser's first request exchanges for a session cookie.
   _Avoid:_ password, API key.
+- **Confined** — said of the git adapter once the remote server has bound the process to its
+  server root: every open takes the folder it is given, never searching upwards, and nothing of
+  the repository may lie outside the root.
+  _Avoid:_ sandboxed, jailed.
 - **Conflict** — a file the index holds in more than one stage after an operation in progress
   stopped on it; resolved by taking ours, taking theirs, or as the developer edited it.
   _Avoid:_ clash, collision.
@@ -51,6 +55,9 @@ to invent.
   branch, offered on a commit of the commit graph (G-5); one stopped on a conflict is an operation
   in progress.
   _Avoid:_ action.
+- **Host** — what serves the web interface its commands and events: the desktop host or the
+  remote server; a `Host` is one window's or tab's share of it.
+  _Avoid:_ backend.
 - **Lane** — the column of the commit graph in which a branch is drawn.
   _Avoid:_ column, rail.
 - **Lane colour** — the colour a lane is drawn in, taken from one theme-independent list so a
