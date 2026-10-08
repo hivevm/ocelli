@@ -1,7 +1,7 @@
 //! The writes of G-5 and G-6 with git2: merge, rebase, cherry-pick, revert, and reset from a
-//! clean tree, stopping on a conflict in `git`'s own state (ADR-0033); and resolving such a
-//! conflict file by file, then continuing or aborting the operation, whoever started it
-//! (ADR-0033). No hook and no program the repository names runs (ADR-0033).
+//! clean tree, stopping on a conflict in `git`'s own state; and resolving such a conflict file
+//! by file, then continuing or aborting the operation, whoever started it. No hook and no program
+//! the repository names runs (ADR-0033).
 
 use crate::checkout::{check_out, files_written, nothing_untracked_in_the_way};
 use crate::guard::{
@@ -17,7 +17,7 @@ use ocelli_core::model::Operation;
 use ocelli_core::port::ResetMode;
 
 /// Refuses unless the branch `name` is checked out at `tip`, no operation is in progress, and no
-/// tracked file has an uncommitted change: where every operation of ADR-0033 starts.
+/// tracked file has an uncommitted change: where every history operation starts (ADR-0033).
 fn clean_start<'r>(repo: &'r Repository, name: &str, tip: &str) -> Result<git2::Branch<'r>> {
     let branch = branch_as_shown(repo, name, tip)?;
     if !branch.is_head() {

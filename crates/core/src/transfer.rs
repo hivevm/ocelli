@@ -1,11 +1,57 @@
 //! The transfers of the checked-out branch, decided once for both front ends (ADR-0035): which
 //! fetch, pull, and push the refs a front end holds make possible, or why there is none, and
-//! which write is a transfer and which of those can be stopped while it runs.
+//! which write is a transfer and which of those can be stopped while it runs. The desktop host
+//! sends the answers to the web interface as `Transfers`, which it restates none of (ADR-0036).
 
 use crate::model::RepoRefs;
 use crate::port::Write;
+use serde::Serialize;
+
+/// A transfer the refs make possible, with whether it can be stopped while it runs, or why there
+/// is none: `{ write, canStop }` or `{ reason }` in JSON.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(untagged)]
+pub enum Transfer {
+    Offered {
+        write: Write,
+        #[serde(rename = "canStop")]
+        can_stop: bool,
+    },
+    Refused {
+        reason: String,
+    },
+}
+
+impl From<Result<Write, String>> for Transfer {
+    fn from(answer: Result<Write, String>) -> Self {
+        match answer {
+            Ok(write) => Transfer::Offered {
+                can_stop: write.can_stop(),
+                write,
+            },
+            Err(reason) => Transfer::Refused { reason },
+        }
+    }
+}
+
+/// The fetch, pull, and push the refs make possible, as a toolbar offers them.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct Transfers {
+    pub fetch: Transfer,
+    pub pull: Transfer,
+    pub push: Transfer,
+}
 
 impl RepoRefs {
+    /// The fetch, pull, and push of the refs, each with whether it can be stopped.
+    pub fn transfers(&self) -> Transfers {
+        Transfers {
+            fetch: self.fetch().into(),
+            pull: self.pull().into(),
+            push: self.push().into(),
+        }
+    }
+
     /// The fetch of the default remote, or why there is none.
     pub fn fetch(&self) -> Result<Write, String> {
         let remote = self.default_remote.clone().ok_or("No remote to fetch")?;
@@ -140,5 +186,28 @@ mod tests {
         assert!(!push.can_stop() && !local.can_stop());
         assert!(fetch.is_transfer() && pull.is_transfer() && push.is_transfer());
         assert!(!local.is_transfer());
+    }
+
+    #[test]
+    // Verifies: ADR-0036, ADR-0035
+    fn the_transfers_serialize_as_a_write_that_says_whether_it_stops_or_a_reason() {
+        let tracked = refs(Some(Some("origin/main")), Some("origin")).transfers();
+        assert_eq!(
+            serde_json::to_value(&tracked).unwrap(),
+            serde_json::json!({
+                "fetch": { "write": { "kind": "fetch", "remote": "origin" }, "canStop": true },
+                "pull": { "write": { "kind": "pull", "branch": "main", "tip": "s" }, "canStop": true },
+                "push": { "write": { "kind": "push", "branch": "main", "tip": "s" }, "canStop": false },
+            })
+        );
+        let detached = refs(None, None).transfers();
+        assert_eq!(
+            serde_json::to_value(&detached).unwrap(),
+            serde_json::json!({
+                "fetch": { "reason": "No remote to fetch" },
+                "pull": { "reason": "No branch is checked out to pull" },
+                "push": { "reason": "No branch is checked out to push" },
+            })
+        );
     }
 }

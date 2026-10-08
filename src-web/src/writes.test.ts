@@ -1,7 +1,7 @@
-// Verifies: ADR-0033, ADR-0034, G-7, Q-6
+// Verifies: ADR-0033, ADR-0034, ADR-0036, G-7, Q-6
 import { describe, expect, test } from 'bun:test';
 import { join } from 'node:path';
-import type { Conflict, FileChange, Operation, Staging } from './types.ts';
+import type { Conflict, FileChange, Offered, Operation, Staging, Transfer, Transfers } from './types.ts';
 import {
   OneWrite, actionLabel, branchRequest, operationName, commitRequest, confirmedWrite, stageToggle, stashRequest, tagRequest,
   type ResetMode, type Take, type Write, type WriteOf,
@@ -223,5 +223,39 @@ describe('the JSON of a file the host sends', () => {
     expect('staging' in committed).toBe(false);
     expect(stageToggle(working as unknown as FileChange)).toEqual({ kind: 'stageFile', path: 'f', shown: 'w' });
     expect(stageToggle(committed as unknown as FileChange)).toBeNull();
+  });
+});
+
+describe('the JSON of what the host offers', () => {
+  // Written by the core's test (crates/core/tests/write_fixture.rs): the transfers of refs that
+  // offer a fetch and a push and refuse a pull, and the operations of a commit beside a refusal,
+  // as the host sends them (ADR-0036). This side only draws them, and reads their shape here.
+  const fixture = join(import.meta.dir, '..', '..', 'crates', 'core', 'tests', 'fixtures', 'offers.json');
+
+  /** The fields of each answer; the types require exactly these. */
+  const transferKeys: Record<keyof Transfers, true> = { fetch: true, pull: true, push: true };
+  const offeredKeys: Record<keyof Extract<Transfer<'fetch'>, { write: unknown }>, true> = {
+    write: true, canStop: true,
+  };
+  const reasonKeys: Record<keyof Extract<Offered, { reason: string }>, true> = { reason: true };
+  const operationsKeys: Record<keyof Extract<Offered, { operations: unknown }>, true> = { operations: true };
+  const sorted = (value: object) => Object.keys(value).sort();
+
+  test('a transfer is a write with whether it stops, or a reason, and both arrive', async () => {
+    const { transfers } = (await Bun.file(fixture).json()) as { transfers: Record<string, object> };
+    expect(sorted(transfers)).toEqual(sorted(transferKeys));
+    const shapes = Object.values(transfers).map(sorted);
+    expect(shapes).toContainEqual(sorted(offeredKeys));
+    expect(shapes).toContainEqual(sorted(reasonKeys));
+    for (const shape of shapes) expect([sorted(offeredKeys), sorted(reasonKeys)]).toContainEqual(shape);
+    const { fetch } = transfers as unknown as Transfers;
+    expect('write' in fetch && fetch.write.kind === 'fetch' && typeof fetch.canStop).toBe('boolean');
+  });
+
+  test('a commit offers its operations as writes, or a reason', async () => {
+    const { offered } = (await Bun.file(fixture).json()) as { offered: object[] };
+    expect(offered.map(sorted)).toEqual([sorted(operationsKeys), sorted(reasonKeys)]);
+    const [{ operations }] = offered as { operations: Write[] }[];
+    expect(operations.map((w) => w.kind)).toEqual(['merge', 'rebase', 'cherryPick', 'revert', 'reset']);
   });
 });

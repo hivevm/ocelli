@@ -235,124 +235,39 @@ fn the_file_fixture_is_what_the_core_writes() {
     }
 }
 
-/// The core's answers for the transfers of the checked-out branch over a few sets of refs, and
-/// for every write whether it can be stopped: the fixture `transfers.json` the web interface's
-/// `transfers.test.ts` holds its helper to.
+/// The core's answers as the desktop host sends them (ADR-0036): the transfers of refs that offer
+/// a fetch and a push and refuse a pull, and the operations a commit offers beside a refusal, the
+/// fixture `offers.json` the web interface's `writes.test.ts` reads against its types. It holds
+/// the shape of the answers only; which answer the refs give is the core's own tests'.
 #[test]
-fn the_transfer_fixture_is_what_the_core_answers() {
+// Verifies: ADR-0036
+fn the_offers_fixture_is_what_the_core_writes() {
     use ocelli_core::model::{LocalBranch, RepoRefs};
-    let refs = |upstream: Option<Option<&str>>, default_remote: Option<&str>| RepoRefs {
-        locals: upstream
-            .map(|upstream| LocalBranch {
-                name: "main".into(),
-                sha: "s".into(),
-                short_sha: "s".into(),
-                is_head: true,
-                upstream: upstream.map(str::to_string),
-                ahead: 0,
-                behind: 0,
-                merged: true,
-            })
-            .into_iter()
-            .collect(),
-        default_remote: default_remote.map(str::to_string),
-        ..RepoRefs::default()
-    };
-    let answer = |answer: Result<Write, String>| match answer {
-        Ok(write) => serde_json::json!({ "write": write }),
-        Err(reason) => serde_json::json!({ "reason": reason }),
-    };
-    // The checked-out branch after another, which the answers must find all the same.
-    let mut second = refs(Some(Some("origin/main")), None);
-    second.locals.insert(
-        0,
-        LocalBranch {
-            name: "other".into(),
-            sha: "o".into(),
-            short_sha: "o".into(),
-            is_head: false,
+    let refs = RepoRefs {
+        locals: vec![LocalBranch {
+            name: "main".into(),
+            sha: "h".into(),
+            short_sha: "h".into(),
+            is_head: true,
             upstream: None,
             ahead: 0,
             behind: 0,
             merged: true,
-        },
-    );
-    let cases: Vec<_> = [
-        refs(Some(Some("origin/main")), Some("origin")),
-        refs(Some(Some("origin/main")), None),
-        refs(Some(None), Some("origin")),
-        refs(Some(None), None),
-        refs(None, Some("origin")),
-        second,
-    ]
-    .into_iter()
-    .map(|refs| {
-        serde_json::json!({
-            "refs": refs,
-            "fetch": answer(refs.fetch()),
-            "pull": answer(refs.pull()),
-            "push": answer(refs.push()),
-        })
-    })
-    .collect();
-    let can_stop: serde_json::Map<_, _> = examples()
-        .iter()
-        .map(|w| {
-            let json = serde_json::to_value(w).expect("the example serializes");
-            (kind_of(&json), serde_json::Value::Bool(w.can_stop()))
-        })
-        .collect();
-    let fixture = serde_json::json!({ "cases": cases, "canStop": can_stop });
-    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/transfers.json");
+        }],
+        default_remote: Some("origin".into()),
+        ..RepoRefs::default()
+    };
+    let fixture = serde_json::json!({
+        "transfers": refs.transfers(),
+        "offered": [refs.offered("c"), RepoRefs::default().offered("c")],
+    });
+    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/offers.json");
     let written = serde_json::to_string_pretty(&fixture).expect("the fixture serializes") + "\n";
     let on_disk = fs::read_to_string(&path).unwrap_or_default();
     if on_disk != written {
         fs::write(&path, &written).expect("the fixture is written");
         panic!(
-            "{} did not hold what the core answers; it is written anew, commit it",
-            path.display()
-        );
-    }
-}
-
-/// The core's history operations for a commit on another branch, one on none, and the checked-out
-/// one, and its refusal where no branch is checked out: the fixture `operations.json` the web
-/// interface's `operations.test.ts` holds its helper to.
-#[test]
-fn the_operations_fixture_is_what_the_core_answers() {
-    use ocelli_core::model::{LocalBranch, RepoRefs};
-    let local = |name: &str, sha: &str, is_head: bool| LocalBranch {
-        name: name.into(),
-        sha: sha.into(),
-        short_sha: sha.into(),
-        is_head,
-        upstream: None,
-        ahead: 0,
-        behind: 0,
-        merged: true,
-    };
-    let refs = RepoRefs {
-        locals: vec![local("topic", "t", false), local("main", "h", true)],
-        ..RepoRefs::default()
-    };
-    let answer = |refs: &RepoRefs, sha: &str| match refs.history_operations(sha) {
-        Ok(operations) => serde_json::json!({ "operations": operations }),
-        Err(reason) => serde_json::json!({ "reason": reason }),
-    };
-    let detached = RepoRefs::default();
-    let cases: Vec<_> = [(&refs, "t"), (&refs, "x"), (&refs, "h"), (&detached, "t")]
-        .into_iter()
-        .map(|(refs, sha)| {
-            serde_json::json!({ "refs": refs, "sha": sha, "answer": answer(refs, sha) })
-        })
-        .collect();
-    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/operations.json");
-    let written = serde_json::to_string_pretty(&cases).expect("the fixture serializes") + "\n";
-    let on_disk = fs::read_to_string(&path).unwrap_or_default();
-    if on_disk != written {
-        fs::write(&path, &written).expect("the fixture is written");
-        panic!(
-            "{} did not hold what the core answers; it is written anew, commit it",
+            "{} did not hold what the core writes; it is written anew, commit it",
             path.display()
         );
     }

@@ -1,0 +1,63 @@
+{
+  "offered": [
+    {
+      "operations": [
+        {
+          "branch": "main",
+          "commit": "c",
+          "kind": "merge",
+          "name": null,
+          "tip": "h"
+        },
+        {
+          "branch": "main",
+          "kind": "rebase",
+          "onto": "c",
+          "tip": "h"
+        },
+        {
+          "branch": "main",
+          "commit": "c",
+          "kind": "cherryPick",
+          "tip": "h"
+        },
+        {
+          "branch": "main",
+          "commit": "c",
+          "kind": "revert",
+          "tip": "h"
+        },
+        {
+          "branch": "main",
+          "commit": "c",
+          "kind": "reset",
+          "mode": "mixed",
+          "tip": "h"
+        }
+      ]
+    },
+    {
+      "reason": "No branch is checked out"
+    }
+  ],
+  "transfers": {
+    "fetch": {
+      "canStop": true,
+      "write": {
+        "kind": "fetch",
+        "remote": "origin"
+      }
+    },
+    "pull": {
+      "reason": "main has no upstream to pull from"
+    },
+    "push": {
+      "canStop": false,
+      "write": {
+        "branch": "main",
+        "kind": "push",
+        "tip": "h"
+      }
+    }
+  }
+}
