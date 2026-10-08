@@ -80,6 +80,9 @@
   let question = $state<
     { lost: string; action: string; answer: (confirmed: boolean) => void } | null
   >(null);
+  // What the status bar says over the load's own line until the developer acts again: why a
+  // transfer was refused, which the reload after it would otherwise hide.
+  let notice = $state<string | null>(null);
   // Whether the dialog that describes a new stash is open.
   let stashing = $state(false);
   // Whether a transfer to or from a remote runs, and whether the toolbar's button can cancel it:
@@ -89,14 +92,19 @@
   // The checked-out branch, which a pull moves, where it has an upstream.
   const pullable = $derived(repoRefs?.locals.find(b => b.isHead && b.upstream !== null) ?? null);
 
-  /** Runs a transfer, the toolbar's buttons turning into one that cancels it. */
+  /** Runs a transfer, the toolbar's buttons turning into one that cancels it. A transfer refused
+      may have moved remote branches by its fetch, so the repository is read again, the refusal
+      kept in view (ADR-0035). */
   async function transfer(write: Write, doing: string): Promise<void> {
     fetching = true;
     cancellable = write.kind !== 'push';
     status = doing;
     const error = await performWrite(write);
     fetching = false;
-    if (error) report(error);
+    if (error) {
+      await reloadAfterWrite(null);
+      notice = 'Error: ' + error;
+    }
   }
 
   /** Fetches the remote a fetch reaches without one named; the reload after shows its branches. */
@@ -324,6 +332,7 @@
 
   // ── Actions ────────────────────────────────────────────────────────────────
   async function browseRepo(): Promise<void> {
+    notice = null;
     status = 'Selecting repository…';
     await invoke('browse_repo').catch((e: unknown) => { status = 'Error: ' + e; });
   }
@@ -332,6 +341,7 @@
       once the load lays it out (ADR-0033). */
   async function refreshRepo(select: string | null = null): Promise<void> {
     if (!currentRepoPath) return;
+    notice = null;
     status = 'Refreshing…';
     await invoke('open_repo', { path: currentRepoPath, select }).catch((e: unknown) => {
       status = 'Error: ' + e;
@@ -348,6 +358,7 @@
   /// working tree, or the parent module (ADR-0027). It is the same load the
   /// folder picker triggers, so the graph, the refs and the label all follow.
   async function openRepoPath(path: string): Promise<void> {
+    notice = null;
     if (!path) return;
     status = 'Opening…';
     await invoke('open_repo', { path }).catch((e: unknown) => { status = 'Error: ' + e; });
@@ -357,6 +368,7 @@
       after it shows the result, the commit selected again. Resolves with why the host refused
       it, or null once written or kept. */
   async function performWrite(write: Write): Promise<string | null> {
+    notice = null;
     let done: Outcome;
     try {
       done = await confirmedWrite(
@@ -391,6 +403,7 @@
   /** Selects the commit in `row`: the host computes its lineage, which the window read after
       lights up, and its changed files follow. */
   async function onSelectRow(row: number): Promise<void> {
+    notice = null;
     let selected: Selected | null;
     try {
       selected = await selects.ask(() => invoke<Selected | null>('select_row', { row }), currentLoad);
@@ -588,7 +601,7 @@
 {/if}
 
 <StatusBar
-  {status}
+  status={notice ?? status}
   {theme}
   {showAvatars}
   onToggleTheme={toggleTheme}
