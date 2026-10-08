@@ -676,6 +676,9 @@ struct Transfer<'p> {
     progress: std::cell::RefCell<&'p mut dyn FnMut(&str) -> bool>,
     cancelled: std::cell::Cell<bool>,
     tried: std::cell::RefCell<Tried>,
+    /// The `known_hosts` that revoked the server's key, where one did: libssh2 replaces the
+    /// message of a refusal with its own, so the reason is kept here.
+    revoked: std::cell::RefCell<Option<String>>,
 }
 
 impl<'p> Transfer<'p> {
@@ -687,6 +690,7 @@ impl<'p> Transfer<'p> {
             progress: std::cell::RefCell::new(progress),
             cancelled: std::cell::Cell::new(false),
             tried: Default::default(),
+            revoked: Default::default(),
         }
     }
 
@@ -705,6 +709,22 @@ impl<'p> Transfer<'p> {
                 return Err(git2::Error::from_str("cancelled"));
             }
             self.tried.borrow_mut().credentials(url, user, allowed)
+        });
+        // libgit2 checks an SSH host key against the developer's known_hosts after this; a key
+        // that a revoked line lists, which libssh2 does not read, is refused first (ADR-0035).
+        callbacks.certificate_check(|cert, host| {
+            if let Some(key) = cert.as_hostkey().and_then(|k| k.hostkey()) {
+                let files = known_hosts_files();
+                if let Some(file) = files.iter().find(|(_, text)| revoked_in(text, key)) {
+                    *self.revoked.borrow_mut() = Some(file.0.clone());
+                    return Err(git2::Error::new(
+                        ErrorCode::Certificate,
+                        git2::ErrorClass::Ssh,
+                        format!("{host}'s host key is revoked in {}", file.0),
+                    ));
+                }
+            }
+            Ok(git2::CertificateCheckStatus::CertificatePassthrough)
         });
         callbacks.sideband_progress(|_| self.go_on("the server is preparing"));
         callbacks.transfer_progress(|stats| {
@@ -732,14 +752,32 @@ impl<'p> Transfer<'p> {
             return anyhow::anyhow!("{doing} {name} was cancelled");
         }
         match e.code() {
-            ErrorCode::Certificate if is_ssh(url) => anyhow::anyhow!(
-                "{name}'s host key is not in your known_hosts: connect to it once with ssh, and \
-                 check its fingerprint, before {direction} it from Ocelli"
+            ErrorCode::Certificate if self.revoked.borrow().is_some() => anyhow::anyhow!(
+                "{name} cannot be trusted: its host key is revoked in {}",
+                self.revoked.borrow().as_deref().unwrap_or_default()
             ),
-            ErrorCode::Certificate => anyhow::anyhow!(
-                "{name}'s server could not be verified against the system's certificates: {}",
-                e.message()
-            ),
+            ErrorCode::Certificate if is_ssh(url) => {
+                let files = known_hosts_files();
+                let user = files.first().map_or("", |f| f.1.as_str());
+                let system = files.get(1).map_or("", |f| f.1.as_str());
+                let host = ssh_host(url);
+                match vouched_elsewhere(user, system, host) {
+                    Some(why) => anyhow::anyhow!(
+                        "{name}'s host key is {why}, which Ocelli does not trust: add the host to \
+                         your ~/.ssh/known_hosts"
+                    ),
+                    None => anyhow::anyhow!(
+                        "{name}'s host key is not in your known_hosts: connect to it once with \
+                         ssh, and check its fingerprint, before {direction} it from Ocelli"
+                    ),
+                }
+            }
+            _ if e.code() == ErrorCode::Certificate || e.class() == git2::ErrorClass::Ssl => {
+                anyhow::anyhow!(
+                    "{name}'s server could not be verified against the system's certificates: {}",
+                    e.message()
+                )
+            }
             ErrorCode::Auth => anyhow::anyhow!("{name} refused the credentials: {}", e.message()),
             ErrorCode::NotFastForward => {
                 anyhow::anyhow!(
@@ -923,6 +961,104 @@ fn set_server_timeouts() {
     });
 }
 
+/// The developer's and the system's `known_hosts`, by path and text, the developer's first; a file
+/// that cannot be read counts as empty. The home is found as libgit2 finds it: `HOME`, else on
+/// Windows `USERPROFILE` or `HOMEDRIVE` and `HOMEPATH`; the system's file is where OpenSSH keeps it.
+fn known_hosts_files() -> Vec<(String, String)> {
+    let var = |name: &str| std::env::var(name).ok().filter(|v| !v.is_empty());
+    let home = var("HOME")
+        .or_else(|| var("USERPROFILE"))
+        .or_else(|| Some(format!("{}{}", var("HOMEDRIVE")?, var("HOMEPATH")?)));
+    let system = if cfg!(windows) {
+        var("ProgramData").map(|data| format!("{data}\\ssh\\ssh_known_hosts"))
+    } else {
+        Some("/etc/ssh/ssh_known_hosts".to_string())
+    };
+    let user = home.map(|home| {
+        std::path::Path::new(&home)
+            .join(".ssh")
+            .join("known_hosts")
+            .display()
+            .to_string()
+    });
+    [user, system]
+        .into_iter()
+        .map(|path| {
+            let text = path
+                .as_deref()
+                .and_then(|p| std::fs::read_to_string(p).ok())
+                .unwrap_or_default();
+            (path.unwrap_or_default(), text)
+        })
+        .collect()
+}
+
+/// Whether a `@revoked` line of `known_hosts` lists `key`, whatever its host pattern.
+fn revoked_in(known_hosts: &str, key: &[u8]) -> bool {
+    known_hosts.lines().any(|line| {
+        let mut fields = line.split_whitespace();
+        fields.next() == Some("@revoked")
+            && fields
+                .nth(2)
+                .is_some_and(|encoded| decode_base64(encoded).as_deref() == Some(key))
+    })
+}
+
+/// Where a host libssh2 refused is vouched for all the same: only in the system's file, or only
+/// through `@cert-authority`, neither of which libssh2 reads; `None` where it is not.
+fn vouched_elsewhere(user: &str, system: &str, host: &str) -> Option<&'static str> {
+    let names = |line: &str, field: usize| {
+        line.split_whitespace().nth(field).is_some_and(|patterns| {
+            patterns
+                .split(',')
+                .any(|p| p == host || p.contains(&format!("[{host}]")))
+        })
+    };
+    if user
+        .lines()
+        .chain(system.lines())
+        .any(|l| l.starts_with("@cert-authority") && names(l, 1))
+    {
+        return Some("vouched for only by a @cert-authority line");
+    }
+    if system
+        .lines()
+        .any(|l| !l.starts_with('@') && !l.starts_with('#') && names(l, 0))
+    {
+        return Some("listed only in /etc/ssh/ssh_known_hosts");
+    }
+    None
+}
+
+/// The host an SSH address names: `ssh://[user@]host[:port]/path` or `[user@]host:path`.
+fn ssh_host(url: &str) -> &str {
+    let rest = url
+        .strip_prefix("ssh://")
+        .or_else(|| url.strip_prefix("git+ssh://"))
+        .unwrap_or(url);
+    let authority = rest.split('/').next().unwrap_or_default();
+    let host = authority.rsplit('@').next().unwrap_or_default();
+    host.split(':').next().unwrap_or_default()
+}
+
+/// Standard base64, as `known_hosts` writes keys; `None` for text that is not.
+fn decode_base64(text: &str) -> Option<Vec<u8>> {
+    const TABLE: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let mut bits = 0u32;
+    let mut held = 0;
+    let mut out = Vec::new();
+    for c in text.trim_end_matches('=').bytes() {
+        let value = TABLE.iter().position(|&t| t == c)? as u32;
+        bits = bits << 6 | value;
+        held += 6;
+        if held >= 8 {
+            held -= 8;
+            out.push((bits >> held) as u8);
+        }
+    }
+    Some(out)
+}
+
 /// Whether `url` reaches its remote over SSH: `ssh://`, or the scp-like `host:path`.
 fn is_ssh(url: &str) -> bool {
     url.starts_with("ssh://") || url.starts_with("git+ssh://") || !url.contains("://")
@@ -1035,6 +1171,7 @@ fn helper_may_answer_for(address: &str) -> std::result::Result<(), &'static str>
 #[cfg(test)]
 mod tests {
     use super::helper_may_answer_for as asks;
+    use super::{decode_base64, revoked_in, ssh_host, vouched_elsewhere};
 
     #[test]
     // Verifies: ADR-0035
@@ -1059,6 +1196,51 @@ mod tests {
         ] {
             let error = asks(refused).unwrap_err();
             assert!(error.contains(why), "{refused}: {error}");
+        }
+    }
+
+    #[test]
+    // Verifies: ADR-0035
+    fn a_host_key_a_revoked_line_lists_is_refused_whatever_its_host_pattern() {
+        let key = b"ssh-ed25519 key bytes";
+        let encoded = "c3NoLWVkMjU1MTkga2V5IGJ5dGVz";
+        assert_eq!(decode_base64(encoded).as_deref(), Some(&key[..]));
+        let revoked = format!("@revoked * ssh-ed25519 {encoded}\n");
+        assert!(revoked_in(&revoked, key));
+        assert!(
+            !revoked_in(&format!("example.org ssh-ed25519 {encoded}\n"), key),
+            "trusted, not revoked"
+        );
+        assert!(
+            !revoked_in("@revoked * ssh-ed25519 AAAA\n", key),
+            "another key"
+        );
+        assert!(
+            !revoked_in("@revoked * ssh-ed25519 !!!\n", key),
+            "no base64 at all"
+        );
+    }
+
+    #[test]
+    // Verifies: ADR-0035
+    fn a_refusal_names_where_else_a_host_is_vouched_for() {
+        let line = "git.example.org ssh-ed25519 AAAA";
+        assert_eq!(
+            vouched_elsewhere("", line, "git.example.org"),
+            Some("listed only in /etc/ssh/ssh_known_hosts")
+        );
+        let ca = "@cert-authority *.example.org,git.example.org ssh-ed25519 AAAA";
+        assert_eq!(
+            vouched_elsewhere(ca, "", "git.example.org"),
+            Some("vouched for only by a @cert-authority line")
+        );
+        assert_eq!(vouched_elsewhere("", "", "git.example.org"), None);
+        for (url, host) in [
+            ("ssh://git@git.example.org:2222/r.git", "git.example.org"),
+            ("git@git.example.org:r.git", "git.example.org"),
+            ("git.example.org:r.git", "git.example.org"),
+        ] {
+            assert_eq!(ssh_host(url), host, "{url}");
         }
     }
 }
