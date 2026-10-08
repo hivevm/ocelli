@@ -24,6 +24,40 @@ pub fn write(
         Write::Fetch { remote } => fetch(&repo, remote, progress),
         Write::Pull { branch, tip } => pull(&repo, branch, tip, progress),
         Write::Push { branch, tip } => push(&repo, branch, tip, progress),
+        Write::Merge {
+            branch,
+            tip,
+            commit,
+            name,
+        } => return crate::history::merge(&repo, branch, tip, commit, name.as_deref()),
+        Write::Rebase { branch, tip, onto } => {
+            return crate::history::rebase(&repo, branch, tip, onto);
+        }
+        Write::CherryPick {
+            branch,
+            tip,
+            commit,
+        } => return crate::history::cherry_pick(&repo, branch, tip, commit),
+        Write::Revert {
+            branch,
+            tip,
+            commit,
+        } => return crate::history::revert(&repo, branch, tip, commit),
+        Write::Reset {
+            branch,
+            tip,
+            commit,
+            mode,
+        } => return crate::history::reset(&repo, branch, tip, commit, *mode),
+        Write::Resolve {
+            path,
+            conflict,
+            take,
+        } => crate::history::resolve(&repo, path, conflict, *take),
+        Write::Continue { operation, head } => {
+            return crate::history::continue_stopped(&repo, *operation, head);
+        }
+        Write::Abort { operation, head } => crate::history::abort(&repo, *operation, head),
         Write::Commit { message, head } => {
             return commit(&repo, message, head.as_deref()).map(Some);
         }
@@ -101,7 +135,8 @@ pub fn write(
     done.map(|()| None)
 }
 
-const NO_IDENTITY: &str = "no identity is configured to write with: set user.name and user.email";
+pub(crate) const NO_IDENTITY: &str =
+    "no identity is configured to write with: set user.name and user.email";
 
 fn create_tag(repo: &Repository, name: &str, commit: &str, message: Option<&str>) -> Result<()> {
     let refname = format!("refs/tags/{name}");
@@ -133,7 +168,7 @@ fn create_tag(repo: &Repository, name: &str, commit: &str, message: Option<&str>
 
 /// `message` cleaned up as `git tag` cleans it: comment lines, surrounding blank
 /// lines, and trailing spaces go, and it ends in a newline; empty where nothing is left.
-fn clean_message(repo: &Repository, message: &str) -> Result<String> {
+pub(crate) fn clean_message(repo: &Repository, message: &str) -> Result<String> {
     let comment = comment_string(repo)?;
     let kept: Vec<_> = message
         .lines()
@@ -144,7 +179,11 @@ fn clean_message(repo: &Repository, message: &str) -> Result<String> {
 
 /// Refuses `what` where the configuration's `key` asks `git` to sign it, which Ocelli cannot
 /// (ADR-0033).
-fn refuse_where_signing_is_asked(repo: &Repository, key: &str, what: &str) -> Result<()> {
+pub(crate) fn refuse_where_signing_is_asked(
+    repo: &Repository,
+    key: &str,
+    what: &str,
+) -> Result<()> {
     if repo.config()?.get_bool(key).unwrap_or(false) {
         bail!("{key} asks for {what} to be signed, which Ocelli does not do: use git for it");
     }
@@ -356,12 +395,46 @@ fn unstage_file(repo: &Repository, path: &str) -> Result<()> {
         bail!("{path} is not staged");
     }
     match repo.head().ok().and_then(|h| h.peel_to_commit().ok()) {
-        Some(head) => repo.reset_default(Some(head.as_object()), [path])?,
+        Some(head) => {
+            let mut index = repo.index()?;
+            entry_as_in(&mut index, &head.tree()?, path)?;
+            index.write()?;
+        }
         None => {
             let mut index = repo.index()?;
             index.remove_path(Path::new(path))?;
             index.write()?;
         }
+    }
+    Ok(())
+}
+
+/// Puts `path` in `index` as `tree` holds it, or takes it out where `tree` has no file there:
+/// the path taken as written, never as a pattern, as `git reset -- <path>` takes it.
+pub(crate) fn entry_as_in(index: &mut git2::Index, tree: &git2::Tree, path: &str) -> Result<()> {
+    let at = Path::new(path);
+    index.remove_path(at)?;
+    if let Ok(entry) = tree.get_path(at)
+        && matches!(
+            entry.kind(),
+            Some(git2::ObjectType::Blob | git2::ObjectType::Commit)
+        )
+    {
+        let zero = git2::IndexTime::new(0, 0);
+        index.add(&git2::IndexEntry {
+            ctime: zero,
+            mtime: zero,
+            dev: 0,
+            ino: 0,
+            mode: entry.filemode() as u32,
+            uid: 0,
+            gid: 0,
+            file_size: 0,
+            id: entry.id(),
+            flags: 0,
+            flags_extended: 0,
+            path: path.as_bytes().to_vec(),
+        })?;
     }
     Ok(())
 }
@@ -380,7 +453,7 @@ fn commit(repo: &Repository, message: &str, head: Option<&str>) -> Result<String
         RepositoryState::Clean | RepositoryState::Bisect
     ) {
         bail!(
-            "a {} is in progress: finish it with git, which records it as it began it",
+            "a {} is in progress: finish it first, continuing or aborting it here or with git",
             in_progress(repo.state())
         );
     }
@@ -430,7 +503,7 @@ fn as_shown(
 }
 
 /// What a repository is in the middle of, in the words `git status` uses.
-fn in_progress(state: RepositoryState) -> &'static str {
+pub(crate) fn in_progress(state: RepositoryState) -> &'static str {
     match state {
         RepositoryState::Merge => "merge",
         RepositoryState::Revert | RepositoryState::RevertSequence => "revert",
@@ -453,7 +526,11 @@ fn valid_branch_name(name: &str) -> Result<()> {
 }
 
 /// The local branch `name`, refused unless it still points at `tip`.
-fn branch_as_shown<'r>(repo: &'r Repository, name: &str, tip: &str) -> Result<git2::Branch<'r>> {
+pub(crate) fn branch_as_shown<'r>(
+    repo: &'r Repository,
+    name: &str,
+    tip: &str,
+) -> Result<git2::Branch<'r>> {
     let branch = repo
         .find_branch(name, BranchType::Local)
         .with_context(|| format!("there is no branch named '{name}' any more"))?;
@@ -503,13 +580,13 @@ fn switch_to(repo: &Repository, target: &Commit, refname: Option<&str>) -> Resul
 /// Checks `target`'s tree out over the checked-out one, the uncommitted changes carried along,
 /// or refuses with nothing changed, naming what is in the way: what a switch and a fast-forward
 /// both do to the working directory and the index.
-fn check_out(repo: &Repository, target: &Commit) -> Result<()> {
+pub(crate) fn check_out(repo: &Repository, target: &Commit) -> Result<()> {
     if !matches!(
         repo.state(),
         RepositoryState::Clean | RepositoryState::Bisect
     ) {
         bail!(
-            "a {} is in progress: finish it with git first",
+            "a {} is in progress: finish it first, continuing or aborting it here or with git",
             in_progress(repo.state())
         );
     }
@@ -563,7 +640,7 @@ fn check_out(repo: &Repository, target: &Commit) -> Result<()> {
 }
 
 /// The full reference name of a branch.
-fn refname_of(branch: &git2::Branch) -> Result<String> {
+pub(crate) fn refname_of(branch: &git2::Branch) -> Result<String> {
     Ok(branch
         .get()
         .name()

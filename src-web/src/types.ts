@@ -170,6 +170,27 @@ export interface RepoRefs {
   parent: ParentRepo | null;
   /** The remote a fetch reaches without one named, null where there is none to choose. */
   defaultRemote: string | null;
+  /** The operation stopped in the repository, whoever started it, null where none is. */
+  inProgress: InProgress | null;
+}
+
+/** An operation that can stop on a conflict. */
+export type Operation = 'merge' | 'rebase' | 'cherryPick' | 'revert';
+
+/** A conflicted file and the blob ids of its sides, null where a side has no file. */
+export interface Conflict {
+  path: string;
+  ancestor: string | null;
+  ours: string | null;
+  theirs: string | null;
+}
+
+/** A merge, rebase, cherry-pick, or revert stopped in the repository. */
+export interface InProgress {
+  operation: Operation;
+  conflicts: Conflict[];
+  /** The commit HEAD is at, which continuing and aborting expect. */
+  head: string;
 }
 
 /** Serde serializes the Rust enum variants camelCase — the statuses arrive lowercase. */

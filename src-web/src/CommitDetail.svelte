@@ -3,7 +3,7 @@
   import StageToggle from './StageToggle.svelte';
   import { buildFileTree } from './fileTree.ts';
   import {
-    OneWrite, branchRequest, commitRequest, stageToggle, tagRequest, type Write,
+    OneWrite, branchRequest, commitRequest, stageToggle, tagRequest, type ResetMode, type Write,
   } from './writes.ts';
   import type { NodeJson, FileChange, LocalBranch, Relative, Tag } from './types.ts';
 
@@ -22,14 +22,33 @@
     locals: LocalBranch[];
     /** The remote branches on `node`, by remote. */
     remotes: { remote: string; branch: string; tip: string }[];
+    /** The checked-out branch, which the operations of G-5 work on. */
+    head: LocalBranch | null;
     /** Performs a write on `node` (G-7), asking first where it discards work (ADR-0034);
         resolves with why it was refused, or null. */
     onWrite: (write: Write) => Promise<string | null>;
   }
   let {
     node, relatives, showAvatars, changedFiles, diffFile, onSelectFile, onJumpToRow, tags, locals,
-    remotes, onWrite,
+    remotes, head, onWrite,
   }: Props = $props();
+
+  // The reset's mode, mixed as git's default.
+  let resetMode = $state<ResetMode>('mixed');
+
+  /** An operation of G-5 on the checked-out branch with the selected commit (ADR-0033). */
+  function onto(kind: 'merge' | 'rebase' | 'cherryPick' | 'revert' | 'reset'): void {
+    if (!node || !head) return;
+    const base = { branch: head.name, tip: head.sha };
+    const commit = node.sha;
+    const name = locals.find(b => !b.isHead)?.name ?? null;
+    void write(
+      kind === 'merge' ? { kind, ...base, commit, name }
+        : kind === 'rebase' ? { kind, ...base, onto: commit }
+        : kind === 'reset' ? { kind, ...base, commit, mode: resetMode }
+        : { kind, ...base, commit },
+    );
+  }
 
   /** The place of `node` in the stash, when it is a stash node. */
   const stash = $derived(node?.stash ?? null);
@@ -280,6 +299,29 @@
                 Switch here
               </button>
             </div>
+            {#if head}
+              <div class="tag-actions commit-actions">
+                {#if head.sha !== node.sha}
+                  <button class="tag-btn" disabled={writing} onclick={() => onto('merge')}
+                          title="Merge this commit into {head.name}">Merge into {head.name}</button>
+                  <button class="tag-btn" disabled={writing} onclick={() => onto('rebase')}
+                          title="Replay {head.name} onto this commit">Rebase onto</button>
+                  <button class="tag-btn" disabled={writing} onclick={() => onto('cherryPick')}>
+                    Cherry-pick
+                  </button>
+                {/if}
+                <button class="tag-btn" disabled={writing} onclick={() => onto('revert')}>Revert</button>
+              </div>
+              <div class="tag-actions commit-actions">
+                <select class="tag-input" aria-label="Reset mode" bind:value={resetMode}>
+                  <option value="soft">soft</option>
+                  <option value="mixed">mixed</option>
+                  <option value="hard">hard</option>
+                </select>
+                <button class="tag-btn" disabled={writing} onclick={() => onto('reset')}
+                        title="Move {head.name} to this commit">Reset {head.name} here</button>
+              </div>
+            {/if}
           {/if}
         {/if}
       {/if}

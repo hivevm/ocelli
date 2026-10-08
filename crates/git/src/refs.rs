@@ -67,6 +67,7 @@ pub fn load_repo_refs(repo_path: &Path) -> Result<RepoRefs> {
         submodules: load_submodules(&repo),
         parent: find_parent(&repo),
         default_remote: default_remote(&repo, &remote_names),
+        in_progress: crate::history::stopped(&repo),
     })
 }
 

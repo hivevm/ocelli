@@ -12,7 +12,7 @@ use crate::raster::{self, Glyphs, rasterize};
 use crate::sidebar::{self, Look, RailRow, RowKind};
 use crate::theme::{Palette, lane, palette};
 use ocelli_core::model::{CommitKind, DiffLine, DiffLineKind, FileStatus, Staged};
-use ocelli_core::port::Write;
+use ocelli_core::port::{ResetMode, Write};
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::style::{Modifier, Style};
@@ -75,6 +75,37 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
         Some(Modal::Tag(tag)) => draw_tag_prompt(frame, tag, p, main),
         Some(Modal::Stash(stash)) => draw_stash_prompt(frame, stash, p, main),
         Some(Modal::Confirm(write)) => draw_confirm(frame, write, p, main),
+        Some(Modal::Reset { commit, mode }) => {
+            let short = &commit[..commit.len().min(7)];
+            let mut spans = vec![Span::styled("Mode  ", Style::new().fg(p.text_muted))];
+            for (each, name) in [
+                (ResetMode::Soft, "soft"),
+                (ResetMode::Mixed, "mixed"),
+                (ResetMode::Hard, "hard"),
+            ] {
+                let style = if each == *mode {
+                    Style::new().fg(p.accent).add_modifier(Modifier::BOLD)
+                } else {
+                    Style::new().fg(p.text_dim)
+                };
+                spans.push(Span::styled(format!("[{name}] "), style));
+            }
+            let lines = vec![
+                Line::from(spans),
+                Line::styled(
+                    "Tab mode · Enter reset, a hard one asked first · Esc cancel",
+                    Style::new().fg(p.text_dim),
+                ),
+            ];
+            draw_dialog(
+                frame,
+                p,
+                main,
+                format!(" Reset the branch to {short} "),
+                lines,
+            );
+        }
+        Some(Modal::Conflicts { selected }) => draw_conflicts(frame, app, *selected, p, main),
         Some(Modal::Branch {
             commit,
             name,
@@ -892,6 +923,10 @@ fn hints(app: &App) -> &'static str {
         Some(Modal::Tag(_) | Modal::Stash(_)) => return "type a message, or none",
         Some(Modal::Commit { .. }) => return "type the commit's message",
         Some(Modal::Branch { .. }) => return "type the branch's name",
+        Some(Modal::Reset { .. }) => return "Tab soft/mixed/hard · Enter reset",
+        Some(Modal::Conflicts { .. }) => {
+            return "j/k move · o ours · t theirs · e as edited · c continue · A abort";
+        }
         None => {}
     }
     if app.search.editing {
@@ -912,7 +947,7 @@ fn hints(app: &App) -> &'static str {
             Some(CommitKind::Working) => "j/k move · / search · c commit · s stash · Esc deselect",
             Some(CommitKind::Stash) => "j/k move · / search · a/p/d apply/pop/drop · Esc deselect",
             _ => {
-                "j/k move · ]/[ }/{ jump · / search · y copy · t tag · b branch · w switch · s stash"
+                "j/k move · ]/[ }/{ jump · / search · y copy · t/b/w tag/branch/switch · s stash · m/R/C/V/X merge/rebase/pick/revert/reset"
             }
         },
         Focus::Detail => "j/k link · Enter jump · y copy · t tag · b branch · w switch",
@@ -921,6 +956,57 @@ fn hints(app: &App) -> &'static str {
         }
         Focus::Files => "j/k move · Enter diff/fold · t tree/flat",
     }
+}
+
+/// What the status bar says first while an operation is stopped: which, how many files still
+/// conflict, and the key to resolve them (ADR-0033).
+fn stopped_note(app: &App) -> String {
+    match app.data.as_ref().and_then(|d| d.in_progress.as_ref()) {
+        Some(stopped) => format!(
+            " ⚠ {} in progress, {} conflicted · ! resolve ",
+            stopped.operation.name(),
+            stopped.conflicts.len()
+        ),
+        None => String::new(),
+    }
+}
+
+/// The conflicted files of the operation in progress, the cursor on `selected` (ADR-0033).
+fn draw_conflicts(frame: &mut Frame, app: &App, selected: usize, p: &Palette, main: Rect) {
+    let Some(stopped) = app.data.as_ref().and_then(|d| d.in_progress.as_ref()) else {
+        return;
+    };
+    // The dialog opens a third down; the rows below it hold the list, a window that follows the
+    // selection where the list is longer.
+    let room = usize::from((main.height - main.height / 3).saturating_sub(3)).max(1);
+    let first = selected.saturating_sub(room - 1);
+    let mut lines: Vec<Line> = stopped
+        .conflicts
+        .iter()
+        .enumerate()
+        .skip(first)
+        .take(room)
+        .map(|(i, c)| {
+            let style = if i == selected {
+                Style::new().fg(p.text_bright).bg(p.bg_sel)
+            } else {
+                Style::new().fg(p.text)
+            };
+            Line::styled(format!("  {}", c.path), style)
+        })
+        .collect();
+    if lines.is_empty() {
+        lines.push(Line::styled(
+            "  Nothing conflicts any more: c continues the operation",
+            Style::new().fg(p.text_muted),
+        ));
+    }
+    lines.push(Line::styled(
+        "o ours · t theirs · e as edited · c continue · A abort · Esc close",
+        Style::new().fg(p.text_dim),
+    ));
+    let title = format!(" {} in progress ", stopped.operation.name());
+    draw_dialog(frame, p, main, title, lines);
 }
 
 fn draw_status(frame: &mut Frame, app: &App, p: &Palette, area: Rect) {
@@ -938,8 +1024,11 @@ fn draw_status(frame: &mut Frame, app: &App, p: &Palette, area: Rect) {
     let [l, r] = Layout::horizontal([Constraint::Fill(1), Constraint::Length(width)]).areas(area);
     let bar = Style::new().bg(p.bg_chrome);
     frame.render_widget(
-        Paragraph::new(format!(" {}", app.notice.as_ref().unwrap_or(&app.status)))
-            .style(bar.fg(p.text_muted)),
+        Paragraph::new(Line::from(vec![
+            Span::styled(stopped_note(app), Style::new().fg(p.amber)),
+            Span::raw(format!(" {}", app.notice.as_ref().unwrap_or(&app.status))),
+        ]))
+        .style(bar.fg(p.text_muted)),
         l,
     );
     frame.render_widget(Paragraph::new(right).style(bar), r);
@@ -962,6 +1051,32 @@ mod tests {
         (0..height)
             .map(|y| (0..width).map(|x| buf[(x, y)].symbol()).collect::<String>())
             .collect()
+    }
+
+    #[test]
+    fn a_long_list_of_conflicts_scrolls_with_the_selection() {
+        let mut app = loaded_app();
+        let conflicts = (0..40)
+            .map(|i| ocelli_core::model::Conflict {
+                path: format!("file{i:02}"),
+                ancestor: None,
+                ours: None,
+                theirs: None,
+            })
+            .collect();
+        app.data.as_mut().unwrap().in_progress = Some(ocelli_core::model::InProgress {
+            operation: ocelli_core::model::Operation::Merge,
+            conflicts,
+            head: "d".into(),
+        });
+        press(&mut app, KeyCode::Char('!'));
+        for _ in 0..39 {
+            press(&mut app, KeyCode::Char('j'));
+        }
+        let rows = screen(&mut app, 100, 30).join("\n");
+        assert!(rows.contains("file39"), "{rows}");
+        assert!(!rows.contains("file00"), "{rows}");
+        assert!(rows.contains("A abort · Esc close"), "{rows}");
     }
 
     /// The graph pane's content lines, right of the sidebar and its border.

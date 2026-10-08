@@ -117,7 +117,79 @@ pub enum Write {
     /// remote's branch of its name, set as its upstream, where it has none; never by force
     /// (ADR-0035).
     Push { branch: String, tip: String },
+    /// Merges `commit`, named `name` in the message where it is a branch, into the checked-out
+    /// branch `branch`, expected at `tip` (ADR-0033).
+    Merge {
+        branch: String,
+        tip: String,
+        commit: String,
+        name: Option<String>,
+    },
+    /// Rebases the checked-out branch `branch`, expected at `tip`, onto `onto` (ADR-0033).
+    Rebase {
+        branch: String,
+        tip: String,
+        onto: String,
+    },
+    /// Applies `commit` onto the checked-out branch `branch`, expected at `tip`, and commits it
+    /// (ADR-0033).
+    CherryPick {
+        branch: String,
+        tip: String,
+        commit: String,
+    },
+    /// Applies the inverse of `commit` onto the checked-out branch `branch`, expected at `tip`,
+    /// and commits it (ADR-0033).
+    Revert {
+        branch: String,
+        tip: String,
+        commit: String,
+    },
+    /// Moves the checked-out branch `branch`, expected at `tip`, to `commit`, as `mode` says
+    /// (ADR-0033).
+    Reset {
+        branch: String,
+        tip: String,
+        commit: String,
+        mode: ResetMode,
+    },
+    /// Resolves the conflicted file `path`, whose conflict is expected to be `conflict`, as
+    /// `take` says (ADR-0033).
+    Resolve {
+        path: String,
+        conflict: Conflict,
+        take: Take,
+    },
+    /// Continues the operation in progress, `HEAD` expected at `head`, once nothing conflicts
+    /// (ADR-0033).
+    Continue { operation: Operation, head: String },
+    /// Aborts the operation in progress, back to where the developer was (ADR-0033).
+    Abort { operation: Operation, head: String },
 }
+
+/// How a reset moves the checked-out branch, as `git reset` names it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum ResetMode {
+    /// The branch alone.
+    Soft,
+    /// The branch and the index.
+    Mixed,
+    /// The branch, the index, and the working directory.
+    Hard,
+}
+
+/// Which side of a conflicted file a resolution takes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum Take {
+    Ours,
+    Theirs,
+    /// The working directory's file, as the developer edited it.
+    AsEdited,
+}
+
+pub use crate::model::{Conflict, Operation};
 
 impl Write {
     /// What the write discards, in the words a confirmation names it with, or `None` for a write
@@ -137,7 +209,20 @@ impl Write {
             | Write::DeleteBranch { merged: true, .. }
             | Write::Fetch { .. }
             | Write::Pull { .. }
-            | Write::Push { .. } => None,
+            | Write::Push { .. }
+            | Write::Merge { .. }
+            | Write::Rebase { .. }
+            | Write::CherryPick { .. }
+            | Write::Revert { .. }
+            | Write::Reset {
+                mode: ResetMode::Soft | ResetMode::Mixed,
+                ..
+            }
+            | Write::Resolve {
+                take: Take::AsEdited,
+                ..
+            }
+            | Write::Continue { .. } => None,
             Write::DeleteTag {
                 name,
                 annotated: true,
@@ -152,6 +237,21 @@ impl Write {
             }
             Write::DeleteBranch { name, .. } => Some(format!(
                 "the branch {name}, which is not merged, and the commits only it reaches"
+            )),
+            Write::Reset {
+                mode: ResetMode::Hard,
+                branch,
+                ..
+            } => Some(format!(
+                "the uncommitted changes to {branch}'s files, and its commits after the one reset to"
+            )),
+            Write::Resolve { path, take, .. } => Some(format!(
+                "{path} as the working directory has it, any edit to it included, for {} side",
+                if *take == Take::Ours { "our" } else { "their" }
+            )),
+            Write::Abort { operation, .. } => Some(format!(
+                "the {} in progress and every conflict resolved in it",
+                operation.name()
             )),
         }
     }
@@ -276,6 +376,44 @@ mod tests {
             merged,
         };
         assert_eq!(delete_branch(true).discards(), None);
+        let reset = |mode| Write::Reset {
+            branch: "main".into(),
+            tip: "t".into(),
+            commit: "c".into(),
+            mode,
+        };
+        assert_eq!(reset(ResetMode::Soft).discards(), None);
+        assert_eq!(reset(ResetMode::Mixed).discards(), None);
+        assert!(reset(ResetMode::Hard).discards().is_some());
+        let abort = Write::Abort {
+            operation: Operation::Rebase,
+            head: "h".into(),
+        };
+        assert_eq!(
+            abort.discards().as_deref(),
+            Some("the rebase in progress and every conflict resolved in it")
+        );
+        let resolve = |take| Write::Resolve {
+            path: "f".into(),
+            conflict: Conflict {
+                path: "f".into(),
+                ancestor: None,
+                ours: None,
+                theirs: None,
+            },
+            take,
+        };
+        assert_eq!(resolve(Take::AsEdited).discards(), None);
+        assert_eq!(
+            resolve(Take::Theirs).discards().as_deref(),
+            Some("f as the working directory has it, any edit to it included, for their side")
+        );
+        assert!(resolve(Take::Ours).discards().is_some());
+        let carry_on = Write::Continue {
+            operation: Operation::Rebase,
+            head: "h".into(),
+        };
+        assert_eq!(carry_on.discards(), None);
         assert_eq!(
             delete_branch(false).discards().as_deref(),
             Some("the branch side, which is not merged, and the commits only it reaches")

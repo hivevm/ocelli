@@ -1676,3 +1676,29 @@ fn a_push_follows_push_default_as_git_push_does() {
         .unwrap_err();
     assert!(error.to_string().contains("local branch"), "{error}");
 }
+
+#[test]
+// Verifies: ADR-0033, G-4
+fn a_path_is_unstaged_and_diffed_as_written_never_as_a_pattern() {
+    let scratch = with_file("stage-pattern");
+    let d = &scratch.0;
+    for name in ["x[ab].txt", "xa.txt"] {
+        std::fs::write(d.join(name), "base\n").unwrap();
+    }
+    git(d, &["add", "--all"]);
+    git(d, &["commit", "--quiet", "-m", "both"]);
+    for name in ["x[ab].txt", "xa.txt"] {
+        std::fs::write(d.join(name), "changed\n").unwrap();
+    }
+    git(d, &["add", "--all"]);
+    GitWriter.write(d, &unstage_in(d, "x[ab].txt")).unwrap();
+    assert_eq!(staged_names(d), "M\txa.txt");
+    let diff = ocelli_git::GitReader
+        .load_file_diff(d, ocelli_core::model::WORKDIR_SHA, "x[ab].txt")
+        .unwrap();
+    let changed = diff
+        .iter()
+        .filter(|l| l.content.contains("changed"))
+        .count();
+    assert_eq!(changed, 1, "one file's change, not xa.txt's too: {diff:?}");
+}

@@ -9,6 +9,7 @@
   import RepoSidebar from './RepoSidebar.svelte';
   import StatusBar, { READY_STATUS } from './StatusBar.svelte';
   import ConfirmDialog from './ConfirmDialog.svelte';
+  import InProgress from './InProgress.svelte';
   import { refShas } from './refTree.ts';
   import type { RowRange } from './rowWindow.ts';
   import { Newest } from './hostAnswers.ts';
@@ -368,6 +369,19 @@
       after it shows the result, the commit selected again. Resolves with why the host refused
       it, or null once written or kept. */
   async function performWrite(write: Write): Promise<string | null> {
+    // One write at a time, from whichever panel asks for it.
+    if (writeRunning) return 'A write is still running';
+    writeRunning = true;
+    try {
+      return await performOneWrite(write);
+    } finally {
+      writeRunning = false;
+    }
+  }
+
+  let writeRunning = false;
+
+  async function performOneWrite(write: Write): Promise<string | null> {
     notice = null;
     let done: Outcome;
     try {
@@ -529,6 +543,9 @@
 <svelte:window onkeydown={onWindowKeydown} />
 
 <!-- ── Main content area ──────────────────────────────────────────────────── -->
+{#if repoRefs?.inProgress}
+  <InProgress stopped={repoRefs.inProgress} onWrite={performWrite} />
+{/if}
 <div id="main">
   <div id="top-pane">
     <RepoSidebar
@@ -587,6 +604,7 @@
       tags={selectedTags}
       locals={selectedLocals}
       remotes={selectedRemotes}
+      head={repoRefs?.locals.find(b => b.isHead) ?? null}
       onWrite={performWrite}
     />
   </div><!-- end #top-pane -->
