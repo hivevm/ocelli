@@ -1,5 +1,8 @@
 //! End-to-end tests of `ocelli-measure crossings` on repositories built with git.
 
+#[path = "../../git/tests/git_command/mod.rs"]
+mod git_command;
+use git_command::git_command;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output, Stdio};
@@ -25,9 +28,7 @@ impl Drop for Scratch {
 
 /// Runs git in `dir` with a fixed identity and time, and returns its standard output.
 fn git(dir: &Path, args: &[&str]) -> String {
-    let out = Command::new("git")
-        .arg("-C")
-        .arg(dir)
+    let out = git_command(dir)
         .args([
             "-c",
             "user.name=Fixture",
@@ -51,9 +52,7 @@ fn git(dir: &Path, args: &[&str]) -> String {
 fn fast_import(dir: &Path, stream: &str) {
     std::fs::create_dir_all(dir).unwrap();
     git(dir, &["init", "--quiet", "--bare"]);
-    let mut child = Command::new("git")
-        .arg("-C")
-        .arg(dir)
+    let mut child = git_command(dir)
         .args(["fast-import", "--quiet"])
         .stdin(Stdio::piped())
         .spawn()
@@ -223,9 +222,7 @@ fn measuring_a_repository_starts_none_of_the_programs_its_configuration_names() 
     let object = format!(
         "tree {tree}\nparent {parent}\nauthor F <f@x> 1767225600 +0000\ncommitter F <f@x> 1767225600 +0000\ngpgsig -----BEGIN PGP SIGNATURE-----\n \n -----END PGP SIGNATURE-----\n\nsigned\n"
     );
-    let mut hash = Command::new("git")
-        .arg("-C")
-        .arg(&dir)
+    let mut hash = git_command(&dir)
         .args(["hash-object", "-t", "commit", "-w", "--stdin"])
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())

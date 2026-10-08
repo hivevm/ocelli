@@ -4,12 +4,17 @@
 //! identity in the global and system configuration too, so this test points those at an empty
 //! directory, which holds for the whole process: it runs in a binary of its own.
 
+#![allow(
+    clippy::disallowed_methods,
+    reason = "a test sets a repository up by hand, the way a developer would"
+)]
 #![cfg(unix)]
 
+mod git_command;
+use git_command::git_command;
 use git2::ConfigLevel;
 use ocelli_core::port::{RepositoryWriter, Write};
 use ocelli_git::GitWriter;
-use std::process::Command;
 
 #[test]
 #[allow(unsafe_code)]
@@ -25,9 +30,7 @@ fn an_annotated_tag_without_an_identity_is_refused_with_nothing_changed() {
         unsafe { git2::opts::set_search_path(level, &empty) }.unwrap();
     }
     let git = |args: &[&str]| {
-        let out = Command::new("git")
-            .arg("-C")
-            .arg(&repo)
+        let out = git_command(&repo)
             .args(["-c", "user.name=F", "-c", "user.email=f@example.invalid"])
             .args(args)
             .output()

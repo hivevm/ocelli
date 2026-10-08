@@ -134,8 +134,7 @@ mod tests {
                 status: FileStatus::Modified,
                 additions: 0,
                 deletions: 0,
-                staged: None,
-                shown: None,
+                staging: None,
             })
             .collect()
     }

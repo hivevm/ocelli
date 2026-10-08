@@ -56,6 +56,9 @@ golden path and the test pattern an agent copies from are named here.
   ([ADR-0030](adr/0030-edge-shapes-and-tracks-out-of-the-main-line.md)). `History` in `history.rs`
   keeps the graph laid out so far and answers the front ends' reads of it: a window of rows with the
   edges crossing it, search, and lineage ([ADR-0031](adr/0031-front-ends-read-row-windows.md)).
+  `transfer.rs` decides the fetch, pull, and push of the checked-out branch the refs make possible,
+  or why there is none, and which transfer can be stopped, and `actions.rs` which operations of
+  G-5 a commit offers on the checked-out branch, for both front ends to draw.
   `load.rs` runs a load session through the port, and a `LoadSession` is what a front end keeps of
   it, its `History` and its status line, for both front ends and the measurement alike.
 - **Git adapter** (`crates/git`, `ocelli-git`) — `GitReader`, the repository port implemented with
@@ -65,28 +68,32 @@ golden path and the test pattern an agent copies from are named here.
   and diffs ([ADR-0019](adr/0019-git2-repository-reader.md),
   [ADR-0016](adr/0016-history-loads-in-chunks.md),
   [ADR-0024](adr/0024-synthetic-nodes-in-the-first-chunk.md)); the walk runs in commit-date order
-  and turns libgit2's object cache off for the whole process. `history.rs` holds the operations of
-  G-5 and G-6 from a clean tree, stopping on a conflict in git's own state and resolving one file by
-  file ([ADR-0033](adr/0033-writes-what-git-writes.md),
+  and turns libgit2's object cache off for the whole process. `operations.rs` holds the operations
+  of G-5 and G-6 from a clean tree, stopping on a conflict in git's own state and resolving one
+  file by file ([ADR-0033](adr/0033-writes-what-git-writes.md),
   [ADR-0033](adr/0033-writes-what-git-writes.md)); the refs carry the
   operation in progress with its conflicts, read from git's state whoever started it. `GitWriter`
-  implements the writer port in `write.rs`, each write checked against the state it names before
-  anything changes, and returns the commit a write made
+  implements the writer port in `write.rs`, which dispatches each write, checked against the state
+  it names before anything changes by the checks of `guard.rs`, the index and the working
+  directory written through `checkout.rs` and a message cleaned up by `message.rs` as `git` cleans
+  it up, and returns the commit a write made
   ([ADR-0033](adr/0033-writes-what-git-writes.md)); a commit or an annotated tag
   is refused where the configuration asks for a signature
   ([ADR-0033](adr/0033-writes-what-git-writes.md)). A fetch, a pull, which then
   fast-forwards the checked-out branch, and a push, never by force and where `push.default` sends
-  it, reach the remote through libgit2's own transports with the SSH agent and the credential helper
-  of the developer's global and system configuration, a helper asked only for a remote named by its
-  domain over HTTPS, and with libgit2's server timeouts set once for the process, the git adapter's
-  one `unsafe` block
+  it, live in `remote.rs` and reach the remote through libgit2's own transports with the SSH agent
+  and the credential helper of the developer's global and system configuration, a helper asked
+  only for a remote named by its domain over HTTPS, and with libgit2's server timeouts set once
+  for the process, the git adapter's one `unsafe` block
   ([ADR-0035](adr/0035-remotes-through-libgit2-transports.md)). The refs
-  name the remote a fetch reaches without one named. Neither `GitReader` nor `GitWriter` starts a
-  program a repository names, a hook included (Q-4).
+  name the default remote. Neither `GitReader` nor `GitWriter` starts a program a repository
+  names, a hook included (Q-4).
 - **Terminal application** (`crates/tui`, `ocelli-cli`) — draws the core's graph with box-drawing
   characters on ratatui; it loads and lays out the history chunk by chunk on a loader thread, keeps
   the core's `History` at its event loop, reads files and diffs through `GitReader` on a worker
-  thread, writes through `GitWriter` on a thread of its own, one write at a time, showing a
+  thread, writes through `GitWriter` on a thread of its own, one write at a time, which
+  `writes.rs` holds with the requests the keys build, as `writes.ts` does for the web interface,
+  showing a
   transfer's progress in the status line and stopping a fetch or a pull on `Esc`, lists an
   operation in progress with its conflicts, resolved, continued, or aborted from there, and keeps
   its view state in a file

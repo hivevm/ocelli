@@ -3,10 +3,13 @@
 //! conflict file by file, then continuing or aborting the operation, whoever started it
 //! (ADR-0033). No hook and no program the repository names runs (ADR-0033).
 
-use crate::write::{
-    NO_IDENTITY, branch_as_shown, check_out, entry_as_in, in_progress, refname_of,
+use crate::checkout::{check_out, entry_as_in};
+use crate::git::WORKTREE;
+use crate::guard::{
+    NO_IDENTITY, branch_as_shown, nothing_in_progress, operation_of, refname_of,
     refuse_where_signing_is_asked,
 };
+use crate::message::{Made, cleaned};
 use anyhow::{Context, Result, bail};
 use git2::build::CheckoutBuilder;
 use git2::{
@@ -24,12 +27,7 @@ fn clean_start<'r>(repo: &'r Repository, name: &str, tip: &str) -> Result<git2::
     if !branch.is_head() {
         bail!("'{name}' is not checked out: the operation works on the checked-out branch");
     }
-    if repo.state() != RepositoryState::Clean {
-        bail!(
-            "a {} is in progress: finish or abort it first",
-            in_progress(repo.state())
-        );
-    }
+    nothing_in_progress(repo, false)?;
     let mut options = StatusOptions::new();
     options.include_untracked(false).include_ignored(false);
     let changed: Vec<String> = repo
@@ -123,11 +121,15 @@ pub(crate) fn merge(
         .skip(1)
         .map(|l| format!("{l}\n"))
         .collect();
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "a file of git's own directory, not of the working directory"
+    )]
     std::fs::write(&prepared, format!("{subject}\n{rest}"))?;
     if repo.index()?.has_conflicts() {
         return Ok(None);
     }
-    commit_in_progress(repo, Operation::Merge, &me, None).map(Some)
+    commit_in_progress(repo, Operation::Merge, Made::Merged, &me, None).map(Some)
 }
 
 /// Whether git leaves the branch merged into out of a merge's subject: `merge.suppressDest` holds
@@ -321,7 +323,7 @@ fn apply(
         );
     }
     let author = (operation == Operation::CherryPick).then(|| picked.author().to_owned());
-    commit_in_progress(repo, operation, &me, author.as_ref()).map(Some)
+    commit_in_progress(repo, operation, Made::Taken, &me, author.as_ref()).map(Some)
 }
 
 /// Commits what the stopped `operation` left in the index, with the message it prepared, by
@@ -329,6 +331,7 @@ fn apply(
 fn commit_in_progress(
     repo: &Repository,
     operation: Operation,
+    made: Made,
     me: &Signature,
     author: Option<&Signature>,
 ) -> Result<String> {
@@ -353,7 +356,7 @@ fn commit_in_progress(
         }
     }
     let prepared = std::fs::read_to_string(repo.path().join("MERGE_MSG")).unwrap_or_default();
-    let message = git2::message_prettify(without_conflict_list(&prepared), None)?;
+    let message = cleaned(repo, &prepared, made)?;
     if message.is_empty() {
         bail!("the {} has no message to commit with", operation.name());
     }
@@ -404,6 +407,7 @@ fn run_rebase(
             // libgit2 has moved on to the step it could not apply: a later commit would take it
             // for one resolved to nothing and drop it, so it is marked as never applied.
             if let Some(dir) = rebase_dir(repo) {
+                #[expect(clippy::disallowed_methods, reason = "a file of git's own directory")]
                 std::fs::write(dir.join(UNAPPLIED), "")?;
             }
             return Err(in_the_way(e).into());
@@ -434,12 +438,7 @@ pub(crate) fn reset(
     if !branch.is_head() {
         bail!("'{name}' is not checked out: a reset moves the checked-out branch");
     }
-    if repo.state() != RepositoryState::Clean {
-        bail!(
-            "a {} is in progress: finish or abort it first",
-            in_progress(repo.state())
-        );
-    }
+    nothing_in_progress(repo, false)?;
     let target = commit_of(repo, commit)?;
     let kind = match mode {
         ResetMode::Soft => ResetType::Soft,
@@ -453,15 +452,7 @@ pub(crate) fn reset(
 /// The operation stopped in the repository, as `git status` reads it, with its conflicted files
 /// (ADR-0033).
 pub(crate) fn stopped(repo: &Repository) -> Option<InProgress> {
-    let operation = match repo.state() {
-        RepositoryState::Merge => Operation::Merge,
-        RepositoryState::Revert | RepositoryState::RevertSequence => Operation::Revert,
-        RepositoryState::CherryPick | RepositoryState::CherryPickSequence => Operation::CherryPick,
-        RepositoryState::Rebase
-        | RepositoryState::RebaseInteractive
-        | RepositoryState::RebaseMerge => Operation::Rebase,
-        _ => return None,
-    };
+    let operation = operation_of(repo.state())?;
     let index = repo.index().ok()?;
     let conflicts = conflicts_of(&index);
     let head = repo.head().ok()?.peel_to_commit().ok()?.id().to_string();
@@ -563,6 +554,10 @@ pub(crate) fn resolve(
                     index.add(&entry)?;
                     index.write()?;
                     let mut checkout = CheckoutBuilder::new();
+                    #[expect(
+                        clippy::disallowed_methods,
+                        reason = "the pattern matching is turned off"
+                    )]
                     checkout.force().disable_pathspec_match(true).path(path);
                     if let Err(e) = repo.checkout_index(Some(&mut index), Some(&mut checkout)) {
                         // The file could not be written: the conflict stays as it was.
@@ -578,6 +573,10 @@ pub(crate) fn resolve(
                 None => {
                     index.write()?;
                     if there.is_some_and(|m| !m.is_dir()) {
+                        #[expect(
+                            clippy::disallowed_methods,
+                            reason = "within() refused a link or a file above it, and a link itself is removed, never followed"
+                        )]
                         std::fs::remove_file(&file)?;
                     }
                 }
@@ -627,13 +626,6 @@ fn within(root: &Path, path: &str, its_own: &dyn Fn(&str) -> bool) -> Result<()>
     }
     Ok(())
 }
-
-/// A file of the working directory the index does not hold as it is.
-const WORKDIR_CHANGES: Status = Status::WT_NEW
-    .union(Status::WT_MODIFIED)
-    .union(Status::WT_DELETED)
-    .union(Status::WT_TYPECHANGE)
-    .union(Status::WT_RENAMED);
 
 /// The bits of an index entry's flags that hold its stage.
 const STAGE_MASK: u16 = 0x3000;
@@ -689,9 +681,14 @@ pub(crate) fn continue_stopped(
         Operation::CherryPick => {
             let picked = repo.find_reference("CHERRY_PICK_HEAD")?.peel_to_commit()?;
             let author = picked.author().to_owned();
-            commit_in_progress(repo, operation, &me, Some(&author)).map(Some)
+            commit_in_progress(repo, operation, Made::PickContinued, &me, Some(&author)).map(Some)
         }
-        _ => commit_in_progress(repo, operation, &me, None).map(Some),
+        Operation::Revert => {
+            commit_in_progress(repo, operation, Made::PickContinued, &me, None).map(Some)
+        }
+        Operation::Merge => {
+            commit_in_progress(repo, operation, Made::MergeContinued, &me, None).map(Some)
+        }
     }
 }
 
@@ -729,7 +726,7 @@ pub(crate) fn abort(repo: &Repository, operation: Operation, head: &str) -> Resu
         .statuses(Some(&mut options))?
         .iter()
         .filter_map(|e| e.path().map(|p| (p.to_string(), e.status())))
-        .filter(|(_, s)| s.intersects(WORKDIR_CHANGES))
+        .filter(|(_, s)| s.intersects(WORKTREE))
         .collect();
     // A file the operation brought in cleanly or removed, which the developer changed or made
     // since, stays, as `git <operation> --abort` refuses rather than lose it.
@@ -788,6 +785,10 @@ pub(crate) fn abort(repo: &Repository, operation: Operation, head: &str) -> Resu
             .remove_untracked(true)
             .disable_pathspec_match(true);
         for path in &touched {
+            #[expect(
+                clippy::disallowed_methods,
+                reason = "the pattern matching is turned off"
+            )]
             checkout.path(path.as_str());
         }
         // Each moved aside, into the repository's own directory, and back should the abort fail.
@@ -795,7 +796,13 @@ pub(crate) fn abort(repo: &Repository, operation: Operation, head: &str) -> Resu
         let mut moved = 0;
         let mut done = Ok(());
         for (i, dir) in own_parents.iter().enumerate() {
-            done = std::fs::rename(root.join(dir), aside(i)).map_err(anyhow::Error::from);
+            #[expect(
+                clippy::disallowed_methods,
+                reason = "a file or link the operation made, unchanged, moved aside into git's \
+                          own directory; a link is moved, never followed"
+            )]
+            let renamed = std::fs::rename(root.join(dir), aside(i));
+            done = renamed.map_err(anyhow::Error::from);
             if done.is_err() {
                 break;
             }
@@ -808,13 +815,25 @@ pub(crate) fn abort(repo: &Repository, operation: Operation, head: &str) -> Resu
         }
         if done.is_ok() {
             for i in 0..moved {
+                #[expect(
+                    clippy::disallowed_methods,
+                    reason = "what was moved aside into git's own directory"
+                )]
                 std::fs::remove_file(aside(i))?;
             }
         }
         if let Err(e) = done {
             for (i, dir) in own_parents.iter().enumerate().take(moved) {
+                #[expect(
+                    clippy::disallowed_methods,
+                    reason = "what was moved aside put back as it was"
+                )]
                 let _ = std::fs::rename(aside(i), root.join(dir));
             }
+            #[expect(
+                clippy::disallowed_methods,
+                reason = "the index file of git's own directory, put back as it was"
+            )]
             std::fs::write(&index_file, kept)?;
             bail!(
                 "the {} could not be aborted, its conflicts kept: {e}",
@@ -875,6 +894,10 @@ fn abort_rebase(repo: &Repository) -> Result<()> {
     }
     // A hard reset clears libgit2's own record of the rebase already.
     if dir.exists() {
+        #[expect(
+            clippy::disallowed_methods,
+            reason = "the rebase's state in git's own directory"
+        )]
         std::fs::remove_dir_all(&dir)?;
     }
     Ok(())
@@ -913,29 +936,6 @@ fn in_the_way(e: git2::Error) -> git2::Error {
     } else {
         e
     }
-}
-
-/// A message `MERGE_MSG` holds, without the list of conflicts libgit2 appends to it.
-fn without_conflict_list(prepared: &str) -> String {
-    let mut kept = Vec::new();
-    let mut listing = false;
-    for line in prepared.lines() {
-        if line
-            .trim_start_matches('#')
-            .trim()
-            .eq_ignore_ascii_case("conflicts:")
-            && line.starts_with('#')
-        {
-            listing = true;
-            continue;
-        }
-        if listing && line.starts_with('#') {
-            continue;
-        }
-        listing = false;
-        kept.push(line);
-    }
-    kept.join("\n")
 }
 
 #[cfg(test)]

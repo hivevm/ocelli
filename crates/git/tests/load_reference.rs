@@ -5,6 +5,11 @@
 //! and lists its refs, changed files, and diffs exactly as the reference implementation did,
 //! with a clean and with a dirty working tree.
 
+#![allow(
+    clippy::disallowed_methods,
+    reason = "a test sets a repository up by hand, the way a developer would"
+)]
+
 mod fixture_repo;
 
 use ocelli_core::graph::build_graph;
@@ -146,12 +151,12 @@ fn a_fixed_repository_loads_as_the_reference_did() {
         .iter_mut()
         .map(|f| {
             let f = f.as_object_mut().unwrap();
-            let shown = f.remove("shown").unwrap();
+            let staging = f.remove("staging").unwrap();
             assert!(
-                shown["workdir"].is_string(),
+                staging["shown"]["workdir"].is_string(),
                 "both files are in the working directory"
             );
-            f.remove("staged").unwrap()
+            staging["staged"].clone()
         })
         .collect();
     assert!(

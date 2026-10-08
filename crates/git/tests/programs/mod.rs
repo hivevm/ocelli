@@ -121,7 +121,7 @@ pub fn set_everywhere(repo: &Path, tools: &Path) -> Markers {
 /// The hooks `git help githooks` documents, where its manual is installed.
 #[allow(dead_code)] // only the test of reading compares the list with git's manual
 pub fn documented_hooks() -> Option<Vec<String>> {
-    let out = std::process::Command::new("git")
+    let out = crate::git_command::git_command(std::env::temp_dir())
         .args(["help", "githooks"])
         .env("MANPAGER", "cat")
         .env("PAGER", "cat")

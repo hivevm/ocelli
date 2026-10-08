@@ -1,0 +1,139 @@
+[
+  {
+    "kind": "createTag",
+    "name": "v1",
+    "commit": "c",
+    "message": "The first release"
+  },
+  {
+    "kind": "deleteTag",
+    "name": "v1",
+    "commit": "c",
+    "annotated": true
+  },
+  {
+    "kind": "createStash",
+    "message": "wip",
+    "untracked": true
+  },
+  {
+    "kind": "applyStash",
+    "index": 1,
+    "commit": "s",
+    "drop": true
+  },
+  {
+    "kind": "dropStash",
+    "index": 1,
+    "commit": "s"
+  },
+  {
+    "kind": "stageFile",
+    "path": "f",
+    "shown": "b"
+  },
+  {
+    "kind": "unstageFile",
+    "path": "f",
+    "shown": "b"
+  },
+  {
+    "kind": "commit",
+    "message": "Change f",
+    "head": "h"
+  },
+  {
+    "kind": "createBranch",
+    "name": "topic",
+    "commit": "c",
+    "switch": true
+  },
+  {
+    "kind": "switchBranch",
+    "name": "topic",
+    "tip": "t"
+  },
+  {
+    "kind": "detach",
+    "commit": "c"
+  },
+  {
+    "kind": "trackRemote",
+    "remote": "origin",
+    "branch": "topic",
+    "tip": "t"
+  },
+  {
+    "kind": "deleteBranch",
+    "name": "topic",
+    "tip": "t",
+    "merged": false
+  },
+  {
+    "kind": "fetch",
+    "remote": "origin"
+  },
+  {
+    "kind": "pull",
+    "branch": "main",
+    "tip": "t"
+  },
+  {
+    "kind": "push",
+    "branch": "main",
+    "tip": "t"
+  },
+  {
+    "kind": "merge",
+    "branch": "main",
+    "tip": "t",
+    "commit": "c",
+    "name": "topic"
+  },
+  {
+    "kind": "rebase",
+    "branch": "topic",
+    "tip": "t",
+    "onto": "c"
+  },
+  {
+    "kind": "cherryPick",
+    "branch": "main",
+    "tip": "t",
+    "commit": "c"
+  },
+  {
+    "kind": "revert",
+    "branch": "main",
+    "tip": "t",
+    "commit": "c"
+  },
+  {
+    "kind": "reset",
+    "branch": "main",
+    "tip": "t",
+    "commit": "c",
+    "mode": "hard"
+  },
+  {
+    "kind": "resolve",
+    "path": "f",
+    "conflict": {
+      "path": "f",
+      "ancestor": "a",
+      "ours": "o",
+      "theirs": "t"
+    },
+    "take": "asEdited"
+  },
+  {
+    "kind": "continue",
+    "operation": "cherryPick",
+    "head": "h"
+  },
+  {
+    "kind": "abort",
+    "operation": "merge",
+    "head": "h"
+  }
+]

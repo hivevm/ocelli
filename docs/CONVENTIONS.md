@@ -21,8 +21,11 @@ skimmed. The design revision drops what prevented nothing
   deriving a file tree, and pairing diff lines are each a function over plain data in a module of
   its own (`refTree.ts`, `rowWindow.ts`, `edgePath.ts`, `fileTree.ts`, `diffSplit.ts`), and the
   component only draws what it returns; so is ordering a host's answers, which drops one from an
-  older load or overtaken by a newer request (`hostAnswers.ts`). A
-  component needs a browser to test and a pane a terminal; a function needs neither.
+  older load or overtaken by a newer request (`hostAnswers.ts`), and matching a commit's ref chips
+  to the branches and tags they switch to or delete (`refChips.ts`), and the core's answer to which
+  transfer the toolbar offers and which operations a commit does (`transfers.ts`, `actions.ts`,
+  held to the core's answers by fixtures the core writes). A component needs a browser
+  to test and a pane a terminal; a function needs neither.
 - **A behaviour both front ends offer lives once in the core; only drawing is ported.** Search,
   lineage, and a load's bookkeeping, its chunks, status, and growing search and selection, belong
   in the core for both front ends; the terminal application's file tree and diff split, which only
@@ -86,10 +89,11 @@ skimmed. The design revision drops what prevented nothing
   again after the wait, under a lock on what it moves, since a commit can land meanwhile. Every
   repository Ocelli touches stays one `git` knows what to do with. A path goes to libgit2 as a
   path, never as a pattern, and the working directory is written only through libgit2's checkout,
-  which writes a link as a link and a file with its mode, never below a link. `git`'s state is
-  more than the repository's state: a sequencer, an autostash, a file changed since an operation
-  stopped. A write's tests include a path with `[` or `*` in it, a link, an executable file, and
-  each such state.
+  which writes a link as a link and a file with its mode, never below a link; `clippy.toml` of
+  the git adapter refuses the methods that do either, and a call that stays says why. `git`'s
+  state is more than the repository's state: a sequencer, an autostash, a file changed since an
+  operation stopped. A write's tests include a path with `[` or `*` in it, a link, an executable
+  file, and each such state.
 - **A control that writes takes no second press while its write runs, and offers no stop it
   cannot keep.** A second click on a write that has not answered yet writes twice, or is refused
   for a state the first one changed; a Cancel on a push, which libgit2 cannot stop once its

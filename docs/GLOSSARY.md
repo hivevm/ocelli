@@ -22,6 +22,10 @@ to invent.
 - **Conflict** — a file the index holds in more than one stage after an operation in progress
   stopped on it; resolved by taking ours, taking theirs, or as the developer edited it.
   _Avoid:_ clash, collision.
+- **Default remote** — the remote a fetch reaches without one named, and a push of a branch
+  without an upstream: the checked-out branch's upstream's remote, else `origin`, else the only
+  remote there is.
+  _Avoid:_ main remote, primary remote.
 - **Edge** — the line joining a commit to one of its children in the commit graph; a branch edge
   or a merge edge.
   _Avoid:_ link, connector.
@@ -84,6 +88,14 @@ to invent.
   out; determined without cloning or fetching.
 - **Track** — the lane a merge out of the main line runs up between its parent's row and its
   child's, which the layout keeps free over those rows.
+- **Transfer** — a write that reaches a remote: a fetch, a pull, which fetches and then
+  fast-forwards, or a push. A transfer tells its progress as it goes, the repository is read again
+  after it whether it was written or refused, and a fetch, a pull's fetch included, can be stopped
+  while it runs.
+  _Avoid:_ sync, network write, a write that takes long.
+- **Upstream** — the remote branch a local branch follows, which a pull fetches and fast-forwards
+  to and a push sends to; set where the branch tracks one.
+  _Avoid:_ tracking branch (that is the local branch), remote counterpart.
 - **View state** — what a front end remembers between sessions: the theme, the sidebar's width or
   minimised rail, and the diff layout; never anything read from a repository.
 - **Window** — the range of rows a front end is drawing, the same term in both front ends since

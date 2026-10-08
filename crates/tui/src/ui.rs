@@ -23,6 +23,14 @@ use ratatui::widgets::{Block, BorderType, Clear, List, ListItem, ListState, Para
 const REFS_WIDTH: usize = 22;
 const SIDEBAR_WIDTH: u16 = 32;
 const RAIL_WIDTH: u16 = 7;
+/// The narrowest terminal the layout is designed for, which the status bar's hints are held to.
+/// At 80 columns the sidebar and the branch/tag column leave the graph pane five columns for its
+/// lanes, short SHA, and message; at 100 they leave it eighteen.
+#[cfg(test)]
+const DESIGN_WIDTH: u16 = 100;
+/// Columns the status bar keeps for the status text left of the hint, enough for a count of
+/// commits or the name of a write running.
+const STATUS_ROOM: u16 = 20;
 /// Search results beyond this are reachable by cycling, not listed.
 const MAX_PANEL_ROWS: usize = 200;
 
@@ -638,8 +646,8 @@ fn draw_files(frame: &mut Frame, app: &App, p: &Palette, area: Rect) {
                     name_style = name_style.fg(p.accent).add_modifier(Modifier::BOLD);
                 }
                 let mut spans = vec![Span::raw("  ".repeat(depth))];
-                if let Some(staged) = f.staged {
-                    spans.push(staged_mark(p, app.glyphs, staged));
+                if let Some(staging) = &f.staging {
+                    spans.push(staged_mark(p, app.glyphs, staging.staged));
                 }
                 spans.extend([status_letter(p, &f.status), Span::styled(name, name_style)]);
                 if f.additions > 0 {
@@ -915,6 +923,9 @@ fn draw_dialog(frame: &mut Frame, p: &Palette, main: Rect, title: String, lines:
 
 // ── Status bar ──────────────────────────────────────────────────────────────
 
+/// The keys of the state the application is in. Each fits beside the theme and quit keys and
+/// [`STATUS_ROOM`] in the width the layout is designed for, so a hint names the keys that matter
+/// most there and groups the rest; search is on the title bar and is not repeated here.
 fn hints(app: &App) -> &'static str {
     match &app.modal {
         Some(Modal::Open(_)) => return "type a path",
@@ -925,7 +936,7 @@ fn hints(app: &App) -> &'static str {
         Some(Modal::Branch { .. }) => return "type the branch's name",
         Some(Modal::Reset { .. }) => return "Tab soft/mixed/hard · Enter reset",
         Some(Modal::Conflicts { .. }) => {
-            return "j/k move · o ours · t theirs · e as edited · c continue · A abort";
+            return "j/k move · o/t/e resolve · c continue · A abort";
         }
         None => {}
     }
@@ -940,20 +951,14 @@ fn hints(app: &App) -> &'static str {
     }
     match app.focus {
         Focus::Sidebar if app.side.minimised => "j/k move · Enter expand · 1 expand",
-        Focus::Sidebar => {
-            "j/k move · Enter open/toggle · w switch · d delete · / filter · 1 minimise"
-        }
+        Focus::Sidebar => "Enter open · w switch · d delete · / filter · 1 minimise",
         Focus::Graph => match app.selected_node().map(|n| n.kind) {
-            Some(CommitKind::Working) => "j/k move · / search · c commit · s stash · Esc deselect",
-            Some(CommitKind::Stash) => "j/k move · / search · a/p/d apply/pop/drop · Esc deselect",
-            _ => {
-                "j/k move · ]/[ }/{ jump · / search · y copy · t/b/w tag/branch/switch · s stash · m/R/C/V/X merge/rebase/pick/revert/reset"
-            }
+            Some(CommitKind::Working) => "j/k move · c commit · s stash · Esc deselect",
+            Some(CommitKind::Stash) => "j/k move · a/p/d apply/pop/drop · Esc deselect",
+            _ => "t/b/w tag/branch/switch · m/R/C/V/X history · y copy",
         },
-        Focus::Detail => "j/k link · Enter jump · y copy · t tag · b branch · w switch",
-        Focus::Files if working(app) => {
-            "j/k move · Enter diff/fold · t tree/flat · a stage · u unstage · c commit"
-        }
+        Focus::Detail => "j/k link · Enter jump · y copy · t/b/w tag/branch/switch",
+        Focus::Files if working(app) => "Enter diff · t tree/flat · a/u stage/unstage · c commit",
         Focus::Files => "j/k move · Enter diff/fold · t tree/flat",
     }
 }
@@ -1009,8 +1014,9 @@ fn draw_conflicts(frame: &mut Frame, app: &App, selected: usize, p: &Palette, ma
     draw_dialog(frame, p, main, title, lines);
 }
 
-fn draw_status(frame: &mut Frame, app: &App, p: &Palette, area: Rect) {
-    let right = Line::from(vec![
+/// The right of the status bar: the hint, then the theme and quit keys.
+fn status_keys(app: &App, p: &Palette) -> Line<'static> {
+    Line::from(vec![
         Span::styled(hints(app), Style::new().fg(p.text_dim)),
         Span::styled("  T ", Style::new().fg(p.accent)),
         Span::styled(
@@ -1019,9 +1025,15 @@ fn draw_status(frame: &mut Frame, app: &App, p: &Palette, area: Rect) {
         ),
         Span::styled("q", Style::new().fg(p.accent)),
         Span::styled(" quit ", Style::new().fg(p.text_dim)),
-    ]);
+    ])
+}
+
+fn draw_status(frame: &mut Frame, app: &App, p: &Palette, area: Rect) {
+    let right = status_keys(app, p);
     let width = right.width() as u16;
-    let [l, r] = Layout::horizontal([Constraint::Fill(1), Constraint::Length(width)]).areas(area);
+    // Where the terminal is narrower than the hint needs, the status text keeps its room.
+    let [l, r] =
+        Layout::horizontal([Constraint::Min(STATUS_ROOM), Constraint::Length(width)]).areas(area);
     let bar = Style::new().bg(p.bg_chrome);
     frame.render_widget(
         Paragraph::new(Line::from(vec![
@@ -1201,8 +1213,7 @@ mod tests {
                 status: FileStatus::Modified,
                 additions: 1,
                 deletions: 1,
-                staged: None,
-                shown: None,
+                staging: None,
             }]),
         });
         // The pane's own title says both that the list is drawn and which view it starts in.
@@ -1255,8 +1266,7 @@ mod tests {
                 status: FileStatus::Modified,
                 additions: 1,
                 deletions: 1,
-                staged: None,
-                shown: None,
+                staging: None,
             }]),
         });
         app.focus = Focus::Files;
@@ -1373,8 +1383,13 @@ mod tests {
             status: FileStatus::Modified,
             additions: 0,
             deletions: 0,
-            staged: Some(staged),
-            shown: None,
+            staging: Some(ocelli_core::model::Staging {
+                staged,
+                shown: ocelli_core::model::Shown {
+                    workdir: None,
+                    index: None,
+                },
+            }),
         };
         app.files = Some(crate::app::Files {
             sha: ocelli_core::model::WORKDIR_SHA.into(),
@@ -1446,5 +1461,140 @@ mod tests {
             graph_lines(&before, 3, 3),
             "the rows shown stay where they were"
         );
+    }
+
+    /// Every state `hints` answers for, named: each modal, each focus, each kind of node
+    /// selected in the graph, and the search, the filter, and the diff that take the keys.
+    fn every_hinted_state() -> Vec<(&'static str, App)> {
+        use crate::app::tests::{on_a_stash, on_the_working_node};
+        use crate::app::{DiffView, StashPrompt, TagPrompt};
+        use ocelli_core::port::{ResetMode, Write};
+
+        let with = |f: &dyn Fn(&mut App)| {
+            let mut app = loaded_app();
+            f(&mut app);
+            app
+        };
+        let modal = |m: Modal| with(&|app: &mut App| app.modal = Some(m.clone()));
+        let focus = |f: Focus| with(&|app: &mut App| app.focus = f);
+        let tag = |message: Option<String>| TagPrompt {
+            sha: "d".into(),
+            name: "v2".into(),
+            message,
+        };
+        let mut working_files = on_the_working_node();
+        working_files.focus = Focus::Files;
+        vec![
+            ("the open prompt", modal(Modal::Open("/repo".into()))),
+            (
+                "the question before a write that discards work",
+                modal(Modal::Confirm(Write::DropStash {
+                    index: 0,
+                    commit: "d".into(),
+                })),
+            ),
+            ("the tag's name", modal(Modal::Tag(tag(None)))),
+            (
+                "the tag's message",
+                modal(Modal::Tag(tag(Some(String::new())))),
+            ),
+            (
+                "the stash prompt",
+                modal(Modal::Stash(StashPrompt {
+                    message: String::new(),
+                    untracked: false,
+                })),
+            ),
+            (
+                "the commit prompt",
+                modal(Modal::Commit {
+                    head: "d".into(),
+                    message: String::new(),
+                }),
+            ),
+            (
+                "the branch prompt",
+                modal(Modal::Branch {
+                    commit: "d".into(),
+                    name: String::new(),
+                    switch: true,
+                }),
+            ),
+            (
+                "the reset's mode",
+                modal(Modal::Reset {
+                    commit: "d".into(),
+                    mode: ResetMode::Mixed,
+                }),
+            ),
+            ("the conflicts", modal(Modal::Conflicts { selected: 0 })),
+            (
+                "the search field",
+                with(&|app: &mut App| app.search.editing = true),
+            ),
+            (
+                "the sidebar's filter",
+                with(&|app: &mut App| {
+                    app.focus = Focus::Sidebar;
+                    app.side.editing = true;
+                }),
+            ),
+            (
+                "the diff",
+                with(&|app: &mut App| {
+                    app.diff = Some(DiffView {
+                        path: "f".into(),
+                        lines: None,
+                        scroll: 0,
+                    });
+                }),
+            ),
+            ("the sidebar", focus(Focus::Sidebar)),
+            (
+                "the sidebar minimised",
+                with(&|app: &mut App| {
+                    app.focus = Focus::Sidebar;
+                    app.side.minimised = true;
+                }),
+            ),
+            ("the graph on a commit", focus(Focus::Graph)),
+            (
+                "the graph on the working-directory node",
+                on_the_working_node(),
+            ),
+            ("the graph on a stash node", on_a_stash()),
+            (
+                "the graph before a load",
+                App::new("/repo".into(), Glyphs::Unicode),
+            ),
+            ("the detail", focus(Focus::Detail)),
+            ("a commit's files", focus(Focus::Files)),
+            ("the working-directory node's files", working_files),
+        ]
+    }
+
+    #[test]
+    fn every_hint_fits_the_width_the_layout_is_designed_for() {
+        for (state, mut app) in every_hinted_state() {
+            for theme in [crate::theme::Theme::Dark, crate::theme::Theme::Light] {
+                app.theme = theme;
+                let keys = status_keys(&app, palette(theme));
+                assert!(
+                    keys.width() + usize::from(STATUS_ROOM) <= usize::from(DESIGN_WIDTH),
+                    "the hint of {state} takes {} columns with the theme and quit keys, past the \
+                     {} beside the status text in {DESIGN_WIDTH}: {}",
+                    keys.width(),
+                    DESIGN_WIDTH - STATUS_ROOM,
+                    hints(&app)
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn the_status_text_keeps_its_room_on_a_narrow_terminal() {
+        let mut app = loaded_app();
+        let rows = screen(&mut app, 40, 10);
+        assert!(rows[9].contains("4 commits"), "{}", rows[9]);
     }
 }

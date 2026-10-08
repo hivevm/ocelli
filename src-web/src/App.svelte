@@ -11,9 +11,12 @@
   import ConfirmDialog from './ConfirmDialog.svelte';
   import InProgress from './InProgress.svelte';
   import { refShas } from './refTree.ts';
+  import { commitChips } from './refChips.ts';
   import type { RowRange } from './rowWindow.ts';
   import { Newest } from './hostAnswers.ts';
   import { actionLabel, confirmedWrite, type Outcome, type Write } from './writes.ts';
+  import { canStop, fetchOf, pullOf, pushOf } from './transfers.ts';
+  import { historyActions } from './actions.ts';
   import StashDialog from './StashDialog.svelte';
   import type {
     NodeJson, FileChange, DiffLine, RepoRefs, Growth, RowWindow, Relative, Selected, Found,
@@ -86,21 +89,27 @@
   let notice = $state<string | null>(null);
   // Whether the dialog that describes a new stash is open.
   let stashing = $state(false);
-  // Whether a transfer to or from a remote runs, and whether the toolbar's button can cancel it:
-  // libgit2 cannot stop a push once its objects are sent (ADR-0035).
+  // Whether a transfer to or from a remote runs, and whether the toolbar's button can cancel it,
+  // as the core decides (ADR-0035).
   let fetching = $state(false);
   let cancellable = $state(false);
-  // The checked-out branch, which a pull moves, where it has an upstream.
-  const pullable = $derived(repoRefs?.locals.find(b => b.isHead && b.upstream !== null) ?? null);
+  // The fetch, pull, and push the refs make possible, or why there is none, as the core decides.
+  const fetchable = $derived(repoRefs ? fetchOf(repoRefs) : { reason: 'No repository is open' });
+  const pullable = $derived(repoRefs ? pullOf(repoRefs) : { reason: 'No repository is open' });
+  const pushable = $derived(repoRefs ? pushOf(repoRefs) : { reason: 'No repository is open' });
 
   /** Runs a transfer, the toolbar's buttons turning into one that cancels it. A transfer refused
       may have moved remote branches by its fetch, so the repository is read again, the refusal
       kept in view (ADR-0035). */
-  async function transfer(write: Write, doing: string): Promise<void> {
+  async function transfer(answer: { write: Write } | { reason: string }, doing: string): Promise<void> {
+    if (!('write' in answer)) {
+      status = answer.reason;
+      return;
+    }
     fetching = true;
-    cancellable = write.kind !== 'push';
+    cancellable = canStop(answer.write);
     status = doing;
-    const error = await performWrite(write);
+    const error = await performWrite(answer.write);
     fetching = false;
     if (error) {
       await reloadAfterWrite(null);
@@ -108,52 +117,30 @@
     }
   }
 
-  /** Fetches the remote a fetch reaches without one named; the reload after shows its branches. */
+  /** Fetches the default remote; the reload after shows its branches. */
   async function fetchRemote(): Promise<void> {
-    const remote = repoRefs?.defaultRemote;
-    if (!remote) {
-      status = 'No remote to fetch';
-      return;
-    }
-    await transfer({ kind: 'fetch', remote }, `Fetching ${remote}…`);
+    await transfer(fetchable, 'write' in fetchable ? `Fetching ${fetchable.write.remote}…` : '');
   }
-
-  // The checked-out branch, which a push sends, where a remote takes it.
-  const pushable = $derived(
-    repoRefs?.locals.find(b => b.isHead && (b.upstream !== null || repoRefs?.defaultRemote)) ?? null,
-  );
 
   /** Pushes the checked-out branch to its upstream, or sets one; never by force. */
   async function pushBranch(): Promise<void> {
-    if (!pushable) return;
-    await transfer(
-      { kind: 'push', branch: pushable.name, tip: pushable.sha },
-      `Pushing ${pushable.name}…`,
-    );
+    await transfer(pushable, 'write' in pushable ? `Pushing ${pushable.write.branch}…` : '');
   }
 
   /** Pulls the checked-out branch from its upstream, fast-forward only. */
   async function pullBranch(): Promise<void> {
-    if (!pullable) return;
-    await transfer(
-      { kind: 'pull', branch: pullable.name, tip: pullable.sha },
-      `Pulling ${pullable.name}…`,
-    );
+    await transfer(pullable, 'write' in pullable ? `Pulling ${pullable.write.branch}…` : '');
   }
-  const selectedTags = $derived(
-    selectedNode ? (repoRefs?.tags ?? []).filter(t => t.sha === selectedNode?.sha) : [],
+  // The selected commit's ref chips, each with the switch or delete it offers.
+  const selectedChips = $derived(
+    selectedNode ? commitChips(selectedNode.refs, repoRefs, selectedNode.sha) : [],
   );
-  // The local and remote branches on the selected commit, which its chips switch to or delete.
-  const selectedLocals = $derived(
-    selectedNode ? (repoRefs?.locals ?? []).filter(b => b.sha === selectedNode?.sha) : [],
-  );
-  const selectedRemotes = $derived(
-    selectedNode
-      ? (repoRefs?.remotes ?? []).flatMap(r => r.branches
-        .filter(b => b.sha === selectedNode?.sha)
-        .map(b => ({ remote: r.name, branch: b.name, tip: b.sha })))
-      : [],
-  );
+  // The operations of G-5 the selected commit offers on the checked-out branch (ADR-0033).
+  const selectedActions = $derived.by(() => {
+    if (!repoRefs || selectedNode?.kind !== 'commit') return [];
+    const offered = historyActions(repoRefs, selectedNode.sha);
+    return 'actions' in offered ? offered.actions : [];
+  });
 
   /** A command that failed: the status bar says so. */
   function report(e: unknown): void {
@@ -512,17 +499,17 @@
         {cancellable ? 'Cancel' : 'Pushing…'}
       </button>
     {:else}
-      <button class="tb-btn" onclick={fetchRemote} disabled={!repoRefs?.defaultRemote}
-              title="Fetch {repoRefs?.defaultRemote ?? 'a remote'}">
+      <button class="tb-btn" onclick={fetchRemote} disabled={!('write' in fetchable)}
+              title={'write' in fetchable ? `Fetch ${fetchable.write.remote}` : fetchable.reason}>
         Fetch
       </button>
-      <button class="tb-btn" onclick={pullBranch} disabled={!pullable}
-              title={pullable ? `Pull ${pullable.name} from ${pullable.upstream}, fast-forward only`
-                : 'The checked-out branch has no upstream to pull from'}>
+      <button class="tb-btn" onclick={pullBranch} disabled={!('write' in pullable)}
+              title={'write' in pullable ? `Pull ${pullable.write.branch}, fast-forward only`
+                : pullable.reason}>
         Pull
       </button>
-      <button class="tb-btn" onclick={pushBranch} disabled={!pushable}
-              title={pushable ? `Push ${pushable.name}` : 'There is no branch or remote to push to'}>
+      <button class="tb-btn" onclick={pushBranch} disabled={!('write' in pushable)}
+              title={'write' in pushable ? `Push ${pushable.write.branch}` : pushable.reason}>
         Push
       </button>
     {/if}
@@ -601,10 +588,8 @@
       {diffFile}
       {onSelectFile}
       onJumpToRow={jumpToRow}
-      tags={selectedTags}
-      locals={selectedLocals}
-      remotes={selectedRemotes}
-      head={repoRefs?.locals.find(b => b.isHead) ?? null}
+      chips={selectedChips}
+      actions={selectedActions}
       onWrite={performWrite}
     />
   </div><!-- end #top-pane -->
