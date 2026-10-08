@@ -145,7 +145,9 @@ in `crates/git/src/lib.rs`. **The test pattern** is a reference test: a fixed or
 input and the output the reference implementation produced, compared exactly
 (`crates/core/tests/layout_reference.rs`, `crates/git/tests/load_reference.rs`), beside the
 structural tests of the shape in `crates/core/tests/structure.rs`. A write is tested on a
-repository `git` made, and what it did is read back with `git` (`crates/git/tests/write.rs`).
+repository `git` made, and what it did is read back with `git` (`crates/git/tests/write.rs`); a
+refused write goes through `refused` there, which compares one snapshot of the repository before
+and after.
 
 ## How it runs
 

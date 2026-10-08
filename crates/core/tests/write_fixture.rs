@@ -262,11 +262,28 @@ fn the_transfer_fixture_is_what_the_core_answers() {
         Ok(write) => serde_json::json!({ "write": write }),
         Err(reason) => serde_json::json!({ "reason": reason }),
     };
+    // The checked-out branch after another, which the answers must find all the same.
+    let mut second = refs(Some(Some("origin/main")), None);
+    second.locals.insert(
+        0,
+        LocalBranch {
+            name: "other".into(),
+            sha: "o".into(),
+            short_sha: "o".into(),
+            is_head: false,
+            upstream: None,
+            ahead: 0,
+            behind: 0,
+            merged: true,
+        },
+    );
     let cases: Vec<_> = [
         refs(Some(Some("origin/main")), Some("origin")),
+        refs(Some(Some("origin/main")), None),
         refs(Some(None), Some("origin")),
         refs(Some(None), None),
         refs(None, Some("origin")),
+        second,
     ]
     .into_iter()
     .map(|refs| {
@@ -315,7 +332,7 @@ fn the_actions_fixture_is_what_the_core_answers() {
         merged: true,
     };
     let refs = RepoRefs {
-        locals: vec![local("main", "h", true), local("topic", "t", false)],
+        locals: vec![local("topic", "t", false), local("main", "h", true)],
         ..RepoRefs::default()
     };
     let answer = |refs: &RepoRefs, sha: &str| match refs.history_actions(sha) {

@@ -43,21 +43,21 @@
         {
           "ahead": 0,
           "behind": 0,
-          "isHead": true,
-          "merged": true,
-          "name": "main",
-          "sha": "h",
-          "shortSha": "h",
-          "upstream": null
-        },
-        {
-          "ahead": 0,
-          "behind": 0,
           "isHead": false,
           "merged": true,
           "name": "topic",
           "sha": "t",
           "shortSha": "t",
+          "upstream": null
+        },
+        {
+          "ahead": 0,
+          "behind": 0,
+          "isHead": true,
+          "merged": true,
+          "name": "main",
+          "sha": "h",
+          "shortSha": "h",
           "upstream": null
         }
       ],
@@ -113,21 +113,21 @@
         {
           "ahead": 0,
           "behind": 0,
-          "isHead": true,
-          "merged": true,
-          "name": "main",
-          "sha": "h",
-          "shortSha": "h",
-          "upstream": null
-        },
-        {
-          "ahead": 0,
-          "behind": 0,
           "isHead": false,
           "merged": true,
           "name": "topic",
           "sha": "t",
           "shortSha": "t",
+          "upstream": null
+        },
+        {
+          "ahead": 0,
+          "behind": 0,
+          "isHead": true,
+          "merged": true,
+          "name": "main",
+          "sha": "h",
+          "shortSha": "h",
           "upstream": null
         }
       ],
@@ -164,21 +164,21 @@
         {
           "ahead": 0,
           "behind": 0,
-          "isHead": true,
-          "merged": true,
-          "name": "main",
-          "sha": "h",
-          "shortSha": "h",
-          "upstream": null
-        },
-        {
-          "ahead": 0,
-          "behind": 0,
           "isHead": false,
           "merged": true,
           "name": "topic",
           "sha": "t",
           "shortSha": "t",
+          "upstream": null
+        },
+        {
+          "ahead": 0,
+          "behind": 0,
+          "isHead": true,
+          "merged": true,
+          "name": "main",
+          "sha": "h",
+          "shortSha": "h",
           "upstream": null
         }
       ],

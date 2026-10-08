@@ -71,6 +71,46 @@
     },
     {
       "fetch": {
+        "reason": "No remote to fetch"
+      },
+      "pull": {
+        "write": {
+          "branch": "main",
+          "kind": "pull",
+          "tip": "s"
+        }
+      },
+      "push": {
+        "write": {
+          "branch": "main",
+          "kind": "push",
+          "tip": "s"
+        }
+      },
+      "refs": {
+        "defaultRemote": null,
+        "inProgress": null,
+        "locals": [
+          {
+            "ahead": 0,
+            "behind": 0,
+            "isHead": true,
+            "merged": true,
+            "name": "main",
+            "sha": "s",
+            "shortSha": "s",
+            "upstream": "origin/main"
+          }
+        ],
+        "parent": null,
+        "remotes": [],
+        "submodules": [],
+        "tags": [],
+        "worktrees": []
+      }
+    },
+    {
+      "fetch": {
         "write": {
           "kind": "fetch",
           "remote": "origin"
@@ -157,6 +197,56 @@
         "defaultRemote": "origin",
         "inProgress": null,
         "locals": [],
+        "parent": null,
+        "remotes": [],
+        "submodules": [],
+        "tags": [],
+        "worktrees": []
+      }
+    },
+    {
+      "fetch": {
+        "reason": "No remote to fetch"
+      },
+      "pull": {
+        "write": {
+          "branch": "main",
+          "kind": "pull",
+          "tip": "s"
+        }
+      },
+      "push": {
+        "write": {
+          "branch": "main",
+          "kind": "push",
+          "tip": "s"
+        }
+      },
+      "refs": {
+        "defaultRemote": null,
+        "inProgress": null,
+        "locals": [
+          {
+            "ahead": 0,
+            "behind": 0,
+            "isHead": false,
+            "merged": true,
+            "name": "other",
+            "sha": "o",
+            "shortSha": "o",
+            "upstream": null
+          },
+          {
+            "ahead": 0,
+            "behind": 0,
+            "isHead": true,
+            "merged": true,
+            "name": "main",
+            "sha": "s",
+            "shortSha": "s",
+            "upstream": "origin/main"
+          }
+        ],
         "parent": null,
         "remotes": [],
         "submodules": [],

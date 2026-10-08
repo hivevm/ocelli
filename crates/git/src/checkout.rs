@@ -35,8 +35,22 @@ pub(crate) fn check_out(repo: &Repository, target: &Commit) -> Result<()> {
         );
     }
 
+    if changed.is_empty() {
+        return Ok(());
+    }
+    untracked_where_a_file_goes(repo, &goal, &changed)?;
     let mut in_the_way = Vec::new();
     let mut checkout = CheckoutBuilder::new();
+    // Only the paths the target changes: a file deleted in the working directory comes back
+    // where the target changes it, and stays deleted where it does not, as `git switch` does.
+    checkout.disable_pathspec_match(true);
+    for path in &changed {
+        #[expect(
+            clippy::disallowed_methods,
+            reason = "the pattern matching is turned off"
+        )]
+        checkout.path(path.as_str());
+    }
     checkout
         .recreate_missing(true)
         .notify_on(CheckoutNotificationType::CONFLICT)
@@ -57,6 +71,58 @@ pub(crate) fn check_out(repo: &Repository, target: &Commit) -> Result<()> {
             );
         }
         result => result?,
+    }
+    Ok(())
+}
+
+/// Refuses where the target puts a file in the place of a directory that holds a file the index
+/// does not, untracked or ignored: libgit2 would fail halfway, the directory's tracked files gone
+/// already, where `git switch` refuses for an untracked file and deletes an ignored one. Ocelli
+/// keeps both.
+fn untracked_where_a_file_goes(
+    repo: &Repository,
+    goal: &git2::Tree,
+    changed: &[String],
+) -> Result<()> {
+    let Some(root) = repo.workdir() else {
+        return Ok(());
+    };
+    let index = repo.index()?;
+    for path in changed {
+        let file_goes = goal
+            .get_path(Path::new(path))
+            .is_ok_and(|e| e.kind() != Some(git2::ObjectType::Tree));
+        let dir = root.join(path);
+        if !file_goes || !dir.symlink_metadata().is_ok_and(|m| m.is_dir()) {
+            continue;
+        }
+        let mut found = Vec::new();
+        files_below(root, &dir, &mut found)?;
+        let mut kept: Vec<_> = found
+            .into_iter()
+            .filter(|f| index.get_path(Path::new(f), 0).is_none())
+            .collect();
+        if !kept.is_empty() {
+            kept.sort();
+            bail!(
+                "{path} is a directory holding files the commit does not track, which a file \
+                 would replace: move {} first",
+                kept.join(", ")
+            );
+        }
+    }
+    Ok(())
+}
+
+/// The files below `dir`, by their path from `root`, links among them, none followed.
+fn files_below(root: &Path, dir: &Path, found: &mut Vec<String>) -> Result<()> {
+    for entry in std::fs::read_dir(dir)? {
+        let path = entry?.path();
+        if path.symlink_metadata()?.is_dir() {
+            files_below(root, &path, found)?;
+        } else if let Ok(name) = path.strip_prefix(root) {
+            found.push(name.to_string_lossy().replace('\\', "/"));
+        }
     }
     Ok(())
 }

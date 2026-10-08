@@ -17,7 +17,6 @@ const OFF: &[(&str, &str)] = &[
     ("core.askPass", ""),
     ("core.sshCommand", "ssh"),
     ("credential.helper", ""),
-    ("diff.external", ""),
     ("commit.gpgSign", "false"),
     ("tag.gpgSign", "false"),
     ("push.gpgSign", "false"),
@@ -30,17 +29,20 @@ pub fn git_command(dir: impl AsRef<Path>) -> Command {
     for (key, value) in OFF {
         command.arg("-c").arg(format!("{key}={value}"));
     }
-    let hooks = std::env::temp_dir().join("ocelli-tests-no-hooks");
-    command
-        .arg("-c")
-        .arg(format!("core.hooksPath={}", hooks.display()));
-    // An empty filter turns it off. An empty textconv, diff command, or merge driver would run
-    // an empty program: `cat` stands in for a textconv, which then changes nothing, and `false`
-    // for the others, a diff or a merge that needs one failing loudly.
+    // A file, not a directory: no hook can stand below it.
+    command.arg("-c").arg("core.hooksPath=/dev/null");
+    // An empty filter turns it off. An empty textconv, diff command, external diff, or merge
+    // driver would run an empty program: `cat` stands in for a textconv, which then changes
+    // nothing, `false` for the others, a diff or a merge that needs one failing loudly, and git's
+    // own programs for the ones a fetch and a push start on the remote's side.
     for key in drivers(dir) {
         let off = if key.ends_with(".textconv") {
             "cat"
-        } else if key.ends_with(".command") || key.ends_with(".driver") {
+        } else if key.ends_with(".uploadpack") {
+            "git-upload-pack"
+        } else if key.ends_with(".receivepack") {
+            "git-receive-pack"
+        } else if key.ends_with(".command") || key.ends_with(".driver") || key == "diff.external" {
             "false"
         } else {
             ""
@@ -71,15 +73,16 @@ fn bare(dir: &Path) -> Command {
     command
 }
 
-/// The keys of the repository's own configuration that name a driver's program: a filter's,
-/// a diff's, or a merge's. Reading the configuration runs none of them.
+/// The keys of the repository's own configuration that name a program: a filter's, a diff's,
+/// or a merge's driver, the external diff, and what a fetch or a push starts on the remote's
+/// side. Reading the configuration runs none of them.
 fn drivers(dir: &Path) -> Vec<String> {
     let Ok(out) = bare(dir)
         .args([
             "config",
             "--name-only",
             "--get-regexp",
-            r"^(filter|diff|merge)\..+\.(clean|smudge|process|command|textconv|driver)$",
+            r"^((filter|diff|merge)\..+\.(clean|smudge|process|command|textconv|driver)|diff\.external|remote\..+\.(uploadpack|receivepack))$",
         ])
         .output()
     else {
@@ -91,12 +94,24 @@ fn drivers(dir: &Path) -> Vec<String> {
         .collect()
 }
 
-/// The lines of the Rust source `text` that start `git` some other way, by number.
+/// The lines of the Rust source `text` that start `git` some other way, by number: a command
+/// made of `git` by name or by path, however it is spaced, or a name or constant holding `git`
+/// for one.
 #[allow(dead_code)] // only the test that holds every test to the helper reads it
 pub fn other_ways(text: &str) -> Vec<usize> {
+    let names_git = |literal: &str| literal == "git" || literal.ends_with("/git");
     text.lines()
         .enumerate()
-        .filter(|(_, line)| line.contains(concat!("Command::new(", "\"git\")")))
+        .filter(|(_, line)| {
+            let line: String = line.chars().filter(|c| !c.is_whitespace()).collect();
+            let started = line
+                .split(concat!("Command::new", "(\""))
+                .skip(1)
+                .any(|rest| rest.split('"').next().is_some_and(names_git));
+            let held = (line.starts_with("let") || line.starts_with("const"))
+                && line.split('"').nth(1).is_some_and(names_git);
+            started || held
+        })
         .map(|(i, _)| i + 1)
         .collect()
 }
