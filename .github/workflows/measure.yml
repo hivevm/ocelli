@@ -11,6 +11,8 @@ name: Measure
 # - Q-3, the memory the commit graph of a repository of 100 000 commits adds to the desktop
 #   application over the empty application, by scripts/measure-memory.sh under a virtual display on
 #   Linux.
+# - The guards of the git adapter, each changed by a mutant the suite must catch, by
+#   scripts/measure-mutants.sh (ADR-0033, ADR-0035).
 # Each job fails when its goal is missed or it cannot measure.
 
 on:
@@ -72,3 +74,15 @@ jobs:
         run: bun install --frozen-lockfile
       - name: Measure the desktop application's memory
         run: bash scripts/measure-memory.sh
+
+  mutants:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Set up the pinned Rust toolchain
+        run: rustup show active-toolchain
+      - name: Change each guard and expect the suite to fail
+        run: bash scripts/measure-mutants.sh

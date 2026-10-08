@@ -4,7 +4,9 @@
 use crate::checkout::entry_as_in;
 use crate::git::WORKTREE;
 use crate::message::Made;
-use crate::operations::{UNAPPLIED, commit_in_progress, committer, rebase_dir, run_rebase};
+use crate::operations::{
+    UNAPPLIED, commit_in_progress, committer, rebase_dir, run_rebase, set_orig_head,
+};
 use crate::refs::{conflicts_of, stopped};
 use anyhow::{Context, Result, bail};
 use git2::build::CheckoutBuilder;
@@ -291,6 +293,23 @@ pub(crate) fn abort(repo: &Repository, operation: Operation, head: &str) -> Resu
             within(root, path, &its_own)?;
         }
         let mut own_parents = own_parents.into_inner();
+        // A file or link the operation put where the checked-out commit has a submodule goes too:
+        // libgit2 would meet it where it makes the submodule's directory.
+        for path in &touched {
+            let gitlink = tree
+                .get_path(Path::new(path))
+                .is_ok_and(|e| e.kind() == Some(git2::ObjectType::Commit));
+            if gitlink
+                && root
+                    .join(path)
+                    .symlink_metadata()
+                    .is_ok_and(|m| !m.is_dir())
+                && index.get_path(Path::new(path), 0).is_some()
+                && !changed.contains_key(path.as_str())
+            {
+                own_parents.push(path.clone());
+            }
+        }
         own_parents.sort();
         own_parents.dedup();
         // The index as it is, put back should the checkout fail, the operation still stopped.
@@ -369,6 +388,16 @@ pub(crate) fn abort(repo: &Repository, operation: Operation, head: &str) -> Resu
         }
     }
     repo.cleanup_state()?;
+    // `git <operation> --abort` resets to the checked-out commit, which points ORIG_HEAD there.
+    set_orig_head(repo, Some(repo.head()?.peel_to_commit()?.id()))?;
+    no_auto_merge(repo)
+}
+
+/// Removes the `AUTO_MERGE` `git` writes where an operation stops, as its abort does.
+fn no_auto_merge(repo: &Repository) -> Result<()> {
+    if let Ok(mut auto) = repo.find_reference("AUTO_MERGE") {
+        auto.delete()?;
+    }
     Ok(())
 }
 
@@ -416,7 +445,7 @@ fn abort_rebase(repo: &Repository) -> Result<()> {
         )]
         std::fs::remove_dir_all(&dir)?;
     }
-    Ok(())
+    no_auto_merge(repo)
 }
 
 /// Refuses to `act` on what only `git` carries on rightly: a sequence of cherry-picks or reverts,

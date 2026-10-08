@@ -45,6 +45,25 @@ run "Format check" cargo fmt --all --check
 run "Lint (clippy)" cargo clippy --workspace --all-targets --locked -- -D warnings
 run "Lint (web interface)" bun run --cwd src-web lint
 
+# The Windows build's lint, where cargo-xwin and its LLVM tools are installed: code under
+# cfg(windows), or a test whose helper only unix uses, fails only there, and CI's Windows runner
+# would be the first to say so. The desktop host is left out: its resource compiler needs the
+# Windows SDK's own tools. Where a tool is missing the step says so and goes on; CI's Windows
+# runner lints that build natively.
+printf '\n==> %s\n' "Lint (clippy, Windows, through cargo-xwin)"
+missing=()
+for tool in cargo-xwin llvm-lib clang-cl; do
+  command -v "$tool" >/dev/null 2>&1 || missing+=("$tool")
+done
+rustup target list --installed 2>/dev/null | grep -qx x86_64-pc-windows-msvc ||
+  missing+=("the x86_64-pc-windows-msvc target")
+if ((${#missing[@]})); then
+  echo "Skipped: ${missing[*]} not installed."
+else
+  cargo xwin clippy --workspace --exclude ocelli --all-targets --locked \
+    --target x86_64-pc-windows-msvc -- -D warnings || failed+=("Lint (clippy, Windows)")
+fi
+
 printf '\n'
 if ((${#failed[@]})); then
   echo "FAILED:" >&2

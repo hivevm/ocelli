@@ -534,6 +534,60 @@ fn helper_may_answer_for(address: &str) -> std::result::Result<(), &'static str>
 mod tests {
     #[test]
     // Verifies: ADR-0035
+    fn each_way_to_authenticate_is_tried_once_and_in_turn() {
+        use git2::CredentialType as Kind;
+        let message = |r: Result<git2::Cred, git2::Error>| r.err().map(|e| e.message().to_string());
+        // The user name tried, the next is the helper, which a plain address does not reach.
+        let mut tried = super::Tried {
+            username: true,
+            agent: false,
+            helper: false,
+        };
+        let answer = tried.credentials(
+            "http://example.org/repo.git",
+            Some("u"),
+            Kind::USERNAME | Kind::USER_PASS_PLAINTEXT,
+        );
+        assert!(message(answer).is_some_and(|m| m.contains("https only")));
+        // The agent tried, and no password asked for: nothing is left to try.
+        let mut tried = super::Tried {
+            username: true,
+            agent: true,
+            helper: false,
+        };
+        let answer = tried.credentials("ssh://git@example.org/r.git", Some("git"), Kind::SSH_KEY);
+        assert!(message(answer).is_some_and(|m| m.contains("neither the SSH agent")));
+        // The helper asked once already: it is not asked again.
+        let mut tried = super::Tried {
+            username: true,
+            agent: true,
+            helper: true,
+        };
+        let answer = tried.credentials(
+            "https://example.org/repo.git",
+            Some("u"),
+            Kind::USER_PASS_PLAINTEXT,
+        );
+        assert!(message(answer).is_some_and(|m| m.contains("neither the SSH agent")));
+    }
+
+    #[test]
+    // Verifies: ADR-0035
+    fn an_address_is_ssh_by_its_scheme_or_as_scp_writes_it() {
+        for ssh in [
+            "ssh://git@example.org/r.git",
+            "git+ssh://example.org/r.git",
+            "git@example.org:r.git",
+        ] {
+            assert!(super::is_ssh(ssh), "{ssh}");
+        }
+        for other in ["https://example.org/r.git", "file:///srv/r.git"] {
+            assert!(!super::is_ssh(other), "{other}");
+        }
+    }
+
+    #[test]
+    // Verifies: ADR-0035, Q-7
     fn a_line_break_in_the_user_name_is_refused_before_a_helper_is_asked() {
         use git2::CredentialType as Kind;
         for user in ["victim\nhost=evil.example", "victim\rx", "victim\0x"] {
@@ -562,7 +616,7 @@ mod tests {
     use super::{decode_base64, revoked_in, ssh_host, vouched_elsewhere};
 
     #[test]
-    // Verifies: ADR-0035
+    // Verifies: ADR-0035, Q-7
     fn a_helper_answers_only_for_a_plainly_named_domain_over_https() {
         for fine in [
             "https://example.org/repo.git",
@@ -581,6 +635,7 @@ mod tests {
             ("https://%65xample.org/repo.git", "two ways"),
             ("https://example.org\\@evil.example/repo.git", "two ways"),
             ("https://bücher.example/repo.git", "two ways"),
+            ("https://a b@example.org/repo.git", "two ways"),
         ] {
             let error = asks(refused).unwrap_err();
             assert!(error.contains(why), "{refused}: {error}");
@@ -623,6 +678,27 @@ mod tests {
             Some("vouched for only by a @cert-authority line")
         );
         assert_eq!(vouched_elsewhere("", "", "git.example.org"), None);
+        // A comment, a revoked line, and a certificate authority for another host vouch for none.
+        assert_eq!(
+            vouched_elsewhere("", "# git.example.org ssh-ed25519 AAAA", "git.example.org"),
+            None
+        );
+        assert_eq!(
+            vouched_elsewhere(
+                "",
+                "@revoked git.example.org ssh-ed25519 AAAA",
+                "git.example.org"
+            ),
+            None
+        );
+        assert_eq!(
+            vouched_elsewhere(
+                "@cert-authority other.example ssh-ed25519 AAAA",
+                "",
+                "git.example.org"
+            ),
+            None
+        );
         for (url, host) in [
             ("ssh://git@git.example.org:2222/r.git", "git.example.org"),
             ("git@git.example.org:r.git", "git.example.org"),
