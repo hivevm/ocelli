@@ -297,6 +297,52 @@ pub struct RepoRefs {
     /// The remote a fetch without one named reaches: the remote of the checked-out branch's
     /// upstream, else `origin`, else the only remote there is.
     pub default_remote: Option<String>,
+    /// The operation stopped in the repository, whoever started it, with its conflicted files
+    /// (ADR-0033).
+    pub in_progress: Option<InProgress>,
+}
+
+/// A merge, rebase, cherry-pick, or revert stopped in the repository, as `git status` reads it.
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct InProgress {
+    pub operation: Operation,
+    pub conflicts: Vec<Conflict>,
+    /// The commit `HEAD` is at, which continuing and aborting expect to find.
+    pub head: String,
+}
+
+/// An operation that can stop on a conflict.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum Operation {
+    Merge,
+    Rebase,
+    CherryPick,
+    Revert,
+}
+
+impl Operation {
+    /// Its name as `git` writes it.
+    pub fn name(self) -> &'static str {
+        match self {
+            Operation::Merge => "merge",
+            Operation::Rebase => "rebase",
+            Operation::CherryPick => "cherry-pick",
+            Operation::Revert => "revert",
+        }
+    }
+}
+
+/// A conflicted file: its path and the blob ids of the index's stages, the common ancestor's,
+/// ours, and theirs, each absent where that side has no file.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct Conflict {
+    pub path: String,
+    pub ancestor: Option<String>,
+    pub ours: Option<String>,
+    pub theirs: Option<String>,
 }
 
 #[derive(Debug, Serialize, Clone, PartialEq)]

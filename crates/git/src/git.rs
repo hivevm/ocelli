@@ -416,7 +416,8 @@ pub fn load_file_diff(repo_path: &Path, sha: &str, file_path: &str) -> Result<Ve
     let repo = Repository::discover(repo_path)?;
 
     let mut opts = DiffOptions::new();
-    opts.pathspec(file_path);
+    // The path as written, never a pattern that takes other files with it.
+    opts.pathspec(file_path).disable_pathspec_match(true);
     opts.context_lines(3);
 
     let diff = if sha == WORKDIR_SHA {

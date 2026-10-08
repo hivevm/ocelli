@@ -1,7 +1,7 @@
 // Verifies: ADR-0033, ADR-0034, G-7, Q-6
 import { describe, expect, test } from 'bun:test';
 import {
-  OneWrite, actionLabel, branchRequest, commitRequest, confirmedWrite, stageToggle, stashRequest, tagRequest,
+  OneWrite, actionLabel, branchRequest, operationName, commitRequest, confirmedWrite, stageToggle, stashRequest, tagRequest,
   type Write,
 } from './writes.ts';
 
@@ -118,5 +118,20 @@ describe('branches', () => {
   test('deleting a branch goes ahead under its own label', () => {
     expect(actionLabel({ kind: 'deleteBranch', name: 'x', tip: 't', merged: false }))
       .toBe('Delete branch');
+  });
+});
+
+describe('history', () => {
+  test('taking a side goes ahead under that side', () => {
+    const conflict = { path: 'f', ancestor: null, ours: 'o', theirs: 't' };
+    expect(actionLabel({ kind: 'resolve', path: 'f', conflict, take: 'ours' })).toBe('Take ours');
+    expect(actionLabel({ kind: 'resolve', path: 'f', conflict, take: 'theirs' })).toBe('Take theirs');
+  });
+
+  test('an operation reads as git names it, and so does the abort that discards it', () => {
+    expect(operationName('cherryPick')).toBe('cherry-pick');
+    expect(actionLabel({ kind: 'abort', operation: 'merge', head: 'h' })).toBe('Abort the merge');
+    expect(actionLabel({ kind: 'reset', branch: 'm', tip: 't', commit: 'c', mode: 'hard' }))
+      .toBe('Reset hard');
   });
 });

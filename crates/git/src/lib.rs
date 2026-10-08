@@ -3,6 +3,7 @@
 //! writing a repository starts no program the repository names (Q-4).
 
 pub mod git;
+mod history;
 pub mod refs;
 mod write;
 

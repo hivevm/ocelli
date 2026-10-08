@@ -19,6 +19,9 @@ to invent.
 - **Commit graph** — the commits of a repository drawn as nodes, each joined by an edge to its
   parents, with every branch and tag shown.
   _Avoid:_ tree, history graph, log graph.
+- **Conflict** — a file the index holds in more than one stage after an operation in progress
+  stopped on it; resolved by taking ours, taking theirs, or as the developer edited it.
+  _Avoid:_ clash, collision.
 - **Edge** — the line joining a commit to one of its children in the commit graph; a branch edge
   or a merge edge.
   _Avoid:_ link, connector.
@@ -57,6 +60,9 @@ to invent.
 - **Merge edge** — an edge that joins a parent in another lane to a merge commit, where a branch
   is merged.
   _Avoid:_ merge line.
+- **Operation in progress** — a merge, rebase, cherry-pick, or revert stopped on a conflict, in
+  `git`'s own state, whoever started it; continued or aborted once its conflicts are resolved.
+  _Avoid:_ stopped write, pending merge.
 - **Parent row** — in the sidebar, the row above the sections that leads out of a submodule or a
   linked working tree to the repository one level up, read from Git and never remembered from the
   way in. Not a commit's parent.
@@ -91,4 +97,4 @@ to invent.
   tag or applying a stash, naming the state it expects to find and refused with nothing changed
   where the repository no longer holds it; a write that discards work runs only once the
   developer has confirmed it.
-  _Avoid:_ operation, action, mutation.
+  _Avoid:_ operation, which names an operation in progress, action, mutation.

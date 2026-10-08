@@ -19,9 +19,9 @@ use ocelli_core::graph::LaidChunk;
 use ocelli_core::history::{History, Lineage};
 use ocelli_core::load::{Event, LoadSession};
 use ocelli_core::model::{
-    CommitKind, DiffLine, FileChange, LocalBranch, NodeJson, RepoRefs, Shown, Tag,
+    CommitKind, DiffLine, FileChange, InProgress, LocalBranch, NodeJson, RepoRefs, Shown, Tag,
 };
-use ocelli_core::port::{Confirmation, Write};
+use ocelli_core::port::{Confirmation, ResetMode, Take, Write};
 use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use std::collections::HashSet;
 use std::path::PathBuf;
@@ -51,6 +51,8 @@ pub struct Loaded {
     pub locals: Vec<LocalBranch>,
     /// The remote a fetch reaches without one named.
     pub default_remote: Option<String>,
+    /// The operation stopped in the repository, with its conflicted files (ADR-0033).
+    pub in_progress: Option<InProgress>,
 }
 
 impl Loaded {
@@ -72,6 +74,7 @@ impl Loaded {
             tags: Vec::new(),
             locals: Vec::new(),
             default_remote: None,
+            in_progress: None,
         }
     }
 
@@ -81,6 +84,7 @@ impl Loaded {
         self.tags = repo_refs.tags.clone();
         self.locals = repo_refs.locals.clone();
         self.default_remote = repo_refs.default_remote.clone();
+        self.in_progress = repo_refs.in_progress.clone();
         self.refs = RefContext {
             head: repo_refs
                 .locals
@@ -188,6 +192,10 @@ pub enum Modal {
         name: String,
         switch: bool,
     },
+    /// The mode chosen after `X` for a reset of the checked-out branch to `commit`.
+    Reset { commit: String, mode: ResetMode },
+    /// The conflicted files of the operation in progress, after `!`, the cursor on `selected`.
+    Conflicts { selected: usize },
 }
 
 pub struct App {
@@ -533,6 +541,8 @@ impl App {
                     name,
                     switch,
                 } => self.branch_key(commit, name, switch, key),
+                Modal::Reset { commit, mode } => self.reset_key(commit, mode, key),
+                Modal::Conflicts { selected } => self.conflicts_key(selected, key),
             };
         }
         if self.search.editing {
@@ -565,6 +575,7 @@ impl App {
             KeyCode::Char('q') => self.quit = true,
             KeyCode::Char('f') if self.focus != Focus::Sidebar => self.start_fetch(None),
             KeyCode::Char('U') => self.start_pull(),
+            KeyCode::Char('!') => self.open_conflicts(),
             KeyCode::Char('P') => self.start_push(),
             KeyCode::Char('1') => self.side.toggle_minimised(),
             KeyCode::Char('T') => self.theme = self.theme.toggled(),
@@ -998,6 +1009,162 @@ impl App {
         self.transferring = true;
     }
 
+    /// The checked-out branch, which every operation of G-5 works on.
+    fn head_branch(&mut self) -> Option<(String, String)> {
+        let head = self
+            .data
+            .as_ref()
+            .and_then(|d| d.locals.iter().find(|b| b.is_head))
+            .map(|b| (b.name.clone(), b.sha.clone()));
+        if head.is_none() {
+            self.status = "No branch is checked out".to_string();
+        }
+        head
+    }
+
+    /// `m`, `R`, `C`, `V`, `X` on a commit: merges it in, rebases onto it, cherry-picks it,
+    /// reverts it, or asks how to reset to it (ADR-0033).
+    fn start_history(&mut self, key: char) {
+        let Some(node) = self.selected_node() else {
+            return;
+        };
+        if node.kind != CommitKind::Commit {
+            self.status = "Only a commit can be merged, picked, reverted, or reset to".to_string();
+            return;
+        }
+        let Some((branch, tip)) = self.head_branch() else {
+            return;
+        };
+        let commit = node.sha.clone();
+        let write = match key {
+            'm' => {
+                let name = self.data.as_ref().and_then(|d| {
+                    d.locals
+                        .iter()
+                        .find(|b| b.sha == commit && !b.is_head)
+                        .map(|b| b.name.clone())
+                });
+                Write::Merge {
+                    branch,
+                    tip,
+                    commit,
+                    name,
+                }
+            }
+            'R' => Write::Rebase {
+                branch,
+                tip,
+                onto: commit,
+            },
+            'C' => Write::CherryPick {
+                branch,
+                tip,
+                commit,
+            },
+            'V' => Write::Revert {
+                branch,
+                tip,
+                commit,
+            },
+            _ => {
+                self.modal = Some(Modal::Reset {
+                    commit,
+                    mode: ResetMode::Mixed,
+                });
+                return;
+            }
+        };
+        self.ask_or_queue(write);
+    }
+
+    fn reset_key(&mut self, commit: String, mode: ResetMode, key: KeyEvent) {
+        let mode = match key.code {
+            KeyCode::Esc => return,
+            KeyCode::Tab => match mode {
+                ResetMode::Soft => ResetMode::Mixed,
+                ResetMode::Mixed => ResetMode::Hard,
+                ResetMode::Hard => ResetMode::Soft,
+            },
+            KeyCode::Enter => {
+                let Some((branch, tip)) = self.head_branch() else {
+                    return;
+                };
+                self.ask_or_queue(Write::Reset {
+                    branch,
+                    tip,
+                    commit,
+                    mode,
+                });
+                return;
+            }
+            _ => mode,
+        };
+        self.modal = Some(Modal::Reset { commit, mode });
+    }
+
+    /// `!`: the conflicted files of the operation in progress (ADR-0033).
+    fn open_conflicts(&mut self) {
+        if self
+            .data
+            .as_ref()
+            .and_then(|d| d.in_progress.as_ref())
+            .is_none()
+        {
+            self.status = "No operation is in progress".to_string();
+            return;
+        }
+        self.modal = Some(Modal::Conflicts { selected: 0 });
+    }
+
+    /// In the conflicts: `j`/`k` move, `o`, `t`, `e` resolve the file by ours, theirs, or as
+    /// edited, `c` continues the operation, `A` aborts it once confirmed.
+    fn conflicts_key(&mut self, mut selected: usize, key: KeyEvent) {
+        let Some(stopped) = self.data.as_ref().and_then(|d| d.in_progress.clone()) else {
+            return;
+        };
+        let last = stopped.conflicts.len().saturating_sub(1);
+        let take = match key.code {
+            KeyCode::Esc => return,
+            KeyCode::Char('j') | KeyCode::Down => {
+                selected = (selected + 1).min(last);
+                None
+            }
+            KeyCode::Char('k') | KeyCode::Up => {
+                selected = selected.saturating_sub(1);
+                None
+            }
+            KeyCode::Char('o') => Some(Take::Ours),
+            KeyCode::Char('t') => Some(Take::Theirs),
+            KeyCode::Char('e') => Some(Take::AsEdited),
+            KeyCode::Char('c') => {
+                self.ask_or_queue(Write::Continue {
+                    operation: stopped.operation,
+                    head: stopped.head,
+                });
+                return;
+            }
+            KeyCode::Char('A') => {
+                self.ask_or_queue(Write::Abort {
+                    operation: stopped.operation,
+                    head: stopped.head,
+                });
+                return;
+            }
+            _ => None,
+        };
+        if let Some(take) = take
+            && let Some(conflict) = stopped.conflicts.get(selected)
+        {
+            self.ask_or_queue(Write::Resolve {
+                path: conflict.path.clone(),
+                conflict: conflict.clone(),
+                take,
+            });
+            return;
+        }
+        self.modal = Some(Modal::Conflicts { selected });
+    }
+
     /// `b` on a commit: asks for the name of a branch there.
     fn start_branch(&mut self) {
         let Some(node) = self.selected_node() else {
@@ -1224,6 +1391,10 @@ impl App {
                 self.start_detach();
                 None
             }
+            KeyCode::Char(c @ ('m' | 'R' | 'C' | 'V' | 'X')) => {
+                self.start_history(c);
+                None
+            }
             KeyCode::Char('s') => {
                 self.modal = Some(Modal::Stash(StashPrompt::default()));
                 None
@@ -1280,6 +1451,7 @@ impl App {
             KeyCode::Char('c') => self.start_commit(),
             KeyCode::Char('b') => self.start_branch(),
             KeyCode::Char('w') => self.start_detach(),
+            KeyCode::Char(c @ ('m' | 'R' | 'C' | 'V' | 'X')) => self.start_history(c),
             KeyCode::Char(c @ ('a' | 'p' | 'd')) => self.on_stash(KeyCode::Char(c)),
             KeyCode::Enter => {
                 let Some(sha) = links.get(self.link) else {
@@ -2359,6 +2531,141 @@ pub(crate) mod tests {
         app.writing = true;
         app.on_msg(Msg::Written(Err("a tag named 'v1' exists already".into())));
         assert_eq!(app.reload, None);
+    }
+
+    #[test]
+    // Verifies: ADR-0033, G-5
+    fn the_history_keys_merge_rebase_pick_revert_and_reset_onto_the_selected_commit() {
+        let on_b = || {
+            let mut app = loaded_app();
+            let row = app.data.as_ref().unwrap().row_of("b").unwrap();
+            app.select(row);
+            app
+        };
+        let (branch, tip, commit) = ("main".to_string(), "d".to_string(), "b".to_string());
+        let mut app = on_b();
+        press(&mut app, KeyCode::Char('m'));
+        let merge = Write::Merge {
+            branch: branch.clone(),
+            tip: tip.clone(),
+            commit: commit.clone(),
+            name: Some("feat/x".into()),
+        };
+        assert_eq!(taken(&mut app), Some((merge, Confirmation::Absent)));
+        for (key, write) in [
+            (
+                'R',
+                Write::Rebase {
+                    branch: branch.clone(),
+                    tip: tip.clone(),
+                    onto: commit.clone(),
+                },
+            ),
+            (
+                'C',
+                Write::CherryPick {
+                    branch: branch.clone(),
+                    tip: tip.clone(),
+                    commit: commit.clone(),
+                },
+            ),
+            (
+                'V',
+                Write::Revert {
+                    branch: branch.clone(),
+                    tip: tip.clone(),
+                    commit: commit.clone(),
+                },
+            ),
+        ] {
+            let mut app = on_b();
+            press(&mut app, KeyCode::Char(key));
+            assert_eq!(
+                taken(&mut app),
+                Some((write, Confirmation::Absent)),
+                "{key}"
+            );
+        }
+
+        // A reset asks for its mode; a hard one is asked about once more.
+        let mut app = on_b();
+        press(&mut app, KeyCode::Char('X'));
+        press(&mut app, KeyCode::Enter);
+        let reset = |mode| Write::Reset {
+            branch: branch.clone(),
+            tip: tip.clone(),
+            commit: commit.clone(),
+            mode,
+        };
+        assert_eq!(
+            taken(&mut app),
+            Some((reset(ResetMode::Mixed), Confirmation::Absent))
+        );
+        press(&mut app, KeyCode::Char('X'));
+        press(&mut app, KeyCode::Tab);
+        press(&mut app, KeyCode::Enter);
+        assert_eq!(app.confirm(), Some(&reset(ResetMode::Hard)));
+        press(&mut app, KeyCode::Char('y'));
+        assert_eq!(
+            taken(&mut app),
+            Some((reset(ResetMode::Hard), Confirmation::Given))
+        );
+    }
+
+    #[test]
+    // Verifies: ADR-0033, G-6
+    fn the_conflicts_resolve_continue_and_abort_after_a_confirmation() {
+        let conflict = ocelli_core::model::Conflict {
+            path: "f".into(),
+            ancestor: Some("a".into()),
+            ours: Some("o".into()),
+            theirs: Some("t".into()),
+        };
+        let mut app = loaded_app();
+        app.data.as_mut().unwrap().in_progress = Some(InProgress {
+            operation: ocelli_core::model::Operation::Merge,
+            conflicts: vec![conflict.clone()],
+            head: "d".into(),
+        });
+        press(&mut app, KeyCode::Char('!'));
+        press(&mut app, KeyCode::Char('e'));
+        let resolve = |take| Write::Resolve {
+            path: "f".into(),
+            conflict: conflict.clone(),
+            take,
+        };
+        assert_eq!(
+            taken(&mut app),
+            Some((resolve(Take::AsEdited), Confirmation::Absent))
+        );
+        press(&mut app, KeyCode::Char('!'));
+        press(&mut app, KeyCode::Char('t'));
+        assert_eq!(
+            app.confirm(),
+            Some(&resolve(Take::Theirs)),
+            "an edit may be lost"
+        );
+        press(&mut app, KeyCode::Char('y'));
+        assert_eq!(
+            taken(&mut app),
+            Some((resolve(Take::Theirs), Confirmation::Given))
+        );
+        press(&mut app, KeyCode::Char('!'));
+        press(&mut app, KeyCode::Char('c'));
+        let carry_on = Write::Continue {
+            operation: ocelli_core::model::Operation::Merge,
+            head: "d".into(),
+        };
+        assert_eq!(taken(&mut app), Some((carry_on, Confirmation::Absent)));
+        press(&mut app, KeyCode::Char('!'));
+        press(&mut app, KeyCode::Char('A'));
+        assert!(matches!(app.confirm(), Some(Write::Abort { .. })));
+        press(&mut app, KeyCode::Char('n'));
+        assert_eq!(app.write, None, "declined, nothing aborted");
+
+        let mut app = loaded_app();
+        press(&mut app, KeyCode::Char('!'));
+        assert_eq!(app.status, "No operation is in progress");
     }
 
     #[test]

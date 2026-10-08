@@ -104,6 +104,9 @@ fn a_fixed_repository_loads_as_the_reference_did() {
         .remove("defaultRemote")
         .unwrap();
     assert_eq!(default_remote, serde_json::Value::Null);
+    // So did the operation in progress (G-6): none in the fixture.
+    let in_progress = refs.as_object_mut().unwrap().remove("inProgress").unwrap();
+    assert_eq!(in_progress, serde_json::Value::Null);
     assert_eq!(refs, expected("repo-refs.json"));
 
     let (head, merge) = {

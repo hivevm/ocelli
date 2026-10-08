@@ -3,7 +3,7 @@
 //
 // All of it is bookkeeping over strings and numbers, so it lives here and is tested directly.
 
-import type { FileChange } from './types.ts';
+import type { Conflict, FileChange, Operation } from './types.ts';
 
 /** A write as the core's `Write` crosses to the host, its kind in `kind`. */
 export type Write =
@@ -22,7 +22,26 @@ export type Write =
   | { kind: 'deleteBranch'; name: string; tip: string; merged: boolean }
   | { kind: 'fetch'; remote: string }
   | { kind: 'pull'; branch: string; tip: string }
-  | { kind: 'push'; branch: string; tip: string };
+  | { kind: 'push'; branch: string; tip: string }
+  | { kind: 'merge'; branch: string; tip: string; commit: string; name: string | null }
+  | { kind: 'rebase'; branch: string; tip: string; onto: string }
+  | { kind: 'cherryPick'; branch: string; tip: string; commit: string }
+  | { kind: 'revert'; branch: string; tip: string; commit: string }
+  | { kind: 'reset'; branch: string; tip: string; commit: string; mode: ResetMode }
+  | { kind: 'resolve'; path: string; conflict: Conflict; take: Take }
+  | { kind: 'continue'; operation: Operation; head: string }
+  | { kind: 'abort'; operation: Operation; head: string };
+
+/** How a reset moves the checked-out branch, as git reset names it. */
+export type ResetMode = 'soft' | 'mixed' | 'hard';
+
+/** Which side of a conflicted file a resolution takes. */
+export type Take = 'ours' | 'theirs' | 'asEdited';
+
+/** The name of an operation as git writes it. */
+export function operationName(operation: Operation): string {
+  return operation === 'cherryPick' ? 'cherry-pick' : operation;
+}
 
 /** A write of one kind. */
 export type WriteOf<K extends Write['kind']> = Extract<Write, { kind: K }>;
@@ -73,6 +92,9 @@ export function actionLabel(write: Write): string {
     case 'applyStash': return write.drop ? 'Pop stash' : 'Apply stash';
     case 'dropStash': return 'Drop stash';
     case 'deleteBranch': return 'Delete branch';
+    case 'reset': return 'Reset hard';
+    case 'abort': return `Abort the ${operationName(write.operation)}`;
+    case 'resolve': return write.take === 'ours' ? 'Take ours' : 'Take theirs';
     default: return 'Go ahead';
   }
 }
