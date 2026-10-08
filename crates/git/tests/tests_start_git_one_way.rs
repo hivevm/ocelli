@@ -8,11 +8,15 @@
     reason = "a test sets a repository up by hand, the way a developer would"
 )]
 
+// Only the unix test of the programs starts git through it; elsewhere the check reads it alone.
+#[cfg_attr(not(unix), allow(dead_code))]
 mod git_command;
 #[cfg(unix)]
 mod programs;
 
-use git_command::{git_command, other_ways};
+#[cfg(unix)]
+use git_command::git_command;
+use git_command::other_ways;
 use std::path::{Path, PathBuf};
 
 /// Every Rust file under the tests of the workspace's crates.
@@ -65,6 +69,10 @@ fn the_check_names_each_line_that_starts_git_another_way() {
         other_ways("let x = git_command(dir);\nCommand::new(\"cp\");\n"),
         vec![]
     );
+    let spaced = concat!("Command :: new ( ", "\"/usr/bin/git\" )");
+    let held = concat!("const GIT: &str = ", "\"git\";");
+    let text = format!("{spaced}\n{held}\nlet n = \"gitx\";\n");
+    assert_eq!(other_ways(&text), vec![1, 2]);
 }
 
 #[cfg(unix)]

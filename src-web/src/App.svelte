@@ -504,7 +504,8 @@
         Fetch
       </button>
       <button class="tb-btn" onclick={pullBranch} disabled={!('write' in pullable)}
-              title={'write' in pullable ? `Pull ${pullable.write.branch}, fast-forward only`
+              title={'write' in pullable
+                ? `Pull ${pullable.write.branch} from ${repoRefs?.locals.find(b => b.isHead)?.upstream}, fast-forward only`
                 : pullable.reason}>
         Pull
       </button>

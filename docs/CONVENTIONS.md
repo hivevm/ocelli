@@ -84,16 +84,17 @@ skimmed. The design revision drops what prevented nothing
   tested against `git` doing otherwise. A refusal is decided before libgit2 is called, since
   libgit2 can stop halfway; one only libgit2 can find, such as a branch name clashing with
   another, goes first, and a refusal after it undoes it. Its test compares everything the write
-  can change before and after: `HEAD`, the refs, the index, and the working directory's status,
-  ignored files included. A write that waits, on a remote or on a lock, checks what it expects
-  again after the wait, under a lock on what it moves, since a commit can land meanwhile. Every
-  repository Ocelli touches stays one `git` knows what to do with. A path goes to libgit2 as a
-  path, never as a pattern, and the working directory is written only through libgit2's checkout,
-  which writes a link as a link and a file with its mode, never below a link; `clippy.toml` of
-  the git adapter refuses the methods that do either, and a call that stays says why. `git`'s
-  state is more than the repository's state: a sequencer, an autostash, a file changed since an
-  operation stopped. A write's tests include a path with `[` or `*` in it, a link, an executable
-  file, and each such state.
+  can change before and after: `HEAD`, the refs, the index, the working directory's status with
+  ignored files, the configuration, and an operation in progress, the one snapshot `refused` in
+  `crates/git/tests/write.rs` takes. A write that waits, on a remote or on a lock, checks what it
+  expects again after the wait, under a lock on what it moves, since a commit can land
+  meanwhile. Every repository Ocelli touches stays one `git` knows what to do with. A path goes
+  to libgit2 as a path, never as a pattern, and the working directory is written only through
+  libgit2's checkout, which writes a link as a link and a file with its mode, never below a link;
+  `clippy.toml` of the git adapter refuses the methods that do either, and a call that stays says
+  why. `git`'s state is more than the repository's state: a sequencer, an autostash, a file
+  changed since an operation stopped. A write's tests include a path with `[` or `*` in it, a
+  link, an executable file, and each such state.
 - **A control that writes takes no second press while its write runs, and offers no stop it
   cannot keep.** A second click on a write that has not answered yet writes twice, or is refused
   for a state the first one changed; a Cancel on a push, which libgit2 cannot stop once its

@@ -14,7 +14,7 @@ describe('the transfers of the checked-out branch', () => {
     const { cases } = (await Bun.file(fixture).json()) as {
       cases: { refs: RepoRefs; fetch: unknown; pull: unknown; push: unknown }[];
     };
-    expect(cases.length).toBeGreaterThan(3);
+    expect(cases.length).toBeGreaterThan(5);
     for (const { refs, fetch, pull, push } of cases) {
       expect(fetchOf(refs)).toEqual(fetch as ReturnType<typeof fetchOf>);
       expect(pullOf(refs)).toEqual(pull as ReturnType<typeof pullOf>);

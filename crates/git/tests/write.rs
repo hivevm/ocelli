@@ -14,6 +14,7 @@ mod git_command;
 use git_command::git_command;
 use ocelli_core::port::{RepositoryReader, RepositoryWriter, Write};
 use ocelli_git::GitWriter;
+use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 
 mod programs;
@@ -36,6 +37,11 @@ impl Drop for Scratch {
 }
 
 fn git(dir: &Path, args: &[&str]) -> String {
+    raw(dir, args).trim().to_string()
+}
+
+/// What `git` prints, untrimmed, for output whose leading space or NUL separators are read.
+fn raw(dir: &Path, args: &[&str]) -> String {
     let out = git_command(dir)
         .args(["-c", "user.name=F", "-c", "user.email=f@example.invalid"])
         .args(args)
@@ -46,7 +52,290 @@ fn git(dir: &Path, args: &[&str]) -> String {
         "git {args:?}: {}",
         String::from_utf8_lossy(&out.stderr)
     );
-    String::from_utf8(out.stdout).unwrap().trim().to_string()
+    String::from_utf8(out.stdout).unwrap()
+}
+
+/// The files `git` keeps in its directory while an operation is in progress, and `ORIG_HEAD`,
+/// which the operations set.
+const IN_PROGRESS: &[&str] = &[
+    "MERGE_HEAD",
+    "MERGE_MSG",
+    "MERGE_MODE",
+    "MERGE_AUTOSTASH",
+    "AUTO_MERGE",
+    "CHERRY_PICK_HEAD",
+    "REVERT_HEAD",
+    "ORIG_HEAD",
+    "BISECT_LOG",
+    "rebase-merge",
+    "rebase-apply",
+    "sequencer",
+];
+
+/// The repository as `git` reads it, everything a write can change: a refused write leaves each
+/// part as it was (`docs/CONVENTIONS.md`, a refusal changes nothing).
+#[derive(Debug, PartialEq)]
+struct Snapshot {
+    head: String,
+    /// Every ref, the tags, the remote branches, and the stash included.
+    refs: String,
+    /// The stash's entries, those below its newest included, which no ref names.
+    stash: String,
+    index: String,
+    /// Each path the status names, ignored and untracked files included, with its content.
+    status: Vec<(String, Option<String>)>,
+    /// The repository's own configuration, where a branch's upstream is kept.
+    config: String,
+    /// Every directory of the working directory, an empty one included, which the status omits.
+    dirs: Vec<String>,
+    in_progress: Vec<(String, String)>,
+}
+
+fn snapshot(dir: &Path) -> Snapshot {
+    let status = raw(
+        dir,
+        &[
+            "status",
+            "--porcelain",
+            "-z",
+            "--ignored",
+            "--untracked-files=all",
+        ],
+    );
+    let mut fields = status.split('\0').filter(|f| !f.is_empty());
+    let mut entries = Vec::new();
+    while let Some(entry) = fields.next() {
+        let path = &entry[3..];
+        // A rename or a copy names its source in the field after.
+        let entry = match entry.as_bytes()[0] {
+            b'R' | b'C' => format!("{entry} from {}", fields.next().unwrap()),
+            _ => entry.to_string(),
+        };
+        entries.push((entry, content_of(&dir.join(path))));
+    }
+    let git_dir = PathBuf::from(git(dir, &["rev-parse", "--absolute-git-dir"]));
+    let mut in_progress = Vec::new();
+    for name in IN_PROGRESS {
+        files_below(&git_dir, Path::new(name), &mut in_progress);
+    }
+    Snapshot {
+        head: head_of(dir),
+        refs: git(dir, &["for-each-ref", "--format=%(refname) %(objectname)"]),
+        stash: git(dir, &["stash", "list", "--format=%gd %H %gs"]),
+        index: git(dir, &["ls-files", "--stage"]),
+        status: entries,
+        config: git(dir, &["config", "--local", "--list"]),
+        dirs: dirs_below(dir, Path::new("")),
+        in_progress,
+    }
+}
+
+/// The content of the file at `path`, by blob id, a link's target, or `None` for a directory or
+/// nothing.
+fn content_of(path: &Path) -> Option<String> {
+    let meta = path.symlink_metadata().ok()?;
+    if meta.is_symlink() {
+        return Some(format!(
+            "-> {}",
+            std::fs::read_link(path).unwrap().display()
+        ));
+    }
+    meta.is_file().then(|| {
+        git2::Oid::hash_file(git2::ObjectType::Blob, path)
+            .unwrap()
+            .to_string()
+    })
+}
+
+/// Every file at or below `path` in `root`, with its content.
+/// The directories below `path` of the working directory `root`, `.git` left out.
+fn dirs_below(root: &Path, path: &Path) -> Vec<String> {
+    let mut found = Vec::new();
+    let mut names: Vec<_> = std::fs::read_dir(root.join(path))
+        .unwrap()
+        .map(|e| e.unwrap().path())
+        .filter(|p| p.symlink_metadata().is_ok_and(|m| m.is_dir()))
+        .filter(|p| p.file_name().is_some_and(|n| n != ".git"))
+        .collect();
+    names.sort();
+    for dir in names {
+        let name = dir.strip_prefix(root).unwrap().to_path_buf();
+        found.push(name.display().to_string());
+        found.extend(dirs_below(root, &name));
+    }
+    found
+}
+
+fn files_below(root: &Path, path: &Path, found: &mut Vec<(String, String)>) {
+    let full = root.join(path);
+    if full.is_dir() {
+        let mut names: Vec<_> = std::fs::read_dir(&full)
+            .unwrap()
+            .map(|e| e.unwrap().file_name())
+            .collect();
+        names.sort();
+        for name in names {
+            files_below(root, &path.join(name), found);
+        }
+    } else if let Ok(content) = std::fs::read(&full) {
+        let content = String::from_utf8_lossy(&content).into_owned();
+        found.push((path.display().to_string(), content));
+    }
+}
+
+/// Writes `write` and expects it refused with `why` among its words, and the repository's
+/// [`Snapshot`] as it was before. Every refusal test of the writer goes through here, so that
+/// none compares less than the whole snapshot.
+fn refused(dir: &Path, write: &Write, why: &str) {
+    refused_reporting(dir, write, why, true, |_| {});
+}
+
+/// [`refused`], with the write's progress answered with `go_on`, and `meanwhile` run on the
+/// repository at the first report, as another program would change it while the write waits:
+/// the snapshot expected after is the one taken once `meanwhile` ran.
+fn refused_reporting(
+    dir: &Path,
+    write: &Write,
+    why: &str,
+    go_on: bool,
+    meanwhile: impl FnOnce(&Path),
+) {
+    let mut before = snapshot(dir);
+    let mut meanwhile = Some(meanwhile);
+    let mut reports = 0;
+    let error = GitWriter
+        .write_reporting(dir, write, &mut |_| {
+            reports += 1;
+            if let Some(change) = meanwhile.take() {
+                change(dir);
+                before = snapshot(dir);
+            }
+            go_on
+        })
+        .unwrap_err();
+    assert!(error.to_string().contains(why), "{write:?}: {error}");
+    assert!(
+        go_on || reports > 0,
+        "{write:?}: the write was asked to stop, so it reported"
+    );
+    assert_eq!(snapshot(dir), before, "{write:?}");
+}
+
+/// The lines of the Rust source `text` that take a refusal of a write outside
+/// [`refused_reporting`], by number, so that no test of the writer compares less than the
+/// snapshot.
+fn refusals_outside_the_helper(text: &str) -> Vec<usize> {
+    let mut inside = false;
+    let mut found = Vec::new();
+    for (i, line) in text.lines().enumerate() {
+        if line.starts_with("fn refused_reporting(") {
+            inside = true;
+        } else if inside && line == "}" {
+            inside = false;
+        } else if !inside {
+            let takes_an_error = [
+                concat!(".unwrap", "_err()"),
+                concat!(".expect", "_err("),
+                concat!(".is", "_err()"),
+                concat!(".err", "()"),
+                concat!("let ", "Err("),
+            ]
+            .iter()
+            .any(|p| line.contains(p));
+            // A refusal of a write on this line, the one before, or the one after.
+            let writes = |l: &str| l.contains(".write(") || l.contains("write_reporting(");
+            let near = |j: Option<usize>| j.and_then(|j| text.lines().nth(j)).is_some_and(writes);
+            let of_a_write = writes(line) || near(i.checked_sub(1)) || near(Some(i + 1));
+            let unconditional = line.contains(concat!(".unwrap", "_err()"))
+                || line.contains(concat!(".expect", "_err("));
+            if takes_an_error && (unconditional || of_a_write) {
+                found.push(i + 1);
+            }
+        }
+    }
+    found
+}
+
+#[test]
+fn every_refusal_test_of_the_writer_compares_the_snapshot() {
+    let text = include_str!("write.rs");
+    assert!(
+        text.contains("fn refused_reporting("),
+        "the helper is where the check looks for it"
+    );
+    let found = refusals_outside_the_helper(text);
+    assert!(
+        found.is_empty(),
+        "crates/git/tests/write.rs takes a refusal outside refused() on lines {found:?}"
+    );
+}
+
+#[test]
+fn the_check_names_each_line_that_takes_a_refusal_outside_the_helper() {
+    let unwrap = concat!(".unwrap", "_err()");
+    let expect = concat!(".expect", "_err(\"refused\")");
+    let text = format!(
+        "fn refused_reporting(d: &Path) {{\n    let e = w(){unwrap};\n    if x {{\n    }}\n}}\n\
+         fn a() {{\n    let e = GitWriter.write(d, &w){unwrap};\n}}\n\
+         let f = w(){expect};\n"
+    );
+    assert_eq!(refusals_outside_the_helper(&text), vec![7, 9]);
+    assert_eq!(
+        refusals_outside_the_helper("fn a() {\n    refused(d, &w, \"why\");\n}\n"),
+        Vec::<usize>::new()
+    );
+    let is_err = concat!(".is", "_err()");
+    let let_err = concat!("let ", "Err(e)");
+    let text = format!(
+        "assert!(GitWriter.write(d, &w){is_err});\n\
+         {let_err} = GitWriter\n    .write(d, &w) else {{ return }};\n\
+         let r = GitWriter.write_reporting(d, &w, &mut go);\nif {let_err} = r {{}}\n\
+         assert!(std::fs::read(p){is_err});\n"
+    );
+    assert_eq!(refusals_outside_the_helper(&text), vec![1, 2, 5]);
+}
+
+#[test]
+// Verifies: ADR-0033
+fn the_snapshot_sees_every_part_a_write_can_change() {
+    let scratch = with_file("snapshot");
+    let d = &scratch.0;
+    write_file(d, ".git/info/exclude", "ignored\n");
+    write_file(d, "ignored", "one\n");
+    for content in ["first\n", "second\n"] {
+        write_file(d, "f", content);
+        git(d, &["stash", "push", "--quiet"]);
+    }
+    let sees = |part: &str, change: &dyn Fn()| {
+        let before = snapshot(d);
+        change();
+        assert_ne!(snapshot(d), before, "{part}");
+    };
+    sees("HEAD", &|| {
+        git(d, &["checkout", "--quiet", "--detach"]);
+    });
+    sees("a tag", &|| {
+        git(d, &["tag", "t"]);
+    });
+    sees("an older stash", &|| {
+        git(d, &["stash", "drop", "--quiet", "stash@{1}"]);
+    });
+    sees("the index", &|| {
+        write_file(d, "f", "staged\n");
+        git(d, &["add", "f"]);
+    });
+    sees("a file's content", &|| write_file(d, "f", "other\n"));
+    sees("an ignored file", &|| write_file(d, "ignored", "two\n"));
+    sees("an upstream", &|| {
+        git(d, &["config", "branch.main.remote", "origin"]);
+    });
+    sees("a merge in progress", &|| {
+        let head = git(d, &["rev-parse", "HEAD"]);
+        write_file(d, ".git/MERGE_HEAD", &format!("{head}\n"));
+    });
+    sees("a sequencer", &|| {
+        write_file(d, ".git/sequencer/todo", "pick x\n");
+    });
 }
 
 /// A repository with two commits on main, its identity in its own configuration, and the SHAs.
@@ -120,12 +409,7 @@ fn a_tag_whose_name_is_taken_is_refused_with_nothing_changed() {
     let scratch = Scratch::new("taken");
     let (one, two) = repository(&scratch.0);
     git(&scratch.0, &["tag", "v1", &one]);
-    let before = tags(&scratch.0);
-    let error = GitWriter
-        .write(&scratch.0, &tag("v1", &two, None))
-        .unwrap_err();
-    assert!(error.to_string().contains("exists already"), "{error}");
-    assert_eq!(tags(&scratch.0), before);
+    refused(&scratch.0, &tag("v1", &two, None), "exists already");
 }
 
 #[test]
@@ -133,27 +417,24 @@ fn a_tag_on_a_commit_no_longer_there_or_with_a_bad_name_is_refused() {
     let scratch = Scratch::new("refused");
     let (one, _) = repository(&scratch.0);
     let gone = "0123456789abcdef0123456789abcdef01234567";
-    let error = GitWriter
-        .write(&scratch.0, &tag("v1", gone, None))
-        .unwrap_err();
-    assert!(
-        error.to_string().contains("no longer in the repository"),
-        "{error}"
+    refused(
+        &scratch.0,
+        &tag("v1", gone, None),
+        "no longer in the repository",
     );
     for bad in ["a..b", "-v1"] {
-        let error = GitWriter
-            .write(&scratch.0, &tag(bad, &one, None))
-            .unwrap_err();
-        assert!(error.to_string().contains("not a name"), "{error}");
+        refused(&scratch.0, &tag(bad, &one, None), "not a name");
     }
-    assert_eq!(tags(&scratch.0), "");
 }
 
 #[test]
-// Verifies: ADR-0033, Q-4
+// Verifies: ADR-0033, ADR-0035, Q-4
 fn writing_a_repository_runs_none_of_its_programs() {
+    use ocelli_core::model::Operation;
+    use ocelli_core::port::{ResetMode, Take};
     let scratch = with_file("programs");
-    let one = git(&scratch.0, &["rev-parse", "HEAD"]);
+    let d = &scratch.0;
+    let one = git(d, &["rev-parse", "HEAD"]);
     let remote = Scratch::new("programs-remote");
     std::fs::remove_dir_all(&remote.0).unwrap();
     git(
@@ -162,108 +443,237 @@ fn writing_a_repository_runs_none_of_its_programs() {
             "clone",
             "--quiet",
             "--bare",
-            scratch.0.to_str().unwrap(),
+            d.to_str().unwrap(),
             remote.0.to_str().unwrap(),
         ],
     );
-    git(
-        &scratch.0,
-        &["remote", "add", "origin", remote.0.to_str().unwrap()],
-    );
+    git(d, &["remote", "add", "origin", remote.0.to_str().unwrap()]);
     // Outside the repository, so that stashing the untracked files leaves them be.
     let tools = Scratch::new("programs-ran");
-    let markers = programs::set_everywhere(&scratch.0, &tools.0);
+    let markers = programs::set_everywhere(d, &tools.0);
     // Ocelli refuses what these would have git sign (ADR-0033); the writes here go through.
-    let mut config = git2::Repository::open(&scratch.0)
-        .unwrap()
-        .config()
-        .unwrap();
+    let mut config = git2::Repository::open(d).unwrap().config().unwrap();
     for (key, _) in programs::SWITCHES {
         config.remove(key).unwrap();
     }
+    // Read with git2, which runs none of the programs, where git would run fsmonitor.
+    let rev = |r: &str| {
+        let repository = git2::Repository::open(d).unwrap();
+        repository.revparse_single(r).unwrap().id().to_string()
+    };
+    let mut performed = BTreeSet::new();
+    let mut write = |write: Write| {
+        performed.insert(kind_of(&write));
+        GitWriter.write(d, &write).unwrap()
+    };
 
-    GitWriter
-        .write(&scratch.0, &tag("v1", &one, Some("release")))
-        .unwrap();
-    GitWriter.write(&scratch.0, &tag("v2", &one, None)).unwrap();
-    std::fs::write(scratch.0.join("f"), "more\n").unwrap();
-    std::fs::write(scratch.0.join("new"), "untracked\n").unwrap();
-    GitWriter
-        .write(&scratch.0, &create_stash(None, true))
-        .unwrap();
-    let mut stash = String::new();
-    git2::Repository::open(&scratch.0)
-        .unwrap()
-        .stash_foreach(|_, _, oid| {
-            stash = oid.to_string();
-            true
-        })
-        .unwrap();
-    GitWriter
-        .write(&scratch.0, &apply(0, &stash, true))
-        .unwrap();
-    GitWriter
-        .write(&scratch.0, &stage_in(&scratch.0, "f"))
-        .unwrap();
-    GitWriter
-        .write(&scratch.0, &unstage_in(&scratch.0, "f"))
-        .unwrap();
-    GitWriter
-        .write(&scratch.0, &stage_in(&scratch.0, "f"))
-        .unwrap();
-    let made = GitWriter
-        .write(&scratch.0, &commit_on(&one, "commit"))
-        .unwrap()
-        .unwrap();
+    write(tag("v1", &one, Some("release")));
+    write(tag("v2", &one, None));
+    write(delete("v2", &one, false));
+    std::fs::write(d.join("f"), "more\n").unwrap();
+    std::fs::write(d.join("new"), "untracked\n").unwrap();
+    write(create_stash(None, true));
+    write(apply(0, &rev("refs/stash"), true));
+    write(stage_in(d, "f"));
+    write(unstage_in(d, "f"));
+    write(stage_in(d, "f"));
+    let made = write(commit_on(&one, "commit")).unwrap();
+    write(create_stash(None, true));
+    write(Write::DropStash {
+        index: 0,
+        commit: rev("refs/stash"),
+    });
     // A switch is where git runs post-checkout.
-    let branch = Write::CreateBranch {
-        name: "b".into(),
-        commit: one.clone(),
+    let switch = |name: &str, tip: &str| Write::SwitchBranch {
+        name: name.into(),
+        tip: tip.into(),
+    };
+    let branch = |name: &str, commit: &str| Write::CreateBranch {
+        name: name.into(),
+        commit: commit.into(),
         switch: true,
     };
-    GitWriter.write(&scratch.0, &branch).unwrap();
-    let back = Write::SwitchBranch {
-        name: "main".into(),
-        tip: made.clone(),
-    };
-    GitWriter.write(&scratch.0, &back).unwrap();
-    GitWriter
-        .write(
-            &scratch.0,
-            &Write::Detach {
-                commit: one.clone(),
-            },
-        )
-        .unwrap();
-    let delete = Write::DeleteBranch {
-        name: "b".into(),
-        tip: one.clone(),
+    let delete_branch = |name: &str, tip: &str| Write::DeleteBranch {
+        name: name.into(),
+        tip: tip.into(),
         merged: true,
     };
-    GitWriter.write(&scratch.0, &delete).unwrap();
-    let fetch = Write::Fetch {
+    write(branch("b", &one));
+    write(switch("main", &made));
+    write(Write::Detach {
+        commit: one.clone(),
+    });
+    write(delete_branch("b", &one));
+    write(Write::Fetch {
         remote: "origin".into(),
-    };
-    GitWriter.write(&scratch.0, &fetch).unwrap();
+    });
+    write(switch("main", &made));
     // A push is where git runs pre-push.
-    let back = Write::SwitchBranch {
-        name: "main".into(),
+    let push = |branch: &str| Write::Push {
+        branch: branch.into(),
         tip: made.clone(),
     };
-    GitWriter.write(&scratch.0, &back).unwrap();
-    let push = Write::Push {
+    write(push("main"));
+    // The push set main's upstream; origin moves on, so a pull fetches it and fast-forwards
+    // main, a checkout, where git runs post-checkout and post-merge.
+    let ahead = git(
+        &remote.0,
+        &[
+            "commit-tree",
+            &format!("{made}^{{tree}}"),
+            "-p",
+            &made,
+            "-m",
+            "ahead",
+        ],
+    );
+    git(&remote.0, &["update-ref", "refs/heads/main", &ahead]);
+    write(Write::Pull {
         branch: "main".into(),
         tip: made.clone(),
-    };
-    GitWriter.write(&scratch.0, &push).unwrap();
-    // The push set main's upstream, so a pull fetches it and finds nothing to move.
-    let pull = Write::Pull {
-        branch: "main".into(),
+    });
+    assert_eq!(rev("HEAD"), ahead, "the pull fast-forwarded main");
+    // Back where the writes below expect main, by the test's own git, which runs nothing.
+    git(d, &["reset", "--quiet", "--hard", &made]);
+    // A branch pushed and deleted here is one of origin's to track.
+    write(branch("t", &made));
+    write(push("t"));
+    write(switch("main", &made));
+    write(delete_branch("t", &made));
+    write(Write::TrackRemote {
+        remote: "origin".into(),
+        branch: "t".into(),
         tip: made.clone(),
-    };
-    GitWriter.write(&scratch.0, &pull).unwrap();
+    });
+    write(switch("main", &made));
+
+    // Two sides that conflict in f, for the operations on the history to stop on.
+    write(branch("side", &made));
+    std::fs::write(d.join("f"), "theirs\n").unwrap();
+    write(stage_in(d, "f"));
+    let theirs = write(commit_on(&made, "theirs")).unwrap();
+    write(switch("main", &made));
+    std::fs::write(d.join("f"), "ours\n").unwrap();
+    write(stage_in(d, "f"));
+    let ours = write(commit_on(&made, "ours")).unwrap();
+    // A merge that stops, resolved and continued: pre-merge-commit, post-merge, commit-msg.
+    let stopped = write(Write::Merge {
+        branch: "main".into(),
+        tip: ours.clone(),
+        commit: theirs.clone(),
+        name: Some("side".into()),
+    });
+    assert_eq!(stopped, None, "the merge stopped on f");
+    let conflict = ocelli_git::GitReader
+        .load_refs(d)
+        .unwrap()
+        .in_progress
+        .unwrap()
+        .conflicts[0]
+        .clone();
+    write(Write::Resolve {
+        path: "f".into(),
+        conflict,
+        take: Take::Ours,
+    });
+    let merged = write(Write::Continue {
+        operation: Operation::Merge,
+        head: ours.clone(),
+    })
+    .unwrap();
+    write(Write::Reset {
+        branch: "main".into(),
+        tip: merged,
+        commit: ours.clone(),
+        mode: ResetMode::Hard,
+    });
+    // A rebase and a cherry-pick that stop, and are aborted: pre-rebase, post-rewrite.
+    let stopped = write(Write::Rebase {
+        branch: "main".into(),
+        tip: ours.clone(),
+        onto: theirs.clone(),
+    });
+    assert_eq!(stopped, None, "the rebase stopped on f");
+    write(Write::Abort {
+        operation: Operation::Rebase,
+        head: rev("HEAD"),
+    });
+    let stopped = write(Write::CherryPick {
+        branch: "main".into(),
+        tip: ours.clone(),
+        commit: theirs,
+    });
+    assert_eq!(stopped, None, "the cherry-pick stopped on f");
+    write(Write::Abort {
+        operation: Operation::CherryPick,
+        head: rev("HEAD"),
+    });
+    write(Write::Revert {
+        branch: "main".into(),
+        tip: ours.clone(),
+        commit: ours,
+    })
+    .unwrap();
+
     let ran = markers.ran();
     assert!(ran.is_empty(), "programs ran: {ran:?}");
+    let missing = not_performed(&performed, &kinds_of_write());
+    assert!(
+        missing.is_empty(),
+        "the test of Q-4 for writing performs no {missing:?}"
+    );
+}
+
+/// The kind of `write`, as the core names it in JSON.
+fn kind_of(write: &Write) -> String {
+    serde_json::to_value(write).unwrap()["kind"]
+        .as_str()
+        .unwrap()
+        .to_string()
+}
+
+/// Every kind of `Write` the core takes, as serde lists them in its refusal of a kind it does not
+/// know: the one list a test can read without repeating it, and longer with each new write.
+fn kinds_of_write() -> Vec<String> {
+    let Err(refusal) = serde_json::from_str::<Write>(r#"{"kind":"?"}"#) else {
+        panic!("a kind the core does not know is refused");
+    };
+    let refusal = refusal.to_string();
+    let (_, expected) = refusal
+        .split_once("expected one of ")
+        .unwrap_or_else(|| panic!("the refusal lists the kinds: {refusal}"));
+    expected
+        .split(", ")
+        .map(|kind| kind.split('`').nth(1).unwrap().to_string())
+        .collect()
+}
+
+/// The `kinds` of write not among those `performed`.
+fn not_performed(performed: &BTreeSet<String>, kinds: &[String]) -> Vec<String> {
+    kinds
+        .iter()
+        .filter(|kind| !performed.contains(*kind))
+        .cloned()
+        .collect()
+}
+
+#[test]
+fn the_check_names_a_write_the_test_of_q4_does_not_perform() {
+    let kinds = kinds_of_write();
+    for kind in [
+        "createTag",
+        "pull",
+        "dropStash",
+        "trackRemote",
+        "revert",
+        "abort",
+    ] {
+        assert!(kinds.iter().any(|k| k == kind), "{kind} in {kinds:?}");
+    }
+    let mut performed: BTreeSet<String> = kinds.iter().cloned().collect();
+    assert_eq!(not_performed(&performed, &kinds), Vec::<String>::new());
+    performed.remove("dropStash");
+    assert_eq!(not_performed(&performed, &kinds), ["dropStash"]);
 }
 
 fn delete(name: &str, commit: &str, annotated: bool) -> Write {
@@ -294,16 +704,13 @@ fn a_tag_no_longer_as_shown_is_refused_with_nothing_changed() {
     let scratch = Scratch::new("moved");
     let (one, two) = repository(&scratch.0);
     git(&scratch.0, &["tag", "v1", &two]);
-    let before = tags(&scratch.0);
     for (write, why) in [
         (delete("v1", &one, false), "no longer the one shown"),
         (delete("v1", &two, true), "no longer the one shown"),
         (delete("gone", &two, false), "no tag named 'gone'"),
     ] {
-        let error = GitWriter.write(&scratch.0, &write).unwrap_err();
-        assert!(error.to_string().contains(why), "{error}");
+        refused(&scratch.0, &write, why);
     }
-    assert_eq!(tags(&scratch.0), before);
 }
 
 /// The stash's entries, newest first, as `stash@{n} message`.
@@ -371,11 +778,7 @@ fn stashing_puts_the_changes_aside_and_the_untracked_files_only_when_asked() {
 #[test]
 fn a_clean_working_directory_has_nothing_to_stash() {
     let scratch = with_file("clean");
-    let error = GitWriter
-        .write(&scratch.0, &create_stash(None, false))
-        .unwrap_err();
-    assert!(error.to_string().contains("nothing to stash"), "{error}");
-    assert_eq!(stashes(&scratch.0), "");
+    refused(&scratch.0, &create_stash(None, false), "nothing to stash");
 }
 
 #[test]
@@ -429,16 +832,7 @@ fn a_stash_that_would_conflict_is_refused_with_the_working_directory_unchanged()
     std::fs::write(scratch.0.join("f"), "committed\n").unwrap();
     git(&scratch.0, &["commit", "--quiet", "-am", "f again"]);
 
-    let error = GitWriter
-        .write(&scratch.0, &apply(0, &stash, true))
-        .unwrap_err();
-    assert!(error.to_string().contains("conflicts"), "{error}");
-    assert_eq!(
-        status(&scratch.0),
-        "",
-        "not even the untracked file came back"
-    );
-    assert_eq!(stashes(&scratch.0).lines().count(), 1);
+    refused(&scratch.0, &apply(0, &stash, true), "conflicts");
 }
 
 #[test]
@@ -449,16 +843,10 @@ fn a_stash_over_changes_of_the_working_directory_is_refused() {
     let stash = stash_at(&scratch.0, 0);
     std::fs::write(scratch.0.join("f"), "mine\n").unwrap();
 
-    let error = GitWriter
-        .write(&scratch.0, &apply(0, &stash, false))
-        .unwrap_err();
-    assert!(
-        error.to_string().contains("f has changes of its own"),
-        "{error}"
-    );
-    assert_eq!(
-        std::fs::read_to_string(scratch.0.join("f")).unwrap(),
-        "mine\n"
+    refused(
+        &scratch.0,
+        &apply(0, &stash, false),
+        "f has changes of its own",
     );
 }
 
@@ -471,7 +859,6 @@ fn a_stash_no_longer_at_its_place_is_neither_applied_nor_dropped() {
     let seen = stash_at(&scratch.0, 0);
     std::fs::write(scratch.0.join("f"), "second\n").unwrap();
     git(&scratch.0, &["stash", "push", "--quiet"]);
-    let before = stashes(&scratch.0);
 
     for write in [
         apply(0, &seen, false),
@@ -480,14 +867,8 @@ fn a_stash_no_longer_at_its_place_is_neither_applied_nor_dropped() {
             commit: seen.clone(),
         },
     ] {
-        let error = GitWriter.write(&scratch.0, &write).unwrap_err();
-        assert!(
-            error.to_string().contains("no longer the stash shown"),
-            "{error}"
-        );
+        refused(&scratch.0, &write, "no longer the stash shown");
     }
-    assert_eq!(stashes(&scratch.0), before);
-    assert_eq!(status(&scratch.0), "");
 
     GitWriter
         .write(
@@ -506,8 +887,8 @@ fn a_stash_no_longer_at_its_place_is_neither_applied_nor_dropped() {
 }
 
 /// Stashes everything with the untracked files, then sets the working directory up with `then`,
-/// and expects applying and popping the stash to be refused with `why` and nothing changed.
-fn refused_after(name: &str, set_up: impl Fn(&Path), then: impl Fn(&Path), why: &str) {
+/// and expects applying and popping the stash to be [`refused`] with `why`.
+fn a_stash_refused_over(name: &str, set_up: impl Fn(&Path), then: impl Fn(&Path), why: &str) {
     let scratch = with_file(name);
     set_up(&scratch.0);
     git(
@@ -516,20 +897,9 @@ fn refused_after(name: &str, set_up: impl Fn(&Path), then: impl Fn(&Path), why: 
     );
     let stash = stash_at(&scratch.0, 0);
     then(&scratch.0);
-    let before = (status(&scratch.0), stashes(&scratch.0));
-    let ignored = git(&scratch.0, &["status", "--porcelain", "--ignored"]);
     for drop in [false, true] {
-        let error = GitWriter
-            .write(&scratch.0, &apply(0, &stash, drop))
-            .unwrap_err();
-        assert!(error.to_string().contains(why), "{name}: {error}");
+        refused(&scratch.0, &apply(0, &stash, drop), why);
     }
-    assert_eq!((status(&scratch.0), stashes(&scratch.0)), before, "{name}");
-    assert_eq!(
-        git(&scratch.0, &["status", "--porcelain", "--ignored"]),
-        ignored,
-        "{name}"
-    );
 }
 
 fn write_file(dir: &Path, path: &str, content: &str) {
@@ -542,7 +912,7 @@ fn write_file(dir: &Path, path: &str, content: &str) {
 // Verifies: ADR-0033, G-7
 fn a_stash_with_anything_in_its_way_is_refused_with_nothing_changed() {
     // The stash's new file n/x, and a file n where it needs a directory.
-    refused_after(
+    a_stash_refused_over(
         "file-for-dir",
         |d| {
             write_file(d, "u", "untracked\n");
@@ -553,7 +923,7 @@ fn a_stash_with_anything_in_its_way_is_refused_with_nothing_changed() {
         "n stands where stash@{0} needs a directory",
     );
     // The stash's new file d, and an untracked directory d.
-    refused_after(
+    a_stash_refused_over(
         "dir-for-file",
         |d| {
             write_file(d, "u", "untracked\n");
@@ -564,7 +934,7 @@ fn a_stash_with_anything_in_its_way_is_refused_with_nothing_changed() {
         "d is a directory where stash@{0} writes a file",
     );
     // An untracked file the stash took along, since ignored and written anew.
-    refused_after(
+    a_stash_refused_over(
         "ignored-file",
         |d| write_file(d, ".env", "stashed\n"),
         |d| {
@@ -574,7 +944,7 @@ fn a_stash_with_anything_in_its_way_is_refused_with_nothing_changed() {
         ".env is not tracked",
     );
     // An untracked file the stash took along, and an ignored directory of that name.
-    refused_after(
+    a_stash_refused_over(
         "ignored-dir",
         |d| write_file(d, "build", "stashed\n"),
         |d| {
@@ -584,7 +954,7 @@ fn a_stash_with_anything_in_its_way_is_refused_with_nothing_changed() {
         "build is a directory",
     );
     // An untracked file the stash took along, tracked by now.
-    refused_after(
+    a_stash_refused_over(
         "tracked-by-now",
         |d| write_file(d, "later", "stashed\n"),
         |d| {
@@ -599,7 +969,7 @@ fn a_stash_with_anything_in_its_way_is_refused_with_nothing_changed() {
     let probe = Scratch::new("case-probe");
     std::fs::write(probe.0.join("Case"), "").unwrap();
     if probe.0.join("CASE").exists() {
-        refused_after(
+        a_stash_refused_over(
             "case",
             |d| write_file(d, "Readme", "stashed\n"),
             |d| write_file(d, "README", "mine\n"),
@@ -609,7 +979,7 @@ fn a_stash_with_anything_in_its_way_is_refused_with_nothing_changed() {
         eprintln!("this file system tells Readme from README; the case-folding case is skipped");
     }
     // Changes staged in the index.
-    refused_after(
+    a_stash_refused_over(
         "staged",
         |d| write_file(d, "f", "stashed\n"),
         |d| {
@@ -855,15 +1225,8 @@ fn whole_files_are_staged_and_unstaged_as_git_add_and_restore_do() {
 #[test]
 fn a_file_without_a_change_to_stage_or_unstage_is_refused() {
     let scratch = with_file("stage-refused");
-    let error = GitWriter
-        .write(&scratch.0, &stage_in(&scratch.0, "f"))
-        .unwrap_err();
-    assert!(error.to_string().contains("no change to stage"), "{error}");
-    let error = GitWriter
-        .write(&scratch.0, &unstage_in(&scratch.0, "f"))
-        .unwrap_err();
-    assert!(error.to_string().contains("not staged"), "{error}");
-    assert_eq!(status(&scratch.0), "");
+    refused(&scratch.0, &stage_in(&scratch.0, "f"), "no change to stage");
+    refused(&scratch.0, &unstage_in(&scratch.0, "f"), "not staged");
 }
 
 #[test]
@@ -915,34 +1278,25 @@ fn the_index_is_committed_by_the_configured_identity_on_the_head_shown() {
 fn a_commit_is_refused_with_nothing_changed() {
     let scratch = with_file("commit-refused");
     let head = git(&scratch.0, &["rev-parse", "HEAD"]);
-    let error = GitWriter
-        .write(&scratch.0, &commit_on(&head, "nothing"))
-        .unwrap_err();
-    assert!(error.to_string().contains("nothing is staged"), "{error}");
+    refused(
+        &scratch.0,
+        &commit_on(&head, "nothing"),
+        "nothing is staged",
+    );
 
     write_file(&scratch.0, "f", "changed\n");
     GitWriter
         .write(&scratch.0, &stage_in(&scratch.0, "f"))
         .unwrap();
-    let state = |d: &Path| {
-        let ignored = git(d, &["status", "--porcelain", "--ignored"]);
-        (staged_names(d), git(d, &["rev-parse", "HEAD"]), ignored)
-    };
-    let before = state(&scratch.0);
     let moved = "0123456789abcdef0123456789abcdef01234567";
     for (write, why) in [
         (commit_on(moved, "msg"), "no longer the one shown"),
         (commit_on(&head, "  \n"), "needs a message"),
     ] {
-        let error = GitWriter.write(&scratch.0, &write).unwrap_err();
-        assert!(error.to_string().contains(why), "{error}");
+        refused(&scratch.0, &write, why);
     }
     git(&scratch.0, &["config", "commit.gpgSign", "true"]);
-    let error = GitWriter
-        .write(&scratch.0, &commit_on(&head, "msg"))
-        .unwrap_err();
-    assert!(error.to_string().contains("commit.gpgSign"), "{error}");
-    assert_eq!(state(&scratch.0), before);
+    refused(&scratch.0, &commit_on(&head, "msg"), "commit.gpgSign");
 }
 
 #[test]
@@ -951,11 +1305,7 @@ fn an_annotated_tag_is_refused_where_tags_are_signed_and_a_lightweight_one_is_no
     let scratch = Scratch::new("tag-signed");
     let (one, _) = repository(&scratch.0);
     git(&scratch.0, &["config", "tag.gpgSign", "true"]);
-    let error = GitWriter
-        .write(&scratch.0, &tag("v1", &one, Some("release")))
-        .unwrap_err();
-    assert!(error.to_string().contains("tag.gpgSign"), "{error}");
-    assert_eq!(tags(&scratch.0), "");
+    refused(&scratch.0, &tag("v1", &one, Some("release")), "tag.gpgSign");
     GitWriter
         .write(&scratch.0, &tag("mark", &one, None))
         .unwrap();
@@ -968,12 +1318,7 @@ fn a_file_changed_since_it_was_shown_is_neither_staged_nor_unstaged() {
     write_file(&scratch.0, "f", "shown\n");
     let shown = stage_in(&scratch.0, "f");
     write_file(&scratch.0, "f", "changed after\n");
-    let error = GitWriter.write(&scratch.0, &shown).unwrap_err();
-    assert!(
-        error.to_string().contains("changed since it was shown"),
-        "{error}"
-    );
-    assert_eq!(staged_names(&scratch.0), "");
+    refused(&scratch.0, &shown, "changed since it was shown");
 
     GitWriter
         .write(&scratch.0, &stage_in(&scratch.0, "f"))
@@ -981,12 +1326,7 @@ fn a_file_changed_since_it_was_shown_is_neither_staged_nor_unstaged() {
     let shown = unstage_in(&scratch.0, "f");
     write_file(&scratch.0, "f", "staged again\n");
     git(&scratch.0, &["add", "f"]);
-    let error = GitWriter.write(&scratch.0, &shown).unwrap_err();
-    assert!(
-        error.to_string().contains("changed since it was shown"),
-        "{error}"
-    );
-    assert_eq!(staged_names(&scratch.0), "M\tf");
+    refused(&scratch.0, &shown, "changed since it was shown");
 }
 
 #[test]
@@ -1003,20 +1343,12 @@ fn a_commit_is_refused_while_a_merge_is_in_progress() {
         &["merge", "--quiet", "--no-commit", "--no-ff", "side"],
     );
     let head = git(&scratch.0, &["rev-parse", "HEAD"]);
-    let before = git(&scratch.0, &["status", "--porcelain", "--ignored"]);
-    let error = GitWriter
-        .write(&scratch.0, &commit_on(&head, "merge"))
-        .unwrap_err();
-    assert!(
-        error.to_string().contains("a merge is in progress"),
-        "{error}"
+    refused(
+        &scratch.0,
+        &commit_on(&head, "merge"),
+        "a merge is in progress",
     );
-    assert_eq!(git(&scratch.0, &["rev-parse", "HEAD"]), head);
     assert!(scratch.0.join(".git/MERGE_HEAD").exists());
-    assert_eq!(
-        git(&scratch.0, &["status", "--porcelain", "--ignored"]),
-        before
-    );
 }
 
 #[test]
@@ -1040,14 +1372,11 @@ fn an_annotated_tag_is_refused_where_annotated_tags_are_always_signed() {
     let scratch = Scratch::new("force-sign");
     let (one, _) = repository(&scratch.0);
     git(&scratch.0, &["config", "tag.forceSignAnnotated", "true"]);
-    let error = GitWriter
-        .write(&scratch.0, &tag("v1", &one, Some("release")))
-        .unwrap_err();
-    assert!(
-        error.to_string().contains("tag.forceSignAnnotated"),
-        "{error}"
+    refused(
+        &scratch.0,
+        &tag("v1", &one, Some("release")),
+        "tag.forceSignAnnotated",
     );
-    assert_eq!(tags(&scratch.0), "");
 }
 
 /// HEAD as `git` reads it: the branch it is on, or the commit it is detached at.
@@ -1077,22 +1406,6 @@ fn with_side(name: &str) -> (Scratch, String, String) {
     (scratch, main, side)
 }
 
-fn everything(dir: &Path) -> (String, String, String) {
-    let status = git(dir, &["status", "--porcelain", "--ignored"]);
-    (
-        head_of(dir),
-        status,
-        git(
-            dir,
-            &[
-                "branch",
-                "--list",
-                "--format=%(refname:short) %(objectname)",
-            ],
-        ),
-    )
-}
-
 #[test]
 // Verifies: ADR-0033, G-4
 fn a_branch_is_created_at_the_commit_and_switched_to_where_asked() {
@@ -1120,19 +1433,14 @@ fn a_branch_is_created_at_the_commit_and_switched_to_where_asked() {
         "the working directory is side's, mine kept"
     );
 
-    let before = everything(&scratch.0);
     for (name, why) in [
         ("here", "exists already"),
         ("-x", "not a name"),
         ("HEAD", "not a name"),
         ("a..b", "not a name"),
     ] {
-        let error = GitWriter
-            .write(&scratch.0, &create(name, &main, true))
-            .unwrap_err();
-        assert!(error.to_string().contains(why), "{name}: {error}");
+        refused(&scratch.0, &create(name, &main, true), why);
     }
-    assert_eq!(everything(&scratch.0), before);
 }
 
 #[test]
@@ -1153,25 +1461,15 @@ fn a_switch_takes_the_changes_along_or_is_refused_naming_what_is_in_the_way() {
     assert_eq!(status(&scratch.0), "?? mine");
 
     write_file(&scratch.0, "f", "my change\n");
-    let before = everything(&scratch.0);
-    let error = GitWriter
-        .write(&scratch.0, &switch("main", &main))
-        .unwrap_err();
-    assert!(
-        error.to_string().contains("changes to f are in the way"),
-        "{error}"
+    refused(
+        &scratch.0,
+        &switch("main", &main),
+        "changes to f are in the way",
     );
-    let error = GitWriter
-        .write(&scratch.0, &switch("main", &side))
-        .unwrap_err();
-    assert!(
-        error.to_string().contains("no longer where it was shown"),
-        "{error}"
-    );
-    assert_eq!(everything(&scratch.0), before);
-    assert_eq!(
-        std::fs::read_to_string(scratch.0.join("f")).unwrap(),
-        "my change\n"
+    refused(
+        &scratch.0,
+        &switch("main", &side),
+        "no longer where it was shown",
     );
 
     git(&scratch.0, &["checkout", "--quiet", "--", "f"]);
@@ -1186,11 +1484,11 @@ fn a_switch_takes_the_changes_along_or_is_refused_naming_what_is_in_the_way() {
     assert_eq!(head_of(&scratch.0), format!("detached at {main}"));
 }
 
-#[test]
-// Verifies: ADR-0033, G-4
-fn a_remote_branch_is_switched_to_through_a_local_branch_that_tracks_it() {
-    let (origin, _, side) = with_side("remote-origin");
-    let clone = Scratch::new("remote-clone");
+/// A clone of a repository made by [`with_side`], on main, with `origin` pointing there:
+/// (origin, clone, side's tip).
+fn cloned_with_side(name: &str) -> (Scratch, Scratch, String) {
+    let (origin, _, side) = with_side(&format!("{name}-origin"));
+    let clone = Scratch::new(&format!("{name}-clone"));
     std::fs::remove_dir_all(&clone.0).unwrap();
     git(
         Path::new("/"),
@@ -1201,6 +1499,13 @@ fn a_remote_branch_is_switched_to_through_a_local_branch_that_tracks_it() {
             clone.0.to_str().unwrap(),
         ],
     );
+    (origin, clone, side)
+}
+
+#[test]
+// Verifies: ADR-0033, G-4
+fn a_remote_branch_is_switched_to_through_a_local_branch_that_tracks_it() {
+    let (_origin, clone, side) = cloned_with_side("remote");
     let track = Write::TrackRemote {
         remote: "origin".into(),
         branch: "side".into(),
@@ -1212,8 +1517,21 @@ fn a_remote_branch_is_switched_to_through_a_local_branch_that_tracks_it() {
         git(&clone.0, &["rev-parse", "--abbrev-ref", "side@{upstream}"]),
         "origin/side"
     );
-    let error = GitWriter.write(&clone.0, &track).unwrap_err();
-    assert!(error.to_string().contains("exists already"), "{error}");
+    refused(&clone.0, &track, "exists already");
+}
+
+#[test]
+// Verifies: ADR-0033, G-4
+fn a_remote_branch_whose_switch_is_refused_leaves_neither_a_branch_nor_its_upstream() {
+    let (_origin, clone, side) = cloned_with_side("track-refused");
+    write_file(&clone.0, "f", "mine\n");
+    let track = Write::TrackRemote {
+        remote: "origin".into(),
+        branch: "side".into(),
+        tip: side,
+    };
+    // The branch and its upstream are set before the switch finds f in its way.
+    refused(&clone.0, &track, "changes to f are in the way");
 }
 
 #[test]
@@ -1226,7 +1544,6 @@ fn a_branch_is_deleted_only_as_shown_and_never_while_checked_out() {
         tip: tip.into(),
         merged,
     };
-    let before = everything(&scratch.0);
     for (write, why) in [
         (
             delete("side", &side, true),
@@ -1235,10 +1552,8 @@ fn a_branch_is_deleted_only_as_shown_and_never_while_checked_out() {
         (delete("side", &main, false), "no longer where it was shown"),
         (delete("main", &main, true), "is checked out"),
     ] {
-        let error = GitWriter.write(&scratch.0, &write).unwrap_err();
-        assert!(error.to_string().contains(why), "{error}");
+        refused(&scratch.0, &write, why);
     }
-    assert_eq!(everything(&scratch.0), before);
     GitWriter
         .write(&scratch.0, &delete("merged", &main, true))
         .unwrap();
@@ -1254,13 +1569,6 @@ fn a_branch_is_deleted_only_as_shown_and_never_while_checked_out() {
     );
 }
 
-/// What a refused write must leave as it was: HEAD, the branches, the working directory's status
-/// with ignored files, and the index's entries.
-fn all_of(dir: &Path) -> (String, String, String, String) {
-    let (head, status, branches) = everything(dir);
-    (head, status, branches, git(dir, &["ls-files", "--stage"]))
-}
-
 #[test]
 // Verifies: ADR-0033, G-4
 fn a_switch_carries_what_the_target_leaves_alone_and_refuses_staged_changes_it_touches() {
@@ -1274,15 +1582,7 @@ fn a_switch_carries_what_the_target_leaves_alone_and_refuses_staged_changes_it_t
     write_file(&scratch.0, "f", "staged\n");
     git(&scratch.0, &["add", "f"]);
     write_file(&scratch.0, "f", "base\n");
-    let before = all_of(&scratch.0);
-    let error = GitWriter.write(&scratch.0, &switch).unwrap_err();
-    assert!(
-        error
-            .to_string()
-            .contains("staged changes to f are in the way"),
-        "{error}"
-    );
-    assert_eq!(all_of(&scratch.0), before);
+    refused(&scratch.0, &switch, "staged changes to f are in the way");
     git(&scratch.0, &["reset", "--quiet", "--", "f"]);
 
     // A staged file the target leaves alone goes along; a deleted f the target changes comes
@@ -1302,7 +1602,7 @@ fn a_switch_carries_what_the_target_leaves_alone_and_refuses_staged_changes_it_t
 #[test]
 // Verifies: ADR-0033, G-4
 fn a_branch_checked_out_in_another_working_tree_is_neither_switched_to_nor_deleted() {
-    let (scratch, main, side) = with_side("worktree");
+    let (scratch, _, side) = with_side("worktree");
     let elsewhere = Scratch::new("worktree-other");
     std::fs::remove_dir_all(&elsewhere.0).unwrap();
     git(
@@ -1315,7 +1615,6 @@ fn a_branch_checked_out_in_another_working_tree_is_neither_switched_to_nor_delet
             "side",
         ],
     );
-    let before = all_of(&scratch.0);
     for write in [
         Write::SwitchBranch {
             name: "side".into(),
@@ -1327,16 +1626,8 @@ fn a_branch_checked_out_in_another_working_tree_is_neither_switched_to_nor_delet
             merged: false,
         },
     ] {
-        let error = GitWriter.write(&scratch.0, &write).unwrap_err();
-        assert!(
-            error
-                .to_string()
-                .contains("checked out in the working tree"),
-            "{error}"
-        );
+        refused(&scratch.0, &write, "checked out in the working tree");
     }
-    assert_eq!(all_of(&scratch.0), before);
-    let _ = main;
 }
 
 #[test]
@@ -1344,30 +1635,21 @@ fn a_branch_checked_out_in_another_working_tree_is_neither_switched_to_nor_delet
 fn a_branch_whose_name_clashes_with_another_is_refused_with_nothing_changed() {
     let (scratch, main, side) = with_side("clash");
     git(&scratch.0, &["branch", "feature/x", &main]);
-    let before = all_of(&scratch.0);
     let create = Write::CreateBranch {
         name: "feature".into(),
         commit: side.clone(),
         switch: true,
     };
-    let error = GitWriter.write(&scratch.0, &create).unwrap_err();
-    assert!(
-        error.to_string().contains("cannot be created here"),
-        "{error}"
-    );
-    assert_eq!(all_of(&scratch.0), before);
+    refused(&scratch.0, &create, "cannot be created here");
 
     // A switch refused after the branch was created takes the branch away again.
     write_file(&scratch.0, "f", "mine\n");
-    let before = all_of(&scratch.0);
     let create = Write::CreateBranch {
         name: "topic".into(),
         commit: side.clone(),
         switch: true,
     };
-    let error = GitWriter.write(&scratch.0, &create).unwrap_err();
-    assert!(error.to_string().contains("in the way"), "{error}");
-    assert_eq!(all_of(&scratch.0), before);
+    refused(&scratch.0, &create, "in the way");
 }
 
 /// A bare remote made with `git` from a repository with `f`, a clone of it with `origin` pointing
@@ -1411,7 +1693,7 @@ fn with_remote(name: &str) -> (Scratch, Scratch, String) {
 // Verifies: ADR-0035, G-4
 fn a_fetch_moves_the_remote_branches_as_git_fetch_does() {
     let (_remote, clone, later) = with_remote("fetch");
-    let before = all_of(&clone.0);
+    let before = snapshot(&clone.0);
     let mut told = Vec::new();
     GitWriter
         .write_reporting(
@@ -1426,7 +1708,16 @@ fn a_fetch_moves_the_remote_branches_as_git_fetch_does() {
         )
         .unwrap();
     assert_eq!(git(&clone.0, &["rev-parse", "origin/main"]), later);
-    assert_eq!(all_of(&clone.0), before, "only the remote branches move");
+    let mut after = snapshot(&clone.0);
+    let local = |refs: &str| -> Vec<String> {
+        refs.lines()
+            .filter(|r| !r.starts_with("refs/remotes/"))
+            .map(str::to_string)
+            .collect()
+    };
+    assert_eq!(local(&after.refs), local(&before.refs));
+    after.refs = before.refs.clone();
+    assert_eq!(after, before, "only the remote branches move");
     let refs = ocelli_git::GitReader.load_refs(&clone.0).unwrap();
     assert_eq!(
         refs.default_remote.as_deref(),
@@ -1444,17 +1735,11 @@ fn a_fetch_moves_the_remote_branches_as_git_fetch_does() {
 // Verifies: ADR-0035
 fn a_fetch_cancelled_or_of_no_remote_changes_nothing() {
     let (_remote, clone, _) = with_remote("fetch-cancel");
-    let origin = git(&clone.0, &["rev-parse", "origin/main"]);
     let fetch = |name: &str| Write::Fetch {
         remote: name.into(),
     };
-    let error = GitWriter
-        .write_reporting(&clone.0, &fetch("origin"), &mut |_| false)
-        .unwrap_err();
-    assert!(error.to_string().contains("cancelled"), "{error}");
-    let error = GitWriter.write(&clone.0, &fetch("nowhere")).unwrap_err();
-    assert!(error.to_string().contains("no remote named"), "{error}");
-    assert_eq!(git(&clone.0, &["rev-parse", "origin/main"]), origin);
+    refused_reporting(&clone.0, &fetch("origin"), "cancelled", false, |_| {});
+    refused(&clone.0, &fetch("nowhere"), "no remote named");
 }
 
 fn pull_of(dir: &Path, branch: &str) -> Write {
@@ -1485,41 +1770,28 @@ fn a_pull_fast_forwards_the_checked_out_branch_as_git_pull_ff_only_does() {
     );
 
     // Up to date: nothing to do, nothing done.
-    let before = all_of(&clone.0);
+    let before = snapshot(&clone.0);
     GitWriter
         .write(&clone.0, &pull_of(&clone.0, "main"))
         .unwrap();
-    assert_eq!(all_of(&clone.0), before);
+    assert_eq!(snapshot(&clone.0), before);
 }
 
 #[test]
 // Verifies: ADR-0035, G-4
 fn a_pull_is_refused_where_the_branch_diverged_has_no_upstream_or_is_not_checked_out() {
-    let (_remote, clone, later) = with_remote("pull-refused");
+    let (_remote, clone, _) = with_remote("pull-refused");
     write_file(&clone.0, "f", "mine\n");
     git(&clone.0, &["commit", "--quiet", "-am", "mine"]);
-    let before = all_of(&clone.0);
-    let error = GitWriter
-        .write(&clone.0, &pull_of(&clone.0, "main"))
-        .unwrap_err();
-    assert!(error.to_string().contains("have diverged"), "{error}");
-    assert_eq!(all_of(&clone.0), before);
-    assert_eq!(
-        git(&clone.0, &["rev-parse", "origin/main"]),
-        later,
-        "the fetch was done"
-    );
+    // A refused pull has fetched, as `git pull` has, which moves the remote branches: fetched
+    // before, its refusal leaves everything as it was.
+    git(&clone.0, &["fetch", "--quiet", "origin"]);
+    refused(&clone.0, &pull_of(&clone.0, "main"), "have diverged");
 
     git(&clone.0, &["branch", "loose"]);
     git(&clone.0, &["switch", "--quiet", "loose"]);
-    let error = GitWriter
-        .write(&clone.0, &pull_of(&clone.0, "loose"))
-        .unwrap_err();
-    assert!(error.to_string().contains("no upstream"), "{error}");
-    let error = GitWriter
-        .write(&clone.0, &pull_of(&clone.0, "main"))
-        .unwrap_err();
-    assert!(error.to_string().contains("not checked out"), "{error}");
+    refused(&clone.0, &pull_of(&clone.0, "loose"), "no upstream");
+    refused(&clone.0, &pull_of(&clone.0, "main"), "not checked out");
 }
 
 fn push_of(dir: &Path, branch: &str) -> Write {
@@ -1562,17 +1834,12 @@ fn a_push_that_is_not_a_fast_forward_is_refused_with_nothing_changed() {
     let (remote, clone, later) = with_remote("push-refused");
     write_file(&clone.0, "f", "mine\n");
     git(&clone.0, &["commit", "--quiet", "-am", "mine"]);
-    let before = all_of(&clone.0);
-    let error = GitWriter
-        .write(&clone.0, &push_of(&clone.0, "main"))
-        .unwrap_err();
-    assert!(error.to_string().contains("pull first"), "{error}");
+    refused(&clone.0, &push_of(&clone.0, "main"), "pull first");
     assert_eq!(
         git(&remote.0, &["rev-parse", "main"]),
         later,
         "the remote kept its branch"
     );
-    assert_eq!(all_of(&clone.0), before);
 }
 
 #[test]
@@ -1580,45 +1847,34 @@ fn a_push_that_is_not_a_fast_forward_is_refused_with_nothing_changed() {
 fn a_commit_made_while_a_pull_fetches_is_neither_lost_nor_checked_out_over() {
     let (_remote, clone, _) = with_remote("pull-race");
     let pull = pull_of(&clone.0, "main");
-    let dir = clone.0.clone();
-    let mut committed = false;
-    let error = GitWriter
-        .write_reporting(&clone.0, &pull, &mut |_| {
-            if !committed {
-                committed = true;
-                write_file(&dir, "x", "made meanwhile\n");
-                git(&dir, &["add", "x"]);
-                git(&dir, &["commit", "--quiet", "-m", "meanwhile"]);
-            }
-            true
-        })
-        .unwrap_err();
-    assert!(
-        error.to_string().contains("no longer where it was shown"),
-        "{error}"
+    // Another program commits while the pull fetches, and fetches too, so that the remote
+    // branch the pull's own fetch moves is where it moves it already.
+    refused_reporting(
+        &clone.0,
+        &pull,
+        "no longer where it was shown",
+        true,
+        |dir| {
+            write_file(dir, "x", "made meanwhile\n");
+            git(dir, &["add", "x"]);
+            git(dir, &["commit", "--quiet", "-m", "meanwhile"]);
+            git(dir, &["fetch", "--quiet", "origin"]);
+        },
     );
     assert_eq!(git(&clone.0, &["log", "-1", "--format=%s"]), "meanwhile");
-    assert_eq!(
-        std::fs::read_to_string(clone.0.join("x")).unwrap(),
-        "made meanwhile\n"
-    );
 }
 
 #[test]
 // Verifies: ADR-0035
 fn a_pull_whose_branch_another_program_holds_locked_changes_nothing() {
     let (_remote, clone, _) = with_remote("pull-locked");
+    // Fetched before, as for a pull refused where the branches diverged.
+    git(&clone.0, &["fetch", "--quiet", "origin"]);
     let pull = pull_of(&clone.0, "main");
     let lock = clone.0.join(".git/refs/heads/main.lock");
     std::fs::write(&lock, "").unwrap();
-    let before = all_of(&clone.0);
-    let error = GitWriter.write(&clone.0, &pull).unwrap_err();
-    assert!(
-        error.to_string().contains("locked by another program"),
-        "{error}"
-    );
+    refused(&clone.0, &pull, "locked by another program");
     std::fs::remove_file(&lock).unwrap();
-    assert_eq!(all_of(&clone.0), before);
 }
 
 #[test]
@@ -1638,10 +1894,7 @@ fn a_push_follows_push_default_as_git_push_does() {
         &clone.0,
         &["branch", "--quiet", "--set-upstream-to", "origin/main"],
     );
-    let error = GitWriter
-        .write(&clone.0, &push_of(&clone.0, "feat"))
-        .unwrap_err();
-    assert!(error.to_string().contains("named differently"), "{error}");
+    refused(&clone.0, &push_of(&clone.0, "feat"), "named differently");
     assert_eq!(git(&remote.0, &["rev-parse", "main"]), main_there);
 
     // `upstream` pushes there, as git does.
@@ -1656,10 +1909,7 @@ fn a_push_follows_push_default_as_git_push_does() {
 
     for (mode, why) in [("nothing", "is nothing"), ("matching", "every branch")] {
         git(&clone.0, &["config", "push.default", mode]);
-        let error = GitWriter
-            .write(&clone.0, &push_of(&clone.0, "feat"))
-            .unwrap_err();
-        assert!(error.to_string().contains(why), "{mode}: {error}");
+        refused(&clone.0, &push_of(&clone.0, "feat"), why);
     }
 
     // An upstream on a local branch is no remote to push to.
@@ -1668,14 +1918,12 @@ fn a_push_follows_push_default_as_git_push_does() {
         &clone.0,
         &["branch", "--quiet", "--set-upstream-to", "main"],
     );
-    let error = GitWriter
-        .write(&clone.0, &push_of(&clone.0, "feat"))
-        .unwrap_err();
-    assert!(error.to_string().contains("local branch"), "{error}");
+    refused(&clone.0, &push_of(&clone.0, "feat"), "local branch");
 }
 
 #[test]
 // Verifies: ADR-0033, G-4
+
 fn a_path_is_unstaged_and_diffed_as_written_never_as_a_pattern() {
     let scratch = with_file("stage-pattern");
     let d = &scratch.0;
@@ -1698,4 +1946,35 @@ fn a_path_is_unstaged_and_diffed_as_written_never_as_a_pattern() {
         .filter(|l| l.content.contains("changed"))
         .count();
     assert_eq!(changed, 1, "one file's change, not xa.txt's too: {diff:?}");
+}
+
+#[test]
+// Verifies: ADR-0033, Q-6
+fn a_switch_that_puts_a_file_where_a_directory_holds_untracked_files_is_refused() {
+    for (name, kept) in [("untracked", "d/u"), ("ignored", "d/u.log")] {
+        let scratch = with_file(&format!("dir-to-file-{name}"));
+        let d = &scratch.0;
+        std::fs::write(d.join(".gitignore"), "*.log\n").unwrap();
+        std::fs::create_dir(d.join("d")).unwrap();
+        std::fs::write(d.join("d/x"), "x\n").unwrap();
+        git(d, &["add", "--all"]);
+        git(d, &["commit", "--quiet", "-m", "d is a directory"]);
+        git(d, &["switch", "--quiet", "-c", "t"]);
+        git(d, &["rm", "--quiet", "-r", "d"]);
+        std::fs::write(d.join("d"), "a file\n").unwrap();
+        git(d, &["add", "d"]);
+        git(d, &["commit", "--quiet", "-m", "d is a file"]);
+        let tip = git(d, &["rev-parse", "t"]);
+        git(d, &["switch", "--quiet", "main"]);
+        std::fs::write(d.join(kept), "the developer's\n").unwrap();
+        let switch = Write::SwitchBranch {
+            name: "t".into(),
+            tip,
+        };
+        refused(d, &switch, "holding files the commit does not track");
+        assert_eq!(
+            std::fs::read_to_string(d.join(kept)).unwrap(),
+            "the developer's\n"
+        );
+    }
 }
