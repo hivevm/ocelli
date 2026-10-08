@@ -1,3 +1,5 @@
+import type { Write, WriteOf } from './writes.ts';
+
 export type CommitKind = 'commit' | 'stash' | 'working';
 
 export interface NodeJson {
@@ -73,6 +75,32 @@ export interface Selected {
   generation: number;
   node: NodeJson;
   relatives: Relative[];
+  /** The operations of G-5 the commit offers on the checked-out branch, as the core decides them
+      (ADR-0033, ADR-0036); null for a stash or the working directory, and until the load's refs
+      are read. */
+  operations: Offered | null;
+}
+
+/** The operations a commit offers, each with its write, or why there are none. */
+export type Offered = { operations: Write[] } | { reason: string };
+
+/** A transfer the refs make possible, with whether it can be stopped while it runs, or why there
+    is none, as the core decides (ADR-0035). */
+export type Transfer<K extends 'fetch' | 'pull' | 'push'> =
+  | { write: WriteOf<K>; canStop: boolean }
+  | { reason: string };
+
+/** The transfers the toolbar offers. */
+export interface Transfers {
+  fetch: Transfer<'fetch'>;
+  pull: Transfer<'pull'>;
+  push: Transfer<'push'>;
+}
+
+/** The `load-refs` payload: the refs, and the transfers the core decides from them (ADR-0036). */
+export interface LoadedRefs {
+  refs: RepoRefs;
+  transfers: Transfers;
 }
 
 /** Every row matching a search, newest first, and the nodes of the first ones. */
@@ -168,8 +196,29 @@ export interface RepoRefs {
   submodules: Submodule[];
   /** Null when this repository is neither a submodule nor a linked worktree. */
   parent: ParentRepo | null;
-  /** The remote a fetch reaches without one named, null where there is none to choose. */
+  /** The default remote, null where there is none to choose. */
   defaultRemote: string | null;
+  /** The operation stopped in the repository, whoever started it, null where none is. */
+  inProgress: InProgress | null;
+}
+
+/** An operation that can stop on a conflict. */
+export type Operation = 'merge' | 'rebase' | 'cherryPick' | 'revert';
+
+/** A conflicted file and the blob ids of its sides, null where a side has no file. */
+export interface Conflict {
+  path: string;
+  ancestor: string | null;
+  ours: string | null;
+  theirs: string | null;
+}
+
+/** A merge, rebase, cherry-pick, or revert stopped in the repository. */
+export interface InProgress {
+  operation: Operation;
+  conflicts: Conflict[];
+  /** The commit HEAD is at, which continuing and aborting expect. */
+  head: string;
 }
 
 /** Serde serializes the Rust enum variants camelCase — the statuses arrive lowercase. */
@@ -191,9 +240,14 @@ export interface FileChange {
   status: FileStatus;
   additions: number;
   deletions: number;
-  /** For the working-directory node's files only: how much of the change is staged. */
-  staged?: 'no' | 'yes' | 'partly';
-  /** For the working-directory node's files only: the content shown, by blob id, which staging
-      and unstaging expect to find. */
-  shown?: { workdir: string | null; index: string | null };
+  /** For the working-directory node's files only, each of which carries one: how the file
+      stands in the index. */
+  staging?: Staging;
+}
+
+/** How a file of the working-directory node stands in the index: how much of its change is
+    staged, and the content shown, by blob id, which staging and unstaging expect to find. */
+export interface Staging {
+  staged: 'no' | 'yes' | 'partly';
+  shown: { workdir: string | null; index: string | null };
 }

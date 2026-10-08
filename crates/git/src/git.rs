@@ -2,7 +2,7 @@ use anyhow::Result;
 use git2::{DiffOptions, Repository, Sort, Status, StatusOptions};
 use ocelli_core::model::{
     CHUNK_COMMITS, CommitData, CommitKind, DiffLine, DiffLineKind, FileChange, FileStatus, Shown,
-    Staged, WORKDIR_SHA,
+    Staged, Staging, WORKDIR_SHA,
 };
 use std::collections::HashMap;
 use std::path::Path;
@@ -262,18 +262,24 @@ fn has_uncommitted_changes(repo: &Repository) -> bool {
     let Ok(statuses) = repo.statuses(Some(&mut opts)) else {
         return false;
     };
-    let dirty = Status::INDEX_NEW
-        | Status::INDEX_MODIFIED
-        | Status::INDEX_DELETED
-        | Status::INDEX_RENAMED
-        | Status::INDEX_TYPECHANGE
-        | Status::WT_NEW
-        | Status::WT_MODIFIED
-        | Status::WT_DELETED
-        | Status::WT_TYPECHANGE
-        | Status::WT_RENAMED;
-    statuses.iter().any(|e| e.status().intersects(dirty))
+    statuses
+        .iter()
+        .any(|e| e.status().intersects(INDEX | WORKTREE))
 }
+
+/// The changes the index holds against the checked-out commit.
+pub(crate) const INDEX: Status = Status::INDEX_NEW
+    .union(Status::INDEX_MODIFIED)
+    .union(Status::INDEX_DELETED)
+    .union(Status::INDEX_RENAMED)
+    .union(Status::INDEX_TYPECHANGE);
+
+/// The changes the working directory holds against the index, an untracked file included.
+pub(crate) const WORKTREE: Status = Status::WT_NEW
+    .union(Status::WT_MODIFIED)
+    .union(Status::WT_DELETED)
+    .union(Status::WT_RENAMED)
+    .union(Status::WT_TYPECHANGE);
 
 /// Loads the changed files for a single commit SHA.
 /// The synthetic [`WORKDIR_SHA`] yields the uncommitted working-directory diff.
@@ -331,8 +337,7 @@ pub fn load_commit_files(repo_path: &Path, sha: &str) -> Result<Vec<FileChange>>
                 status,
                 additions: 0,
                 deletions: 0,
-                staged: None,
-                shown: None,
+                staging: None,
             }
         })
         .collect();
@@ -368,8 +373,10 @@ pub fn load_commit_files(repo_path: &Path, sha: &str) -> Result<Vec<FileChange>>
 
     if sha == WORKDIR_SHA {
         for f in &mut files {
-            f.staged = Some(staged(&repo, &f.path));
-            f.shown = Some(shown(&repo, &f.path));
+            f.staging = Some(Staging {
+                staged: staged(&repo, &f.path),
+                shown: shown(&repo, &f.path),
+            });
         }
     }
     Ok(files)
@@ -394,17 +401,7 @@ pub(crate) fn shown(repo: &Repository, path: &str) -> Shown {
 /// How much of `path`'s uncommitted change the index holds.
 fn staged(repo: &Repository, path: &str) -> Staged {
     let status = repo.status_file(Path::new(path)).unwrap_or(Status::empty());
-    let index = Status::INDEX_NEW
-        | Status::INDEX_MODIFIED
-        | Status::INDEX_DELETED
-        | Status::INDEX_RENAMED
-        | Status::INDEX_TYPECHANGE;
-    let worktree = Status::WT_NEW
-        | Status::WT_MODIFIED
-        | Status::WT_DELETED
-        | Status::WT_RENAMED
-        | Status::WT_TYPECHANGE;
-    match (status.intersects(index), status.intersects(worktree)) {
+    match (status.intersects(INDEX), status.intersects(WORKTREE)) {
         (true, true) => Staged::Partly,
         (true, false) => Staged::Yes,
         _ => Staged::No,
@@ -416,7 +413,12 @@ pub fn load_file_diff(repo_path: &Path, sha: &str, file_path: &str) -> Result<Ve
     let repo = Repository::discover(repo_path)?;
 
     let mut opts = DiffOptions::new();
-    opts.pathspec(file_path);
+    // The path as written, never a pattern that takes other files with it.
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "the pattern matching is turned off"
+    )]
+    opts.pathspec(file_path).disable_pathspec_match(true);
     opts.context_lines(3);
 
     let diff = if sha == WORKDIR_SHA {

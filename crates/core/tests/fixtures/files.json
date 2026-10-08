@@ -1,0 +1,23 @@
+[
+  {
+    "path": "f",
+    "oldPath": "e",
+    "status": "renamed",
+    "additions": 1,
+    "deletions": 2,
+    "staging": {
+      "staged": "partly",
+      "shown": {
+        "workdir": "w",
+        "index": "i"
+      }
+    }
+  },
+  {
+    "path": "f",
+    "oldPath": "e",
+    "status": "renamed",
+    "additions": 1,
+    "deletions": 2
+  }
+]

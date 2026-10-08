@@ -12,16 +12,19 @@ an ADR. What the golden path already shows needs none. Few entries that hold bea
 skimmed. The design revision drops what prevented nothing
 ([`AGENTS.md` §5](../AGENTS.md#5-quality-bar--definition-of-done)).
 
-- **Behaviour carried over is pinned before it moves.** Code that takes over behaviour from the
-  reference implementation lands with a reference test that compares against that
-  implementation's own output, captured before the move; a test written after the move only
-  restates the new code.
+- **A test looks only for what it started.** A process or a file it checks for carries its own
+  run's mark, its scratch directory or its process group: a machine-wide search sees another
+  session's run.
 - **Logic lives in a pure helper beside the component, not inside it.** Grouping refs into
   folders, choosing the rows to ask the host for, rounding an edge's path through its corners,
   deriving a file tree, and pairing diff lines are each a function over plain data in a module of
   its own (`refTree.ts`, `rowWindow.ts`, `edgePath.ts`, `fileTree.ts`, `diffSplit.ts`), and the
   component only draws what it returns; so is ordering a host's answers, which drops one from an
-  older load or overtaken by a newer request (`hostAnswers.ts`). A
+  older load or overtaken by a newer request (`hostAnswers.ts`), and matching a commit's ref chips
+  to the branches and tags they switch to or delete (`refChips.ts`). What the core decides, such
+  as which transfer the toolbar offers and which operations a commit does, the host sends and the
+  component draws
+  ([ADR-0036](adr/0036-desktop-host-answers-what-the-core-decides.md)). A
   component needs a browser to test and a pane a terminal; a function needs neither.
 - **A behaviour both front ends offer lives once in the core; only drawing is ported.** Search,
   lineage, and a load's bookkeeping, its chunks, status, and growing search and selection, belong
@@ -71,20 +74,19 @@ skimmed. The design revision drops what prevented nothing
   load, so it comes back on a channel no reload replaces. A front end has two things moving at
   once, the developer and the repository, and an answer applied to the state that replaced its
   own shows one commit's result on another.
-- **A write does what `git` does for the same command, and a refusal changes nothing.** Where
-  libgit2 differs from `git`, a name `git` refuses, a message `git` cleans up, a file in the way
-  `git` will not overwrite, the writer follows `git`, and its tests run `git` on the same input.
-  What `git` weighs is more than the working directory: the index, an operation in progress such
-  as a merge, and every configuration key its documentation names for the command; libgit2 reads
-  none of them for the caller. What `git` does is read off `git` run on the same input, never
-  recalled, and a write that departs from it on purpose says so where that is decided and is
-  tested against `git` doing otherwise. A refusal is decided before libgit2 is called, since
-  libgit2 can stop halfway; one only libgit2 can find, such as a branch name clashing with
-  another, goes first, and a refusal after it undoes it. Its test compares everything the write
-  can change before and after: `HEAD`, the refs, the index, and the working directory's status,
-  ignored files included. A write that waits, on a remote or on a lock, checks what it expects
-  again after the wait, under a lock on what it moves, since a commit can land meanwhile. Every
-  repository Ocelli touches stays one `git` knows what to do with.
+- **A write's tests read what `git` does off `git` run on the same input, never recalled.** A
+  write does what `git` does for the same command, refusing first where `git` would or a listed
+  departure decides ([ADR-0033](adr/0033-writes-what-git-writes.md)); libgit2 reads none of
+  the index, the operation in progress, or the configuration keys `git` weighs for the caller,
+  so each is a state its tests set up. A departure is tested against `git` doing otherwise. A
+  refusal's test compares everything the write can change before and after: `HEAD`, the refs,
+  the index, the working directory's status with ignored files, the configuration, the stash,
+  and an operation in progress, the one snapshot `refused` in `crates/git/tests/support/mod.rs`
+  takes. `clippy.toml` of the git adapter refuses the methods that take a path as a pattern or
+  write the working directory past libgit2's checkout, and a call that stays says why. `git`'s
+  state is more than the repository's state: a sequencer, an autostash, a file changed since an
+  operation stopped. A write's tests include a path with `[` or `*` in it, a link, an
+  executable file, and each such state.
 - **A control that writes takes no second press while its write runs, and offers no stop it
   cannot keep.** A second click on a write that has not answered yet writes twice, or is refused
   for a state the first one changed; a Cancel on a push, which libgit2 cannot stop once its

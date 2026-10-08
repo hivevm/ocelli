@@ -31,21 +31,24 @@ SCRIPT="$ROOT/scripts/measure-memory.sh"
 
 work="$(mktemp -d)"
 trap 'rm -rf "$work"' EXIT
+# The stand-ins' child sleeps for a time this run alone uses, so that the check for one left
+# running sees this run's and no other session's.
+pause="301.${$}"
 
 # The stand-ins' own "$1" and "$(...)" are theirs, not this script's.
 # shellcheck disable=SC2016
 {
   printf '#!/usr/bin/env bash\nif [[ -n "${1:-}" ]]; then\n  [[ -d "$1" ]] || exit 3\n'
   printf '  big=$(head -c 20000000 /dev/zero | tr "\\0" a)\n'
-  printf '  echo "$(git -C "$1" rev-list --count --all) commits" >&2\nfi\nsleep 301 &\nwait\n'
+  printf '  echo "$(git -C "$1" rev-list --count --all) commits" >&2\nfi\nsleep %s &\nwait\n' "$pause"
 } > "$work/runs"
 printf '#!/usr/bin/env bash\nexit 0\n' > "$work/exits"
-printf '#!/usr/bin/env bash\nsleep 301 &\nwait\n' > "$work/silent"
+printf '#!/usr/bin/env bash\nsleep %s &\nwait\n' "$pause" > "$work/silent"
 # shellcheck disable=SC2016
 {
   printf '#!/usr/bin/env bash\necho "1 commits" >&2\n'
   printf 'if [[ -e "%s/ran" ]]; then big=$(head -c 30000000 /dev/zero | tr "\\\\0" a); fi\n' "$work"
-  printf 'touch "%s/ran"\nsleep 301 &\nwait\n' "$work"
+  printf 'touch "%s/ran"\nsleep %s &\nwait\n' "$work" "$pause"
 } > "$work/grows"
 chmod +x "$work/runs" "$work/exits" "$work/silent" "$work/grows"
 
@@ -101,12 +104,17 @@ verdict "empty runs exactly 10 percent apart give no verdict" 1000 900 1050 1050
 verdict "loaded runs exactly 10 percent apart give no verdict" 1000 1000 2000 1800 1 "no verdict"
 verdict "runs just under 10 percent apart give a verdict" 1000 901 1050 1050 0 "holds"
 
-if pgrep -f '^sleep 301$' >/dev/null; then
+# Another session's stand-in, running beside this one, is none of this run's.
+sleep 301 &
+foreign=$!
+if pgrep -f "^sleep ${pause}\$" >/dev/null; then
   failed=$((failed + 1))
   echo "FAIL: a stand-in's child process was left running" >&2
 else
   passed=$((passed + 1))
 fi
+kill "$foreign" 2>/dev/null
+wait "$foreign" 2>/dev/null
 
 if ((failed)); then
   echo "Memory measurement self-test FAILED ($failed of $((passed + failed)) cases)." >&2

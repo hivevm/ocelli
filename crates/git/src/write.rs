@@ -2,13 +2,15 @@
 //! a repository's configuration names, so writing, like reading, runs no code the repository
 //! brings (Q-4). Every write checks the state it expects before it changes anything.
 
-use anyhow::{Context, Result, bail};
-use git2::build::CheckoutBuilder;
-use git2::{
-    BranchType, CheckoutNotificationType, Commit, ErrorCode, ObjectType, Oid, Reference,
-    Repository, RepositoryState, StashApplyOptions, StashFlags, Status, TreeWalkMode,
-    TreeWalkResult,
+use crate::checkout::{check_out, entry_as_in};
+use crate::git::{INDEX, WORKTREE};
+use crate::guard::{
+    NO_IDENTITY, as_shown, at_tip, branch_as_shown, not_checked_out_elsewhere, nothing_in_progress,
+    refname_of, refuse_where_signing_is_asked, valid_branch_name,
 };
+use crate::message::{Made, cleaned, stripped};
+use anyhow::{Context, Result, bail};
+use git2::{BranchType, Commit, ObjectType, Oid, Reference, Repository, Status};
 use ocelli_core::port::Write;
 use std::path::Path;
 
@@ -21,9 +23,43 @@ pub fn write(
 ) -> Result<Option<String>> {
     let mut repo = Repository::discover(repo_path)?;
     let done = match write {
-        Write::Fetch { remote } => fetch(&repo, remote, progress),
-        Write::Pull { branch, tip } => pull(&repo, branch, tip, progress),
-        Write::Push { branch, tip } => push(&repo, branch, tip, progress),
+        Write::Fetch { remote } => crate::remote::fetch(&repo, remote, progress),
+        Write::Pull { branch, tip } => crate::remote::pull(&repo, branch, tip, progress),
+        Write::Push { branch, tip } => crate::remote::push(&repo, branch, tip, progress),
+        Write::Merge {
+            branch,
+            tip,
+            commit,
+            name,
+        } => return crate::operations::merge(&repo, branch, tip, commit, name.as_deref()),
+        Write::Rebase { branch, tip, onto } => {
+            return crate::operations::rebase(&repo, branch, tip, onto);
+        }
+        Write::CherryPick {
+            branch,
+            tip,
+            commit,
+        } => return crate::operations::cherry_pick(&repo, branch, tip, commit),
+        Write::Revert {
+            branch,
+            tip,
+            commit,
+        } => return crate::operations::revert(&repo, branch, tip, commit),
+        Write::Reset {
+            branch,
+            tip,
+            commit,
+            mode,
+        } => return crate::operations::reset(&repo, branch, tip, commit, *mode),
+        Write::Resolve {
+            path,
+            conflict,
+            take,
+        } => crate::conflicts::resolve(&repo, path, conflict, *take),
+        Write::Continue { operation, head } => {
+            return crate::conflicts::continue_stopped(&repo, *operation, head);
+        }
+        Write::Abort { operation, head } => crate::conflicts::abort(&repo, *operation, head),
         Write::Commit { message, head } => {
             return commit(&repo, message, head.as_deref()).map(Some);
         }
@@ -69,39 +105,17 @@ pub fn write(
             annotated,
         } => delete_tag(&repo, name, commit, *annotated),
         Write::CreateStash { message, untracked } => {
-            create_stash(&mut repo, message.as_deref(), *untracked)
+            crate::stash::create(&mut repo, message.as_deref(), *untracked)
         }
         Write::ApplyStash {
             index,
             commit,
             drop,
-        } => {
-            stash_as_shown(&mut repo, *index, commit)?;
-            check_applies(&repo, *index, commit)?;
-            // A second guard behind the check: an ignored file is never overwritten.
-            let mut checkout = CheckoutBuilder::new();
-            checkout.overwrite_ignored(false);
-            let mut options = StashApplyOptions::new();
-            options.checkout_options(checkout);
-            repo.stash_apply(*index, Some(&mut options))?;
-            if *drop {
-                // Applied by now: a stash pushed meanwhile moves the entry, which then stays.
-                stash_as_shown(&mut repo, *index, commit)
-                    .context("the stash is applied but not dropped")?;
-                repo.stash_drop(*index)?;
-            }
-            Ok(())
-        }
-        Write::DropStash { index, commit } => {
-            stash_as_shown(&mut repo, *index, commit)?;
-            repo.stash_drop(*index)?;
-            Ok(())
-        }
+        } => crate::stash::apply(&mut repo, *index, commit, *drop),
+        Write::DropStash { index, commit } => crate::stash::drop(&mut repo, *index, commit),
     };
     done.map(|()| None)
 }
-
-const NO_IDENTITY: &str = "no identity is configured to write with: set user.name and user.email";
 
 fn create_tag(repo: &Repository, name: &str, commit: &str, message: Option<&str>) -> Result<()> {
     let refname = format!("refs/tags/{name}");
@@ -116,7 +130,7 @@ fn create_tag(repo: &Repository, name: &str, commit: &str, message: Option<&str>
         .ok()
         .and_then(|oid| repo.find_object(oid, Some(ObjectType::Commit)).ok())
         .with_context(|| format!("the commit {commit} is no longer in the repository"))?;
-    let message = message.map(|m| clean_message(repo, m)).transpose()?;
+    let message = message.map(|m| stripped(repo, m)).transpose()?;
     match message.filter(|m| !m.is_empty()) {
         Some(message) => {
             refuse_where_signing_is_asked(repo, "tag.gpgSign", "an annotated tag")?;
@@ -129,40 +143,6 @@ fn create_tag(repo: &Repository, name: &str, commit: &str, message: Option<&str>
         }
     }
     Ok(())
-}
-
-/// `message` cleaned up as `git tag` cleans it: comment lines, surrounding blank
-/// lines, and trailing spaces go, and it ends in a newline; empty where nothing is left.
-fn clean_message(repo: &Repository, message: &str) -> Result<String> {
-    let comment = comment_string(repo)?;
-    let kept: Vec<_> = message
-        .lines()
-        .filter(|l| !l.starts_with(&comment))
-        .collect();
-    Ok(git2::message_prettify(kept.join("\n"), None)?)
-}
-
-/// Refuses `what` where the configuration's `key` asks `git` to sign it, which Ocelli cannot
-/// (ADR-0033).
-fn refuse_where_signing_is_asked(repo: &Repository, key: &str, what: &str) -> Result<()> {
-    if repo.config()?.get_bool(key).unwrap_or(false) {
-        bail!("{key} asks for {what} to be signed, which Ocelli does not do: use git for it");
-    }
-    Ok(())
-}
-
-/// What starts a comment line in a message, as `git` reads it: `core.commentString` or
-/// `core.commentChar`, whichever the configuration sets last, and `#` where neither is set or
-/// it is `auto`, which `git tag` does not adjust.
-fn comment_string(repo: &Repository) -> Result<String> {
-    let config = repo.config()?.snapshot()?;
-    let mut comment = None;
-    config
-        .entries(Some("core\\.comment(char|string)"))?
-        .for_each(|entry| comment = entry.value().map(str::to_string))?;
-    Ok(comment
-        .filter(|c| !c.is_empty() && c != "auto")
-        .unwrap_or_else(|| "#".to_string()))
 }
 
 /// Deletes the tag, if it is still the one the developer saw: on `commit`, and annotated or not
@@ -183,153 +163,6 @@ fn delete_tag(repo: &Repository, name: &str, commit: &str, annotated: bool) -> R
     reference.delete()?;
     Ok(())
 }
-
-/// Stashes the uncommitted changes, the untracked files with them where `untracked` says so.
-fn create_stash(repo: &mut Repository, message: Option<&str>, untracked: bool) -> Result<()> {
-    let stasher = repo.signature().context(NO_IDENTITY)?;
-    let mut flags = StashFlags::DEFAULT;
-    if untracked {
-        flags |= StashFlags::INCLUDE_UNTRACKED;
-    }
-    let message = message.map(str::trim).filter(|m| !m.is_empty());
-    match repo.stash_save2(&stasher, message, Some(flags)) {
-        Err(e) if e.code() == ErrorCode::NotFound => bail!("there is nothing to stash"),
-        result => result.map(|_| ()).map_err(Into::into),
-    }
-}
-
-/// Refuses unless the stash at `index` is still the entry the developer saw, by its commit.
-fn stash_as_shown(repo: &mut Repository, index: usize, commit: &str) -> Result<()> {
-    let mut found = None;
-    repo.stash_foreach(|i, _, oid| {
-        if i == index {
-            found = Some(oid.to_string());
-        }
-        true
-    })?;
-    if found.as_deref() != Some(commit) {
-        bail!(
-            "stash@{{{index}}} is no longer the stash shown: reload to see the stashes as they are"
-        );
-    }
-    Ok(())
-}
-
-/// Refuses a stash that would not apply cleanly, before anything changes: libgit2 writes the
-/// untracked files first, then the changes, and leaves a conflict in the working directory, so
-/// whatever would stop it halfway or overwrite something is looked for here. The index holds
-/// nothing staged, the stash's changes merge with the checked-out commit without a conflict, and
-/// every path the stash writes is free on disk: a file there is one the checked-out commit tracks
-/// unchanged, by exactly that name, and no file stands where it needs a directory nor a
-/// directory where it writes a file. Untracked and ignored files in its way refuse it too, as
-/// does a file whose name differs only in case on a file system that does not tell the two
-/// apart.
-fn check_applies(repo: &Repository, index: usize, commit: &str) -> Result<()> {
-    let stash = repo.find_commit(Oid::from_str(commit)?)?;
-    let base = stash.parent(0)?.tree()?;
-    let changes = stash.tree()?;
-    let head = repo.head()?.peel_to_tree()?;
-    let root = repo
-        .workdir()
-        .context("a bare repository has no working directory to apply a stash to")?;
-    let staged = repo.diff_tree_to_index(Some(&head), None, None)?;
-    if staged.deltas().len() > 0 {
-        bail!("the index holds staged changes: commit or unstage them before applying a stash");
-    }
-    let name = format!("stash@{{{index}}}");
-    if repo
-        .merge_trees(&base, &head, &changes, None)?
-        .has_conflicts()
-    {
-        bail!("{name} conflicts with the checked-out commit, so it is not applied");
-    }
-
-    let mut written = Vec::new();
-    for delta in repo
-        .diff_tree_to_tree(Some(&base), Some(&changes), None)?
-        .deltas()
-    {
-        for file in [delta.old_file(), delta.new_file()] {
-            if let Some(path) = file.path() {
-                written.push(path.to_path_buf());
-            }
-        }
-    }
-    // The third parent, where there is one, holds the untracked files the stash took along;
-    // one the checked-out commit tracks by now would be overwritten.
-    if let Ok(untracked) = stash.parent(2) {
-        let mut files = Vec::new();
-        untracked
-            .tree()?
-            .walk(TreeWalkMode::PreOrder, |dir, entry| {
-                if entry.kind() == Some(ObjectType::Blob)
-                    && let Some(name) = entry.name()
-                {
-                    files.push(Path::new(dir).join(name));
-                }
-                TreeWalkResult::Ok
-            })?;
-        if let Some(tracked) = files.iter().find(|f| head.get_path(f).is_ok()) {
-            bail!(
-                "{} is tracked by now, so {name} would overwrite it",
-                tracked.display()
-            );
-        }
-        written.extend(files);
-    }
-
-    for path in &written {
-        for dir in path
-            .ancestors()
-            .skip(1)
-            .filter(|d| !d.as_os_str().is_empty())
-        {
-            if root.join(dir).symlink_metadata().is_ok_and(|m| !m.is_dir()) {
-                bail!("{} stands where {name} needs a directory", dir.display());
-            }
-        }
-        let tracked = head.get_path(path).is_ok();
-        match root.join(path).symlink_metadata() {
-            Ok(meta) if meta.is_dir() => {
-                bail!(
-                    "{} is a directory where {name} writes a file",
-                    path.display()
-                )
-            }
-            Ok(_) if !tracked => {
-                bail!(
-                    "{} is not tracked, so {name} would overwrite it",
-                    path.display()
-                )
-            }
-            Ok(_) if repo.status_file(path).ok() != Some(Status::CURRENT) => {
-                bail!(
-                    "{} has changes of its own that {name} would overwrite",
-                    path.display()
-                )
-            }
-            Err(_) if tracked => {
-                bail!(
-                    "{} has changes of its own that {name} would overwrite",
-                    path.display()
-                )
-            }
-            _ => {}
-        }
-    }
-    Ok(())
-}
-
-const INDEX: Status = Status::INDEX_NEW
-    .union(Status::INDEX_MODIFIED)
-    .union(Status::INDEX_DELETED)
-    .union(Status::INDEX_RENAMED)
-    .union(Status::INDEX_TYPECHANGE);
-const WORKTREE: Status = Status::WT_NEW
-    .union(Status::WT_MODIFIED)
-    .union(Status::WT_DELETED)
-    .union(Status::WT_RENAMED)
-    .union(Status::WT_TYPECHANGE);
 
 /// Stages the whole file at `path`, as `git add` does, removing it from the index where the
 /// working directory deleted it; refused where it holds no change the index does not.
@@ -356,7 +189,11 @@ fn unstage_file(repo: &Repository, path: &str) -> Result<()> {
         bail!("{path} is not staged");
     }
     match repo.head().ok().and_then(|h| h.peel_to_commit().ok()) {
-        Some(head) => repo.reset_default(Some(head.as_object()), [path])?,
+        Some(head) => {
+            let mut index = repo.index()?;
+            entry_as_in(&mut index, &head.tree()?, path)?;
+            index.write()?;
+        }
         None => {
             let mut index = repo.index()?;
             index.remove_path(Path::new(path))?;
@@ -375,15 +212,7 @@ fn commit(repo: &Repository, message: &str, head: Option<&str>) -> Result<String
         bail!("the checked-out commit is no longer the one shown: reload to see it as it is");
     }
     // A bisect leaves commits alone; every other operation in progress records its own.
-    if !matches!(
-        repo.state(),
-        RepositoryState::Clean | RepositoryState::Bisect
-    ) {
-        bail!(
-            "a {} is in progress: finish it with git, which records it as it began it",
-            in_progress(repo.state())
-        );
-    }
+    nothing_in_progress(repo, true)?;
     refuse_where_signing_is_asked(repo, "commit.gpgSign", "a commit")?;
     let mut index = repo.index()?;
     if index.has_conflicts() {
@@ -395,17 +224,7 @@ fn commit(repo: &Repository, message: &str, head: Option<&str>) -> Result<String
     {
         bail!("nothing is staged to commit");
     }
-    // `git commit -m` cleans up whitespace only and keeps lines that look like comments, unless
-    // `commit.cleanup` says otherwise.
-    let cleanup = repo
-        .config()?
-        .get_string("commit.cleanup")
-        .unwrap_or_default();
-    let message = match cleanup.as_str() {
-        "strip" => clean_message(repo, message)?,
-        "verbatim" => message.to_string(),
-        _ => git2::message_prettify(message, None)?,
-    };
+    let message = cleaned(repo, message, Made::Given)?;
     if message.is_empty() {
         bail!("a commit needs a message");
     }
@@ -413,72 +232,6 @@ fn commit(repo: &Repository, message: &str, head: Option<&str>) -> Result<String
     let parents: Vec<_> = parent.iter().collect();
     let made = repo.commit(Some("HEAD"), &author, &author, &message, &tree, &parents)?;
     Ok(made.to_string())
-}
-
-/// Refuses unless `path`'s content, where `side` of [`crate::git::shown`] reads it, is still the
-/// one `expected` names (ADR-0033).
-fn as_shown(
-    repo: &Repository,
-    path: &str,
-    expected: &Option<String>,
-    side: impl Fn(ocelli_core::model::Shown) -> Option<String>,
-) -> Result<()> {
-    if side(crate::git::shown(repo, path)) != *expected {
-        bail!("{path} changed since it was shown: reload to see it as it is");
-    }
-    Ok(())
-}
-
-/// What a repository is in the middle of, in the words `git status` uses.
-fn in_progress(state: RepositoryState) -> &'static str {
-    match state {
-        RepositoryState::Merge => "merge",
-        RepositoryState::Revert | RepositoryState::RevertSequence => "revert",
-        RepositoryState::CherryPick | RepositoryState::CherryPickSequence => "cherry-pick",
-        RepositoryState::ApplyMailbox | RepositoryState::ApplyMailboxOrRebase => "git am",
-        _ => "rebase",
-    }
-}
-
-/// Refuses a name `git branch` refuses: one no reference can have, one that reads as an option,
-/// and `HEAD`.
-fn valid_branch_name(name: &str) -> Result<()> {
-    if name.starts_with('-')
-        || name == "HEAD"
-        || !Reference::is_valid_name(&format!("refs/heads/{name}"))
-    {
-        bail!("'{name}' is not a name a branch can have");
-    }
-    Ok(())
-}
-
-/// The local branch `name`, refused unless it still points at `tip`.
-fn branch_as_shown<'r>(repo: &'r Repository, name: &str, tip: &str) -> Result<git2::Branch<'r>> {
-    let branch = repo
-        .find_branch(name, BranchType::Local)
-        .with_context(|| format!("there is no branch named '{name}' any more"))?;
-    if branch.get().target().map(|t| t.to_string()).as_deref() != Some(tip) {
-        bail!("the branch '{name}' is no longer where it was shown: reload to see it as it is");
-    }
-    Ok(branch)
-}
-
-/// Refuses where the branch `refname` is checked out in another working tree, as `git` does.
-fn not_checked_out_elsewhere(repo: &Repository, refname: &str) -> Result<()> {
-    for name in repo.worktrees()?.iter().flatten() {
-        let Ok(worktree) = repo.find_worktree(name) else {
-            continue;
-        };
-        let Ok(other) = Repository::open_from_worktree(&worktree) else {
-            continue;
-        };
-        let head = other.head().ok().and_then(|h| h.name().map(str::to_string));
-        if head.as_deref() == Some(refname) {
-            let short = refname.trim_start_matches("refs/heads/");
-            bail!("'{short}' is checked out in the working tree '{name}'");
-        }
-    }
-    Ok(())
 }
 
 /// Checks `target` out and points `HEAD` at the branch `refname`, or at `target` itself where
@@ -498,77 +251,6 @@ fn switch_to(repo: &Repository, target: &Commit, refname: Option<&str>) -> Resul
         None => repo.set_head_detached(target.id())?,
     }
     Ok(())
-}
-
-/// Checks `target`'s tree out over the checked-out one, the uncommitted changes carried along,
-/// or refuses with nothing changed, naming what is in the way: what a switch and a fast-forward
-/// both do to the working directory and the index.
-fn check_out(repo: &Repository, target: &Commit) -> Result<()> {
-    if !matches!(
-        repo.state(),
-        RepositoryState::Clean | RepositoryState::Bisect
-    ) {
-        bail!(
-            "a {} is in progress: finish it with git first",
-            in_progress(repo.state())
-        );
-    }
-    let head = repo.head().ok().and_then(|h| h.peel_to_tree().ok());
-    let goal = target.tree()?;
-    let paths = |diff: git2::Diff| -> Vec<String> {
-        diff.deltas()
-            .flat_map(|d| [d.old_file().path(), d.new_file().path()])
-            .flatten()
-            .map(|p| p.display().to_string())
-            .collect()
-    };
-    let changed = paths(repo.diff_tree_to_tree(head.as_ref(), Some(&goal), None)?);
-    let mut staged: Vec<_> = paths(repo.diff_tree_to_index(head.as_ref(), None, None)?)
-        .into_iter()
-        .filter(|p| changed.contains(p))
-        .collect();
-    if !staged.is_empty() {
-        staged.sort();
-        staged.dedup();
-        bail!(
-            "staged changes to {} are in the way: commit or stash them first",
-            staged.join(", ")
-        );
-    }
-
-    let mut in_the_way = Vec::new();
-    let mut checkout = CheckoutBuilder::new();
-    checkout
-        .recreate_missing(true)
-        .notify_on(CheckoutNotificationType::CONFLICT)
-        .notify(|_, path, _, _, _| {
-            if let Some(path) = path {
-                in_the_way.push(path.display().to_string());
-            }
-            true
-        });
-    let checked_out = repo.checkout_tree(target.as_object(), Some(&mut checkout));
-    drop(checkout);
-    match checked_out {
-        Err(e) if e.code() == ErrorCode::Conflict => {
-            in_the_way.sort();
-            bail!(
-                "uncommitted changes to {} are in the way: commit or stash them first",
-                in_the_way.join(", ")
-            );
-        }
-        result => result?,
-    }
-    Ok(())
-}
-
-/// The full reference name of a branch.
-fn refname_of(branch: &git2::Branch) -> Result<String> {
-    Ok(branch
-        .get()
-        .name()
-        .context("a branch name git2 cannot read")?
-        .to_string())
 }
 
 /// Switches to the branch `name` just created, deleting it again where the switch is refused,
@@ -610,15 +292,7 @@ fn track_remote(repo: &Repository, remote: &str, branch: &str, tip: &str) -> Res
     let remote_branch = repo
         .find_branch(&upstream, BranchType::Remote)
         .with_context(|| format!("there is no branch '{upstream}' any more"))?;
-    if remote_branch
-        .get()
-        .target()
-        .map(|t| t.to_string())
-        .as_deref()
-        != Some(tip)
-    {
-        bail!("'{upstream}' is no longer where it was shown: reload to see it as it is");
-    }
+    at_tip(remote_branch.get(), tip, &format!("'{upstream}'"))?;
     if repo.find_branch(branch, BranchType::Local).is_ok() {
         bail!("a local branch named '{branch}' exists already: switch to it instead");
     }
@@ -647,600 +321,4 @@ fn delete_branch(repo: &Repository, name: &str, tip: &str, merged: bool) -> Resu
     }
     branch.delete()?;
     Ok(())
-}
-
-/// Fetches `remote` through libgit2's own transports, as `git fetch <remote>` does, telling
-/// `progress` how far it has come and stopping where it says so (ADR-0035).
-fn fetch(repo: &Repository, name: &str, progress: &mut dyn FnMut(&str) -> bool) -> Result<()> {
-    let mut remote = repo
-        .find_remote(name)
-        .with_context(|| format!("there is no remote named '{name}' any more"))?;
-    let url = remote.url().unwrap_or_default().to_string();
-    let transfer = Transfer::new("Fetching", name, progress);
-    let mut options = git2::FetchOptions::new();
-    options.remote_callbacks(transfer.callbacks());
-    let fetched = remote.fetch(&[] as &[&str], Some(&mut options), None);
-    drop(options);
-    fetched.map_err(|e| transfer.refusal(e, &url, "fetching from"))
-}
-
-/// One transfer with a remote, a fetch or a push, through libgit2's own transports (ADR-0035):
-/// what it tells `progress`, whether the developer stopped it, and how a failure reads. No
-/// credential helper or command the repository's configuration names runs, and no server is
-/// trusted unseen: libgit2 verifies a certificate against the system's trust store and an SSH
-/// host key against the developer's `known_hosts`, since no certificate check of Ocelli's own
-/// overrides it. A server that stalls is given up after [`SERVER_TIMEOUT_MS`].
-struct Transfer<'p> {
-    doing: &'static str,
-    name: String,
-    progress: std::cell::RefCell<&'p mut dyn FnMut(&str) -> bool>,
-    cancelled: std::cell::Cell<bool>,
-    tried: std::cell::RefCell<Tried>,
-    /// The `known_hosts` that revoked the server's key, where one did: libssh2 replaces the
-    /// message of a refusal with its own, so the reason is kept here.
-    revoked: std::cell::RefCell<Option<String>>,
-}
-
-impl<'p> Transfer<'p> {
-    fn new(doing: &'static str, name: &str, progress: &'p mut dyn FnMut(&str) -> bool) -> Self {
-        set_server_timeouts();
-        Self {
-            doing,
-            name: name.to_string(),
-            progress: std::cell::RefCell::new(progress),
-            cancelled: std::cell::Cell::new(false),
-            tried: Default::default(),
-            revoked: Default::default(),
-        }
-    }
-
-    /// Tells the developer how far the transfer has come; false once they stopped it.
-    fn go_on(&self, how_far: &str) -> bool {
-        let go_on =
-            (self.progress.borrow_mut())(&format!("{} {}: {how_far}", self.doing, self.name));
-        self.cancelled.set(!go_on);
-        go_on
-    }
-
-    fn callbacks(&self) -> git2::RemoteCallbacks<'_> {
-        let mut callbacks = git2::RemoteCallbacks::new();
-        callbacks.credentials(|url, user, allowed| {
-            if !self.go_on("authenticating") {
-                return Err(git2::Error::from_str("cancelled"));
-            }
-            self.tried.borrow_mut().credentials(url, user, allowed)
-        });
-        // libgit2 checks an SSH host key against the developer's known_hosts after this; a key
-        // that a revoked line lists, which libssh2 does not read, is refused first (ADR-0035).
-        callbacks.certificate_check(|cert, host| {
-            if let Some(key) = cert.as_hostkey().and_then(|k| k.hostkey()) {
-                let files = known_hosts_files();
-                if let Some(file) = files.iter().find(|(_, text)| revoked_in(text, key)) {
-                    *self.revoked.borrow_mut() = Some(file.0.clone());
-                    return Err(git2::Error::new(
-                        ErrorCode::Certificate,
-                        git2::ErrorClass::Ssh,
-                        format!("{host}'s host key is revoked in {}", file.0),
-                    ));
-                }
-            }
-            Ok(git2::CertificateCheckStatus::CertificatePassthrough)
-        });
-        callbacks.sideband_progress(|_| self.go_on("the server is preparing"));
-        callbacks.transfer_progress(|stats| {
-            self.go_on(&format!(
-                "{} of {} objects",
-                stats.received_objects(),
-                stats.total_objects()
-            ))
-        });
-        // libgit2 offers no way to stop a push once its objects are sent: told, not asked.
-        callbacks.push_transfer_progress(|current, total, _| {
-            (self.progress.borrow_mut())(&format!(
-                "{} {}: {current} of {total} objects",
-                self.doing, self.name
-            ));
-        });
-        callbacks
-    }
-
-    /// What a failed transfer tells the developer.
-    fn refusal(&self, e: git2::Error, url: &str, direction: &str) -> anyhow::Error {
-        let name = &self.name;
-        let doing = self.doing.to_lowercase();
-        if self.cancelled.get() {
-            return anyhow::anyhow!("{doing} {name} was cancelled");
-        }
-        match e.code() {
-            ErrorCode::Certificate if self.revoked.borrow().is_some() => anyhow::anyhow!(
-                "{name} cannot be trusted: its host key is revoked in {}",
-                self.revoked.borrow().as_deref().unwrap_or_default()
-            ),
-            ErrorCode::Certificate if is_ssh(url) => {
-                let files = known_hosts_files();
-                let user = files.first().map_or("", |f| f.1.as_str());
-                let system = files.get(1).map_or("", |f| f.1.as_str());
-                let host = ssh_host(url);
-                match vouched_elsewhere(user, system, host) {
-                    Some(why) => anyhow::anyhow!(
-                        "{name}'s host key is {why}, which Ocelli does not trust: add the host to \
-                         your ~/.ssh/known_hosts"
-                    ),
-                    None => anyhow::anyhow!(
-                        "{name}'s host key is not in your known_hosts: connect to it once with \
-                         ssh, and check its fingerprint, before {direction} it from Ocelli"
-                    ),
-                }
-            }
-            _ if e.code() == ErrorCode::Certificate || e.class() == git2::ErrorClass::Ssl => {
-                anyhow::anyhow!(
-                    "{name}'s server could not be verified against the system's certificates: {}",
-                    e.message()
-                )
-            }
-            ErrorCode::Auth => anyhow::anyhow!("{name} refused the credentials: {}", e.message()),
-            ErrorCode::NotFastForward => {
-                anyhow::anyhow!(
-                    "{name} has commits the branch does not: the remote is ahead, so pull first"
-                )
-            }
-            _ => e.into(),
-        }
-    }
-}
-
-/// Pulls the checked-out branch `name`, still at `tip`, as `git pull --ff-only` does: fetches
-/// its upstream's remote and fast-forwards to the upstream, the uncommitted changes carried along;
-/// a branch that has diverged is refused, the fetch kept (ADR-0035).
-fn pull(
-    repo: &Repository,
-    name: &str,
-    tip: &str,
-    progress: &mut dyn FnMut(&str) -> bool,
-) -> Result<()> {
-    let branch = branch_as_shown(repo, name, tip)?;
-    if !branch.is_head() {
-        bail!("'{name}' is not checked out: a pull moves the checked-out branch");
-    }
-    let refname = refname_of(&branch)?;
-    let remote = repo
-        .branch_upstream_remote(&refname)
-        .ok()
-        .and_then(|remote| remote.as_str().map(str::to_string))
-        .with_context(|| format!("'{name}' has no upstream to pull from"))?;
-    // An upstream on `.` is a local branch, with nothing to fetch.
-    if remote != "." {
-        fetch(repo, &remote, progress)?;
-    }
-    let upstream = repo
-        .find_branch(name, BranchType::Local)?
-        .upstream()
-        .map_err(|_| anyhow::anyhow!("the upstream of '{name}' is not there to pull from"))?;
-    let theirs = upstream
-        .get()
-        .target()
-        .context("the upstream points at nothing")?;
-    let ours = Oid::from_str(tip)?;
-    if theirs == ours || repo.graph_descendant_of(ours, theirs)? {
-        return Ok(());
-    }
-    if !repo.graph_descendant_of(theirs, ours)? {
-        bail!(
-            "'{name}' and its upstream have diverged: merge or rebase them with git; only the \
-             fetch was done"
-        );
-    }
-    let target = repo.find_commit(theirs)?;
-    // The branch is locked before anything changes, and checked against `tip` again under the
-    // lock: a commit made while the fetch ran is neither lost nor checked out over, and a lock
-    // another program holds refuses the pull before the working directory moves.
-    let mut transaction = repo.transaction()?;
-    transaction
-        .lock_ref(&refname)
-        .with_context(|| format!("'{name}' is locked by another program: try again later"))?;
-    branch_as_shown(repo, name, tip)?;
-    check_out(repo, &target)?;
-    transaction.set_target(&refname, theirs, None, "pull: Fast-forward")?;
-    transaction.commit()?;
-    Ok(())
-}
-
-/// Pushes the checked-out branch `name`, still at `tip`, as `git push` does, never by force: to
-/// its upstream, or to the remote a fetch reaches without one named, under its own name, which
-/// then becomes its upstream. A push the remote refuses, one that is not a fast-forward, changes
-/// nothing (ADR-0035).
-fn push(
-    repo: &Repository,
-    name: &str,
-    tip: &str,
-    progress: &mut dyn FnMut(&str) -> bool,
-) -> Result<()> {
-    let branch = branch_as_shown(repo, name, tip)?;
-    if !branch.is_head() {
-        bail!("'{name}' is not checked out: a push sends the checked-out branch");
-    }
-    let refname = refname_of(&branch)?;
-    let (remote_name, destination, first) = push_destination(repo, name, &refname)?;
-    let mut remote = repo
-        .find_remote(&remote_name)
-        .with_context(|| format!("there is no remote named '{remote_name}' any more"))?;
-    let url = remote
-        .pushurl()
-        .or(remote.url())
-        .unwrap_or_default()
-        .to_string();
-    let transfer = Transfer::new("Pushing", &remote_name, progress);
-    let refused = std::cell::RefCell::new(None);
-    let mut callbacks = transfer.callbacks();
-    callbacks.push_update_reference(|_, status| {
-        if let Some(why) = status {
-            *refused.borrow_mut() = Some(why.to_string());
-        }
-        Ok(())
-    });
-    let mut options = git2::PushOptions::new();
-    options.remote_callbacks(callbacks);
-    // No `+`: a push that is not a fast-forward is the remote's to refuse.
-    let pushed = remote.push(&[format!("{refname}:{destination}")], Some(&mut options));
-    drop(options);
-    pushed.map_err(|e| transfer.refusal(e, &url, "pushing to"))?;
-    if let Some(why) = refused.into_inner() {
-        bail!("{remote_name} refused '{name}' ({why}): the remote is ahead, so pull first");
-    }
-    if first {
-        repo.find_branch(name, BranchType::Local)?
-            .set_upstream(Some(&format!("{remote_name}/{name}")))
-            .with_context(|| format!("'{name}' was pushed, but its upstream could not be set"))?;
-    }
-    Ok(())
-}
-
-/// Where a push of the branch `name` goes, as `git push` decides with `push.default` and the
-/// branch's push remote: the remote, the reference there, and whether the branch has no upstream
-/// yet, which the push then sets, as `git push -u` would. `simple`, the default, refuses an
-/// upstream named differently; `nothing` and `matching` are left to `git`.
-fn push_destination(
-    repo: &Repository,
-    name: &str,
-    refname: &str,
-) -> Result<(String, String, bool)> {
-    let config = repo.config()?;
-    let setting = |key: &str| config.get_string(key).ok().filter(|v| !v.is_empty());
-    let upstream = repo
-        .branch_upstream_remote(refname)
-        .ok()
-        .and_then(|remote| remote.as_str().map(str::to_string));
-    if upstream.as_deref() == Some(".") {
-        bail!("the upstream of '{name}' is a local branch, which a push does not reach");
-    }
-    let remote = setting(&format!("branch.{name}.pushRemote"))
-        .or_else(|| setting("remote.pushDefault"))
-        .or_else(|| upstream.clone())
-        .or_else(|| crate::refs::default_remote(repo, &crate::refs::remote_names(repo)))
-        .with_context(|| format!("there is no remote to push '{name}' to"))?;
-    let merge = setting(&format!("branch.{name}.merge"));
-    let to_upstream = upstream.as_deref() == Some(remote.as_str());
-    let mode = setting("push.default").unwrap_or_else(|| "simple".to_string());
-    let destination = match mode.as_str() {
-        "nothing" => bail!("push.default is nothing: name what to push with git"),
-        "matching" => bail!("push.default is matching, which pushes every branch: use git for it"),
-        "current" => refname.to_string(),
-        "upstream" | "tracking" => match merge.filter(|_| to_upstream) {
-            Some(merge) if merge.starts_with("refs/heads/") => merge,
-            _ => bail!("'{name}' has no upstream branch on {remote} to push to"),
-        },
-        "simple" => match merge.filter(|_| to_upstream) {
-            Some(merge) if merge != refname => bail!(
-                "the upstream of '{name}' is named differently ({merge}): push it with git, \
-                 naming where"
-            ),
-            _ => refname.to_string(),
-        },
-        other => bail!("push.default is {other}, which Ocelli does not know: use git"),
-    };
-    Ok((remote, destination, upstream.is_none()))
-}
-
-/// How long libgit2 waits for a server to connect, and then for each read, before it gives up.
-const SERVER_CONNECT_TIMEOUT_MS: i32 = 30_000;
-const SERVER_TIMEOUT_MS: i32 = 60_000;
-
-/// Sets libgit2's server timeouts, once for the process, before the first transfer: without them
-/// a server that stalls holds a fetch, and the developer's next write, for ever.
-#[allow(unsafe_code)]
-fn set_server_timeouts() {
-    static ONCE: std::sync::Once = std::sync::Once::new();
-    ONCE.call_once(|| {
-        // SAFETY: libgit2's global options are set here once, before any transfer reads them;
-        // the reads of a repository do not use them.
-        unsafe {
-            let _ =
-                git2::opts::set_server_connect_timeout_in_milliseconds(SERVER_CONNECT_TIMEOUT_MS);
-            let _ = git2::opts::set_server_timeout_in_milliseconds(SERVER_TIMEOUT_MS);
-        }
-    });
-}
-
-/// The developer's and the system's `known_hosts`, by path and text, the developer's first; a file
-/// that cannot be read counts as empty. The home is found as libgit2 finds it: `HOME`, else on
-/// Windows `USERPROFILE` or `HOMEDRIVE` and `HOMEPATH`; the system's file is where OpenSSH keeps it.
-fn known_hosts_files() -> Vec<(String, String)> {
-    let var = |name: &str| std::env::var(name).ok().filter(|v| !v.is_empty());
-    let home = var("HOME")
-        .or_else(|| var("USERPROFILE"))
-        .or_else(|| Some(format!("{}{}", var("HOMEDRIVE")?, var("HOMEPATH")?)));
-    let system = if cfg!(windows) {
-        var("ProgramData").map(|data| format!("{data}\\ssh\\ssh_known_hosts"))
-    } else {
-        Some("/etc/ssh/ssh_known_hosts".to_string())
-    };
-    let user = home.map(|home| {
-        std::path::Path::new(&home)
-            .join(".ssh")
-            .join("known_hosts")
-            .display()
-            .to_string()
-    });
-    [user, system]
-        .into_iter()
-        .map(|path| {
-            let text = path
-                .as_deref()
-                .and_then(|p| std::fs::read_to_string(p).ok())
-                .unwrap_or_default();
-            (path.unwrap_or_default(), text)
-        })
-        .collect()
-}
-
-/// Whether a `@revoked` line of `known_hosts` lists `key`, whatever its host pattern.
-fn revoked_in(known_hosts: &str, key: &[u8]) -> bool {
-    known_hosts.lines().any(|line| {
-        let mut fields = line.split_whitespace();
-        fields.next() == Some("@revoked")
-            && fields
-                .nth(2)
-                .is_some_and(|encoded| decode_base64(encoded).as_deref() == Some(key))
-    })
-}
-
-/// Where a host libssh2 refused is vouched for all the same: only in the system's file, or only
-/// through `@cert-authority`, neither of which libssh2 reads; `None` where it is not.
-fn vouched_elsewhere(user: &str, system: &str, host: &str) -> Option<&'static str> {
-    let names = |line: &str, field: usize| {
-        line.split_whitespace().nth(field).is_some_and(|patterns| {
-            patterns
-                .split(',')
-                .any(|p| p == host || p.contains(&format!("[{host}]")))
-        })
-    };
-    if user
-        .lines()
-        .chain(system.lines())
-        .any(|l| l.starts_with("@cert-authority") && names(l, 1))
-    {
-        return Some("vouched for only by a @cert-authority line");
-    }
-    if system
-        .lines()
-        .any(|l| !l.starts_with('@') && !l.starts_with('#') && names(l, 0))
-    {
-        return Some("listed only in /etc/ssh/ssh_known_hosts");
-    }
-    None
-}
-
-/// The host an SSH address names: `ssh://[user@]host[:port]/path` or `[user@]host:path`.
-fn ssh_host(url: &str) -> &str {
-    let rest = url
-        .strip_prefix("ssh://")
-        .or_else(|| url.strip_prefix("git+ssh://"))
-        .unwrap_or(url);
-    let authority = rest.split('/').next().unwrap_or_default();
-    let host = authority.rsplit('@').next().unwrap_or_default();
-    host.split(':').next().unwrap_or_default()
-}
-
-/// Standard base64, as `known_hosts` writes keys; `None` for text that is not.
-fn decode_base64(text: &str) -> Option<Vec<u8>> {
-    const TABLE: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-    let mut bits = 0u32;
-    let mut held = 0;
-    let mut out = Vec::new();
-    for c in text.trim_end_matches('=').bytes() {
-        let value = TABLE.iter().position(|&t| t == c)? as u32;
-        bits = bits << 6 | value;
-        held += 6;
-        if held >= 8 {
-            held -= 8;
-            out.push((bits >> held) as u8);
-        }
-    }
-    Some(out)
-}
-
-/// Whether `url` reaches its remote over SSH: `ssh://`, or the scp-like `host:path`.
-fn is_ssh(url: &str) -> bool {
-    url.starts_with("ssh://") || url.starts_with("git+ssh://") || !url.contains("://")
-}
-
-/// The ways to authenticate, each tried once: the SSH agent, then the credential helper of the
-/// developer's global and system configuration, never one the repository's own names (ADR-0035).
-#[derive(Default)]
-struct Tried {
-    username: bool,
-    agent: bool,
-    helper: bool,
-}
-
-impl Tried {
-    fn credentials(
-        &mut self,
-        url: &str,
-        user: Option<&str>,
-        allowed: git2::CredentialType,
-    ) -> std::result::Result<git2::Cred, git2::Error> {
-        use git2::CredentialType as Kind;
-        let refuse = |why: &str| {
-            Err(git2::Error::new(
-                ErrorCode::Auth,
-                git2::ErrorClass::Net,
-                why,
-            ))
-        };
-        // A line break in the address or the user name, both of which the repository's
-        // configuration chooses, would add lines of its own to what a credential helper reads,
-        // and could have it hand over the credential of another host (as CVE-2020-5260 did).
-        if [url, user.unwrap_or_default()]
-            .iter()
-            .any(|s| s.contains(['\n', '\r', '\0']))
-        {
-            return refuse(
-                "the remote's address holds a line break, which could pass a credential to another host",
-            );
-        }
-        if allowed.contains(Kind::USERNAME) && !self.username {
-            self.username = true;
-            return git2::Cred::username(&user.map(str::to_string).unwrap_or_else(local_user));
-        }
-        if allowed.contains(Kind::SSH_KEY) && !self.agent {
-            self.agent = true;
-            let user = user.map(str::to_string).unwrap_or_else(local_user);
-            return git2::Cred::ssh_key_from_agent(&user);
-        }
-        if allowed.contains(Kind::USER_PASS_PLAINTEXT) && !self.helper {
-            self.helper = true;
-            if let Err(why) = helper_may_answer_for(url) {
-                return refuse(why);
-            }
-            return git2::Cred::credential_helper(&developers_config()?, url, user);
-        }
-        refuse(
-            "neither the SSH agent nor a credential helper of your configuration gave credentials \
-             the server accepted",
-        )
-    }
-}
-
-/// The user name ssh would use where the address names none: the local one.
-fn local_user() -> String {
-    std::env::var("USER")
-        .or_else(|_| std::env::var("USERNAME"))
-        .unwrap_or_else(|_| "git".to_string())
-}
-
-/// The developer's own configuration, global and system, without the repository's: where a
-/// credential helper is looked up (ADR-0035).
-pub(crate) fn developers_config() -> std::result::Result<git2::Config, git2::Error> {
-    git2::Config::open_default()
-}
-
-/// Refuses an address a credential helper could answer for another host than the one libgit2
-/// sends its answer to. A password goes over https only. git2 tells the helper the host as the
-/// `url` crate reads it, and tells it none at all for an IP address, where a helper could match any
-/// credential it holds; libgit2 connects to the host after the last `@` of the address. The two
-/// must name one and the same domain, written plainly.
-fn helper_may_answer_for(address: &str) -> std::result::Result<(), &'static str> {
-    let scheme = "https://";
-    if !address
-        .get(..scheme.len())
-        .is_some_and(|s| s.eq_ignore_ascii_case(scheme))
-    {
-        return Err("credentials are sent over https only, and this remote is not");
-    }
-    let parsed = url::Url::parse(address).map_err(|_| "the remote's address cannot be read")?;
-    let Some(url::Host::Domain(host)) = parsed.host() else {
-        return Err("credentials go only to a remote named by its domain, not by an IP address");
-    };
-    let authority = address[scheme.len()..]
-        .split(['/', '?', '#'])
-        .next()
-        .unwrap_or_default();
-    let named = authority.rsplit('@').next().unwrap_or_default();
-    let named = match named.rsplit_once(':') {
-        Some((host, port)) if port.chars().all(|c| c.is_ascii_digit()) => host,
-        _ => named,
-    };
-    let unusual = authority.contains(['\\', ' ']) || named.contains('%');
-    if unusual || !named.eq_ignore_ascii_case(host) {
-        return Err("the remote's address names its host in a way that could be read two ways");
-    }
-    Ok(())
-}
-
-#[cfg(test)]
-mod tests {
-    use super::helper_may_answer_for as asks;
-    use super::{decode_base64, revoked_in, ssh_host, vouched_elsewhere};
-
-    #[test]
-    // Verifies: ADR-0035
-    fn a_helper_answers_only_for_a_plainly_named_domain_over_https() {
-        for fine in [
-            "https://example.org/repo.git",
-            "https://user@Example.org:8443/repo.git",
-            "HTTPS://example.org/a@b/repo.git",
-            // Both parsers read the host after the last `@`, so the helper is asked about the
-            // very host the answer goes to.
-            "https://ex%61mple.org@evil.example/repo.git",
-        ] {
-            assert_eq!(asks(fine), Ok(()), "{fine}");
-        }
-        for (refused, why) in [
-            ("http://example.org/repo.git", "https only"),
-            ("https://192.0.2.1/repo.git", "IP address"),
-            ("https://[2001:db8::1]/repo.git", "IP address"),
-            ("https://%65xample.org/repo.git", "two ways"),
-            ("https://example.org\\@evil.example/repo.git", "two ways"),
-            ("https://bücher.example/repo.git", "two ways"),
-        ] {
-            let error = asks(refused).unwrap_err();
-            assert!(error.contains(why), "{refused}: {error}");
-        }
-    }
-
-    #[test]
-    // Verifies: ADR-0035
-    fn a_host_key_a_revoked_line_lists_is_refused_whatever_its_host_pattern() {
-        let key = b"ssh-ed25519 key bytes";
-        let encoded = "c3NoLWVkMjU1MTkga2V5IGJ5dGVz";
-        assert_eq!(decode_base64(encoded).as_deref(), Some(&key[..]));
-        let revoked = format!("@revoked * ssh-ed25519 {encoded}\n");
-        assert!(revoked_in(&revoked, key));
-        assert!(
-            !revoked_in(&format!("example.org ssh-ed25519 {encoded}\n"), key),
-            "trusted, not revoked"
-        );
-        assert!(
-            !revoked_in("@revoked * ssh-ed25519 AAAA\n", key),
-            "another key"
-        );
-        assert!(
-            !revoked_in("@revoked * ssh-ed25519 !!!\n", key),
-            "no base64 at all"
-        );
-    }
-
-    #[test]
-    // Verifies: ADR-0035
-    fn a_refusal_names_where_else_a_host_is_vouched_for() {
-        let line = "git.example.org ssh-ed25519 AAAA";
-        assert_eq!(
-            vouched_elsewhere("", line, "git.example.org"),
-            Some("listed only in /etc/ssh/ssh_known_hosts")
-        );
-        let ca = "@cert-authority *.example.org,git.example.org ssh-ed25519 AAAA";
-        assert_eq!(
-            vouched_elsewhere(ca, "", "git.example.org"),
-            Some("vouched for only by a @cert-authority line")
-        );
-        assert_eq!(vouched_elsewhere("", "", "git.example.org"), None);
-        for (url, host) in [
-            ("ssh://git@git.example.org:2222/r.git", "git.example.org"),
-            ("git@git.example.org:r.git", "git.example.org"),
-            ("git.example.org:r.git", "git.example.org"),
-        ] {
-            assert_eq!(ssh_host(url), host, "{url}");
-        }
-    }
 }

@@ -1,4 +1,4 @@
-//! Verifies: ADR-0035
+//! Verifies: ADR-0035, Q-7
 //!
 //! A fetch sends a credential only over an encrypted connection to the host it belongs to. A
 //! local server asks every request for credentials and records whether any came; the developer's
@@ -6,15 +6,20 @@
 //! repository's own names a helper of its own. libgit2 reads the global configuration from its
 //! search path, which holds for the whole process: these tests run in a binary of their own.
 
+#![allow(
+    clippy::disallowed_methods,
+    reason = "a test sets a repository up by hand, the way a developer would"
+)]
 #![cfg(unix)]
 
+mod git_command;
+use git_command::git_command;
 use git2::ConfigLevel;
 use ocelli_core::port::{RepositoryWriter, Write};
 use ocelli_git::GitWriter;
 use std::io::{BufRead, BufReader, Write as _};
 use std::net::TcpListener;
 use std::path::{Path, PathBuf};
-use std::process::Command;
 use std::sync::{Arc, Mutex, Once};
 
 /// A server that answers every request with 401 and keeps each request's headers.
@@ -77,15 +82,7 @@ fn repository(dir: &Path, url: &str, ran: &Path) {
     let _ = std::fs::remove_dir_all(dir);
     std::fs::create_dir_all(dir).unwrap();
     let run = |args: &[&str]| {
-        assert!(
-            Command::new("git")
-                .arg("-C")
-                .arg(dir)
-                .args(args)
-                .status()
-                .unwrap()
-                .success()
-        );
+        assert!(git_command(dir).args(args).status().unwrap().success());
     };
     run(&["init", "--quiet"]);
     run(&["remote", "add", "origin", url]);
@@ -148,10 +145,7 @@ fn a_line_break_in_the_address_hands_no_credential_over() {
         format!("http://victim%0Ahost=example.invalid%0Aprotocol=https@127.0.0.1:{port}/repo.git");
     repository(&root, &url, &ran);
     let error = fetch(&root);
-    assert!(
-        error.contains("line break") || error.contains("https only"),
-        "{error}"
-    );
+    assert!(error.contains("line break"), "{error}");
     let seen = seen.lock().unwrap();
     assert!(!seen.is_empty(), "the server was asked");
     let sent = credentials_sent(&seen);

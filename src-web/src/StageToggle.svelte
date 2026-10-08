@@ -1,25 +1,27 @@
 <script lang="ts">
   // Whether a file of the uncommitted changes is staged, and the control that stages it whole or
   // takes it out of the index (G-4). A click here does not open the file's diff.
-  import type { FileChange } from './types.ts';
+  import type { FileChange, Staging } from './types.ts';
 
   interface Props {
     file: FileChange;
+    /** How much of the file's change is staged. */
+    staged: Staging['staged'];
     disabled: boolean;
     onStage: (file: FileChange) => void;
   }
-  let { file, disabled, onStage }: Props = $props();
+  let { file, staged, disabled, onStage }: Props = $props();
 
   const label = $derived(
-    file.staged === 'yes' ? 'Unstage' : file.staged === 'partly' ? 'Stage the rest of' : 'Stage',
+    staged === 'yes' ? 'Unstage' : staged === 'partly' ? 'Stage the rest of' : 'Stage',
   );
 </script>
 
 <input
   type="checkbox"
   class="stage"
-  checked={file.staged === 'yes'}
-  indeterminate={file.staged === 'partly'}
+  checked={staged === 'yes'}
+  indeterminate={staged === 'partly'}
   {disabled}
   title="{label} {file.path}"
   aria-label="{label} {file.path}"

@@ -6,7 +6,8 @@
 //! key reads but the writes (ADR-0033): `t` tags the selected commit, `s`
 //! stashes the uncommitted changes, `a` applies the selected stash, and `p`
 //! and `d` on it pop and drop it, as `d` on a tag in the sidebar deletes it,
-//! once the developer has answered `y` (ADR-0034).
+//! once the developer has answered `y` (ADR-0034). The keys are here; the
+//! requests they build and the one write that runs are in [`crate::writes`].
 
 use crate::chips::RefContext;
 use crate::files::{self, FileRow, FileView};
@@ -15,13 +16,14 @@ use crate::raster::Glyphs;
 use crate::sidebar::{self, Action, Activated, Item};
 use crate::state::{DiffView as StoredDiffView, StoredTheme, ViewState};
 use crate::theme::Theme;
+use crate::writes::{self, OneWrite};
 use ocelli_core::graph::LaidChunk;
 use ocelli_core::history::{History, Lineage};
 use ocelli_core::load::{Event, LoadSession};
 use ocelli_core::model::{
-    CommitKind, DiffLine, FileChange, LocalBranch, NodeJson, RepoRefs, Shown, Tag,
+    CommitKind, DiffLine, FileChange, InProgress, LocalBranch, NodeJson, RepoRefs, Tag,
 };
-use ocelli_core::port::{Confirmation, Write};
+use ocelli_core::port::{Confirmation, ResetMode, Take, Write};
 use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use std::collections::HashSet;
 use std::path::PathBuf;
@@ -49,8 +51,10 @@ pub struct Loaded {
     pub tags: Vec<Tag>,
     /// The local branches as read, for where one points and whether it is merged.
     pub locals: Vec<LocalBranch>,
-    /// The remote a fetch reaches without one named.
+    /// The default remote.
     pub default_remote: Option<String>,
+    /// The operation stopped in the repository, with its conflicted files (ADR-0033).
+    pub in_progress: Option<InProgress>,
 }
 
 impl Loaded {
@@ -72,6 +76,7 @@ impl Loaded {
             tags: Vec::new(),
             locals: Vec::new(),
             default_remote: None,
+            in_progress: None,
         }
     }
 
@@ -81,6 +86,7 @@ impl Loaded {
         self.tags = repo_refs.tags.clone();
         self.locals = repo_refs.locals.clone();
         self.default_remote = repo_refs.default_remote.clone();
+        self.in_progress = repo_refs.in_progress.clone();
         self.refs = RefContext {
             head: repo_refs
                 .locals
@@ -188,6 +194,10 @@ pub enum Modal {
         name: String,
         switch: bool,
     },
+    /// The mode chosen after `X` for a reset of the checked-out branch to `commit`.
+    Reset { commit: String, mode: ResetMode },
+    /// The conflicted files of the operation in progress, after `!`, the cursor on `selected`.
+    Conflicts { selected: usize },
 }
 
 pub struct App {
@@ -226,17 +236,8 @@ pub struct App {
     /// A repository to switch to, taken by the event loop, which then starts a
     /// fresh load and drops every result still in flight for the old one.
     pub reload: Option<PathBuf>,
-    /// A write for the event loop to run; its result comes back as [`Msg::Written`].
-    pub write: Option<(Write, Confirmation)>,
-    /// Whether a write runs: no second one starts until its result is in.
-    pub writing: bool,
-    /// Asks the event loop to stop the write that runs, taken by it.
-    pub cancel: bool,
-    /// Whether the write that runs can be stopped: one that reaches a remote.
-    pub cancellable: bool,
-    /// Whether the write that runs reaches a remote, after which the repository is read again
-    /// even where it is refused.
-    pub transferring: bool,
+    /// The one write that runs, which the event loop takes and its result answers.
+    pub writes: OneWrite,
     /// What the status bar says over the load's own line until the next key: why a transfer
     /// was refused, which the reload after it would otherwise hide.
     pub notice: Option<String>,
@@ -290,11 +291,7 @@ impl App {
             quit: false,
             requests: Vec::new(),
             reload: None,
-            write: None,
-            writing: false,
-            cancel: false,
-            cancellable: false,
-            transferring: false,
+            writes: OneWrite::default(),
             notice: None,
             select_again: None,
             clipboard: None,
@@ -339,8 +336,7 @@ impl App {
         next.side.rail_selected = 0;
         next.status = status.to_string();
         next.reload = Some(path);
-        next.writing = self.writing;
-        next.transferring = self.transferring;
+        next.writes = std::mem::take(&mut self.writes);
         *self = next;
     }
 
@@ -357,14 +353,12 @@ impl App {
                     });
                 }
             }
-            Msg::WriteProgress(p) if self.writing => self.status = p,
+            Msg::WriteProgress(p) if self.writes.running() => self.status = p,
             Msg::WriteProgress(_) => {}
             Msg::Written(Err(e)) => {
-                self.writing = false;
-                self.cancellable = false;
                 // A transfer refused may have moved remote branches by its fetch: the
                 // repository is read again, the refusal kept in view (ADR-0035).
-                if std::mem::take(&mut self.transferring) {
+                if self.writes.answered() {
                     let select_again = self.selected_sha();
                     self.open_repo(self.repo.clone(), "Reloading…");
                     self.select_again = select_again;
@@ -377,9 +371,7 @@ impl App {
             // the one that was selected, selected again once its row arrives
             // (ADR-0033).
             Msg::Written(Ok(made)) => {
-                self.writing = false;
-                self.cancellable = false;
-                self.transferring = false;
+                self.writes.answered();
                 let select_again = made.or_else(|| self.selected_sha());
                 self.open_repo(self.repo.clone(), "Written — reloading…");
                 self.select_again = select_again;
@@ -533,6 +525,8 @@ impl App {
                     name,
                     switch,
                 } => self.branch_key(commit, name, switch, key),
+                Modal::Reset { commit, mode } => self.reset_key(commit, mode, key),
+                Modal::Conflicts { selected } => self.conflicts_key(selected, key),
             };
         }
         if self.search.editing {
@@ -556,8 +550,7 @@ impl App {
         if matches!(key.code, KeyCode::Char(_)) && typed(key).is_none() && !chord {
             return;
         }
-        if self.cancellable && key.code == KeyCode::Esc {
-            self.cancel = true;
+        if key.code == KeyCode::Esc && self.writes.cancel() {
             self.status = "Cancelling…".to_string();
             return;
         }
@@ -565,6 +558,7 @@ impl App {
             KeyCode::Char('q') => self.quit = true,
             KeyCode::Char('f') if self.focus != Focus::Sidebar => self.start_fetch(None),
             KeyCode::Char('U') => self.start_pull(),
+            KeyCode::Char('!') => self.open_conflicts(),
             KeyCode::Char('P') => self.start_push(),
             KeyCode::Char('1') => self.side.toggle_minimised(),
             KeyCode::Char('T') => self.theme = self.theme.toggled(),
@@ -684,15 +678,11 @@ impl App {
                 }
             }
             KeyCode::Enter => {
-                let name = tag.name.trim().to_string();
-                self.status = format!("Tagging {name}…");
-                // An empty message makes a lightweight tag.
-                let write = Write::CreateTag {
-                    name,
-                    commit: tag.sha,
-                    message: tag.message.filter(|m| !m.trim().is_empty()),
-                };
-                self.queue(write, Confirmation::Absent);
+                let message = tag.message.take().unwrap_or_default();
+                if let Some(write) = writes::tag_request(&tag.sha, &tag.name, message) {
+                    self.status = format!("Tagging {}…", tag.name.trim());
+                    self.queue(write, Confirmation::Absent);
+                }
                 return;
             }
             _ => {}
@@ -725,14 +715,12 @@ impl App {
                 message.pop();
             }
             KeyCode::Esc => return,
-            KeyCode::Enter if !message.trim().is_empty() => {
-                self.status = "Committing…".to_string();
-                let write = Write::Commit {
-                    message,
-                    head: Some(head),
-                };
-                self.queue(write, Confirmation::Absent);
-                return;
+            KeyCode::Enter => {
+                if let Some(write) = writes::commit_request(&head, &message) {
+                    self.status = "Committing…".to_string();
+                    self.queue(write, Confirmation::Absent);
+                    return;
+                }
             }
             _ => {}
         }
@@ -744,46 +732,26 @@ impl App {
     fn stage(&mut self, stage: bool) {
         let rows = self.file_rows();
         let Some(files) = &self.files else { return };
-        if files.sha != ocelli_core::model::WORKDIR_SHA {
-            return;
-        }
         let (Ok(list), Some(FileRow::File { index, .. })) =
             (&files.files, rows.get(files.selected))
         else {
             return;
         };
         let file = &list[*index];
-        let (path, shown) = (
-            file.path.clone(),
-            file.shown.clone().unwrap_or(Shown {
-                workdir: None,
-                index: None,
-            }),
-        );
-        self.status = format!("{} {path}…", if stage { "Staging" } else { "Unstaging" });
-        let write = if stage {
-            Write::StageFile {
-                path,
-                shown: shown.workdir,
-            }
-        } else {
-            Write::UnstageFile {
-                path,
-                shown: shown.index,
-            }
+        let Some(write) = writes::stage_request(file, stage) else {
+            return;
         };
+        let verb = if stage { "Staging" } else { "Unstaging" };
+        self.status = format!("{verb} {}…", file.path);
         self.queue(write, Confirmation::Absent);
     }
 
     /// Hands `write` to the event loop, unless one runs still: a second press
     /// writes nothing.
     fn queue(&mut self, write: Write, confirmation: Confirmation) {
-        if self.writing {
+        if !self.writes.queue(write, confirmation) {
             self.status = "A write is still running".to_string();
-            return;
         }
-        self.writing = true;
-        self.write = Some((write, confirmation));
     }
 
     /// The answer to a write that discards work: only `y` writes, every other
@@ -807,11 +775,7 @@ impl App {
             KeyCode::Esc => return,
             KeyCode::Enter => {
                 self.status = "Stashing…".to_string();
-                let message = Some(stash.message).filter(|m| !m.trim().is_empty());
-                let write = Write::CreateStash {
-                    message,
-                    untracked: stash.untracked,
-                };
+                let write = writes::stash_request(stash.message, stash.untracked);
                 self.queue(write, Confirmation::Absent);
                 return;
             }
@@ -927,75 +891,210 @@ impl App {
     /// `f`: fetches `remote`, or the one a fetch reaches without one named
     /// (ADR-0035); `Esc` cancels it while it runs.
     fn start_fetch(&mut self, remote: Option<String>) {
-        let Some(remote) = remote.or_else(|| self.data.as_ref()?.default_remote.clone()) else {
-            self.status = "No remote to fetch".to_string();
-            return;
+        let write = match remote {
+            Some(remote) => Ok(Write::Fetch { remote }),
+            None => self.refs_answer(RepoRefs::fetch),
         };
-        if self.writing {
-            self.status = "A write is still running".to_string();
-            return;
-        }
-        self.status = format!("Fetching {remote}… Esc cancels");
-        self.queue(Write::Fetch { remote }, Confirmation::Absent);
-        self.transferring = true;
-        self.cancellable = true;
+        self.start_transfer(write);
     }
 
     /// `U`: pulls the checked-out branch from its upstream, fast-forward only
     /// (ADR-0035); `Esc` cancels it while it fetches.
     fn start_pull(&mut self) {
-        let Some(head) = self
-            .data
-            .as_ref()
-            .and_then(|d| d.locals.iter().find(|b| b.is_head))
-        else {
-            self.status = "No branch is checked out to pull".to_string();
-            return;
-        };
-        if head.upstream.is_none() {
-            self.status = format!("{} has no upstream to pull from", head.name);
-            return;
-        }
-        if self.writing {
-            self.status = "A write is still running".to_string();
-            return;
-        }
-        let write = Write::Pull {
-            branch: head.name.clone(),
-            tip: head.sha.clone(),
-        };
-        self.status = format!("Pulling {}… Esc cancels", head.name);
-        self.queue(write, Confirmation::Absent);
-        self.transferring = true;
-        self.cancellable = true;
+        let write = self.refs_answer(RepoRefs::pull);
+        self.start_transfer(write);
     }
 
     /// `P`: pushes the checked-out branch to its upstream, or to the remote a
     /// fetch reaches, under its own name; never by force (ADR-0035).
     fn start_push(&mut self) {
+        let write = self.refs_answer(RepoRefs::push);
+        self.start_transfer(write);
+    }
+
+    /// The core's answer to `ask` over the refs loaded, the transfer or why there is none.
+    fn refs_answer(&self, ask: fn(&RepoRefs) -> Result<Write, String>) -> Result<Write, String> {
+        self.refs_answer_with(ask)
+    }
+
+    /// The core's answer to `ask` over the refs loaded.
+    fn refs_answer_with<T>(
+        &self,
+        ask: impl FnOnce(&RepoRefs) -> Result<T, String>,
+    ) -> Result<T, String> {
         let Some(data) = self.data.as_ref() else {
-            return;
+            return Err("No repository is loaded".to_string());
         };
-        let Some(head) = data.locals.iter().find(|b| b.is_head) else {
-            self.status = "No branch is checked out to push".to_string();
-            return;
+        ask(&RepoRefs {
+            locals: data.locals.clone(),
+            default_remote: data.default_remote.clone(),
+            ..RepoRefs::default()
+        })
+    }
+
+    /// Starts the transfer the core answered, saying what it does and whether `Esc` stops it,
+    /// or says why there is none.
+    fn start_transfer(&mut self, write: Result<Write, String>) {
+        let write = match write {
+            Ok(write) => write,
+            Err(why) => {
+                self.status = why;
+                return;
+            }
         };
-        if head.upstream.is_none() && data.default_remote.is_none() {
-            self.status = format!("There is no remote to push {} to", head.name);
-            return;
-        }
-        if self.writing {
-            self.status = "A write is still running".to_string();
-            return;
-        }
-        let write = Write::Push {
-            branch: head.name.clone(),
-            tip: head.sha.clone(),
+        let doing = match &write {
+            Write::Fetch { remote } => format!("Fetching {remote}…"),
+            Write::Pull { branch, .. } => format!("Pulling {branch}…"),
+            Write::Push { branch, .. } => format!("Pushing {branch}…"),
+            _ => String::new(),
         };
-        // libgit2 cannot stop a push once its objects are sent, so none is offered.
-        self.status = format!("Pushing {}…", head.name);
+        let stops = if write.can_stop() { " Esc cancels" } else { "" };
+        self.status = format!("{doing}{stops}");
         self.queue(write, Confirmation::Absent);
-        self.transferring = true;
+    }
+
+    /// The operation of G-5 the commit `sha` offers that `wanted` picks, as the core decides,
+    /// or `None` after saying why there is none.
+    fn history_operation(&mut self, sha: &str, wanted: fn(&Write) -> bool) -> Option<Write> {
+        let operations = self.refs_answer_with(|refs| refs.history_operations(sha));
+        match operations {
+            Ok(operations) => {
+                let operation = operations.into_iter().find(wanted);
+                if operation.is_none() {
+                    self.status = "The checked-out commit offers only a revert and a reset".into();
+                }
+                operation
+            }
+            Err(why) => {
+                self.status = why;
+                None
+            }
+        }
+    }
+
+    /// `m`, `R`, `C`, `V`, `X` on a commit: merges it in, rebases onto it, cherry-picks it,
+    /// reverts it, or asks how to reset to it, where the core offers it (ADR-0033).
+    fn start_history(&mut self, key: char) {
+        let Some(node) = self.selected_node() else {
+            return;
+        };
+        if node.kind != CommitKind::Commit {
+            self.status = "Only a commit can be merged, picked, reverted, or reset to".to_string();
+            return;
+        }
+        let commit = node.sha.clone();
+        let wanted: fn(&Write) -> bool = match key {
+            'm' => |w| matches!(w, Write::Merge { .. }),
+            'R' => |w| matches!(w, Write::Rebase { .. }),
+            'C' => |w| matches!(w, Write::CherryPick { .. }),
+            'V' => |w| matches!(w, Write::Revert { .. }),
+            _ => |w| matches!(w, Write::Reset { .. }),
+        };
+        let Some(write) = self.history_operation(&commit, wanted) else {
+            return;
+        };
+        if let Write::Reset { .. } = write {
+            self.modal = Some(Modal::Reset {
+                commit,
+                mode: ResetMode::Mixed,
+            });
+            return;
+        }
+        self.ask_or_queue(write);
+    }
+
+    fn reset_key(&mut self, commit: String, mode: ResetMode, key: KeyEvent) {
+        let mode = match key.code {
+            KeyCode::Esc => return,
+            KeyCode::Tab => match mode {
+                ResetMode::Soft => ResetMode::Mixed,
+                ResetMode::Mixed => ResetMode::Hard,
+                ResetMode::Hard => ResetMode::Soft,
+            },
+            KeyCode::Enter => {
+                let reset = self.history_operation(&commit, |w| matches!(w, Write::Reset { .. }));
+                if let Some(Write::Reset {
+                    branch,
+                    tip,
+                    commit,
+                    ..
+                }) = reset
+                {
+                    self.ask_or_queue(Write::Reset {
+                        branch,
+                        tip,
+                        commit,
+                        mode,
+                    });
+                }
+                return;
+            }
+            _ => mode,
+        };
+        self.modal = Some(Modal::Reset { commit, mode });
+    }
+
+    /// `!`: the conflicted files of the operation in progress (ADR-0033).
+    fn open_conflicts(&mut self) {
+        if self
+            .data
+            .as_ref()
+            .and_then(|d| d.in_progress.as_ref())
+            .is_none()
+        {
+            self.status = "No operation is in progress".to_string();
+            return;
+        }
+        self.modal = Some(Modal::Conflicts { selected: 0 });
+    }
+
+    /// In the conflicts: `j`/`k` move, `o`, `t`, `e` resolve the file by ours, theirs, or as
+    /// edited, `c` continues the operation, `A` aborts it once confirmed.
+    fn conflicts_key(&mut self, mut selected: usize, key: KeyEvent) {
+        let Some(stopped) = self.data.as_ref().and_then(|d| d.in_progress.clone()) else {
+            return;
+        };
+        let last = stopped.conflicts.len().saturating_sub(1);
+        let take = match key.code {
+            KeyCode::Esc => return,
+            KeyCode::Char('j') | KeyCode::Down => {
+                selected = (selected + 1).min(last);
+                None
+            }
+            KeyCode::Char('k') | KeyCode::Up => {
+                selected = selected.saturating_sub(1);
+                None
+            }
+            KeyCode::Char('o') => Some(Take::Ours),
+            KeyCode::Char('t') => Some(Take::Theirs),
+            KeyCode::Char('e') => Some(Take::AsEdited),
+            KeyCode::Char('c') => {
+                self.ask_or_queue(Write::Continue {
+                    operation: stopped.operation,
+                    head: stopped.head,
+                });
+                return;
+            }
+            KeyCode::Char('A') => {
+                self.ask_or_queue(Write::Abort {
+                    operation: stopped.operation,
+                    head: stopped.head,
+                });
+                return;
+            }
+            _ => None,
+        };
+        if let Some(take) = take
+            && let Some(conflict) = stopped.conflicts.get(selected)
+        {
+            self.ask_or_queue(Write::Resolve {
+                path: conflict.path.clone(),
+                conflict: conflict.clone(),
+                take,
+            });
+            return;
+        }
+        self.modal = Some(Modal::Conflicts { selected });
     }
 
     /// `b` on a commit: asks for the name of a branch there.
@@ -1022,16 +1121,12 @@ impl App {
             }
             KeyCode::Tab => switch = !switch,
             KeyCode::Esc => return,
-            KeyCode::Enter if !name.trim().is_empty() => {
-                let name = name.trim().to_string();
-                self.status = format!("Creating {name}…");
-                let write = Write::CreateBranch {
-                    name,
-                    commit,
-                    switch,
-                };
-                self.queue(write, Confirmation::Absent);
-                return;
+            KeyCode::Enter => {
+                if let Some(write) = writes::branch_request(&commit, &name, switch) {
+                    self.status = format!("Creating {}…", name.trim());
+                    self.queue(write, Confirmation::Absent);
+                    return;
+                }
             }
             _ => {}
         }
@@ -1224,6 +1319,10 @@ impl App {
                 self.start_detach();
                 None
             }
+            KeyCode::Char(c @ ('m' | 'R' | 'C' | 'V' | 'X')) => {
+                self.start_history(c);
+                None
+            }
             KeyCode::Char('s') => {
                 self.modal = Some(Modal::Stash(StashPrompt::default()));
                 None
@@ -1280,6 +1379,7 @@ impl App {
             KeyCode::Char('c') => self.start_commit(),
             KeyCode::Char('b') => self.start_branch(),
             KeyCode::Char('w') => self.start_detach(),
+            KeyCode::Char(c @ ('m' | 'R' | 'C' | 'V' | 'X')) => self.start_history(c),
             KeyCode::Char(c @ ('a' | 'p' | 'd')) => self.on_stash(KeyCode::Char(c)),
             KeyCode::Enter => {
                 let Some(sha) = links.get(self.link) else {
@@ -1391,7 +1491,7 @@ impl App {
 pub(crate) mod tests {
     use super::*;
     use ocelli_core::graph::Layout;
-    use ocelli_core::model::{CommitData, FileStatus};
+    use ocelli_core::model::{CommitData, FileStatus, Shown};
 
     pub(crate) fn commit(sha: &str, time: i64, parents: &[&str], refs: &[&str]) -> CommitData {
         CommitData {
@@ -1444,8 +1544,9 @@ pub(crate) mod tests {
 
     /// The write handed to the event loop, which then runs it and reports it done.
     fn taken(app: &mut App) -> Option<(Write, Confirmation)> {
-        app.writing = false;
-        app.write.take()
+        let write = app.writes.take();
+        app.writes.answered();
+        write
     }
 
     pub(crate) fn press(app: &mut App, code: KeyCode) {
@@ -1536,8 +1637,7 @@ pub(crate) mod tests {
                 status: FileStatus::Modified,
                 additions: 1,
                 deletions: 0,
-                staged: None,
-                shown: None,
+                staging: None,
             })
             .collect();
         app.on_msg(Msg::Files {
@@ -1757,7 +1857,7 @@ pub(crate) mod tests {
             commit: "c".into(),
             message: Some("Second".into()),
         };
-        assert_eq!(app.write, Some((tag, Confirmation::Absent)));
+        assert_eq!(app.writes.queued(), Some((tag, Confirmation::Absent)));
         assert_eq!(app.status, "Tagging v2…");
     }
 
@@ -1777,7 +1877,7 @@ pub(crate) mod tests {
         type_text(&mut app, "x");
         press(&mut app, KeyCode::Esc);
         assert_eq!(app.tag_prompt(), None);
-        assert_eq!(app.write, None);
+        assert_eq!(app.writes.queued(), None);
         press(&mut app, KeyCode::Char('j'));
         assert_eq!(sha(&app), "c", "keys move again once the prompt is closed");
     }
@@ -1891,7 +1991,7 @@ pub(crate) mod tests {
         assert_eq!(app.confirm(), Some(&delete));
         press(&mut app, KeyCode::Char('y'));
         assert_eq!(app.confirm(), None);
-        assert_eq!(app.write, Some((delete, Confirmation::Given)));
+        assert_eq!(app.writes.queued(), Some((delete, Confirmation::Given)));
     }
 
     #[test]
@@ -1908,7 +2008,7 @@ pub(crate) mod tests {
             press(&mut app, KeyCode::Char('d'));
             press(&mut app, answer);
             assert_eq!(app.confirm(), None);
-            assert_eq!(app.write, None, "{answer:?}");
+            assert_eq!(app.writes.queued(), None, "{answer:?}");
             assert_eq!(app.status, "Nothing discarded");
         }
     }
@@ -1935,7 +2035,7 @@ pub(crate) mod tests {
             message: Some("wip".into()),
             untracked: true,
         };
-        assert_eq!(app.write, Some((stash, Confirmation::Absent)));
+        assert_eq!(app.writes.queued(), Some((stash, Confirmation::Absent)));
 
         let mut app = loaded_app();
         press(&mut app, KeyCode::Char('s'));
@@ -1945,14 +2045,14 @@ pub(crate) mod tests {
             untracked: false,
         };
         assert_eq!(
-            app.write,
+            app.writes.queued(),
             Some((stash, Confirmation::Absent)),
             "untracked off by default"
         );
     }
 
     /// A history whose newest node is the stash entry `stash@{1}` on `a`, selected.
-    fn on_a_stash() -> App {
+    pub(crate) fn on_a_stash() -> App {
         let mut stash = commit("s", 9, &["a"], &["📦 stash@{1}"]);
         stash.kind = CommitKind::Stash;
         stash.stash = Some(1);
@@ -1988,7 +2088,7 @@ pub(crate) mod tests {
         press(&mut app, KeyCode::Char('d'));
         assert_eq!(app.confirm(), Some(&drop));
         press(&mut app, KeyCode::Char('n'));
-        assert_eq!(app.write, None, "declined, nothing written");
+        assert_eq!(app.writes.queued(), None, "declined, nothing written");
         assert_eq!(app.status, "Nothing discarded");
     }
 
@@ -2037,7 +2137,7 @@ pub(crate) mod tests {
                             Some(Modal::Confirm(_) | Modal::Tag(_) | Modal::Stash(_))
                         );
                         assert!(
-                            app.write.is_none() && !asked,
+                            app.writes.queued().is_none() && !asked,
                             "{modifiers:?}+{c} on {selected} in {focus:?} writes or asks"
                         );
                     }
@@ -2071,7 +2171,7 @@ pub(crate) mod tests {
 
     /// The working-directory node on `d`, selected, its files `f` (staged) and
     /// `g` (not) delivered.
-    fn on_the_working_node() -> App {
+    pub(crate) fn on_the_working_node() -> App {
         let mut working = commit(ocelli_core::model::WORKDIR_SHA, 9, &["d"], &[]);
         working.kind = CommitKind::Working;
         let mut app = App::new("/repo".into(), Glyphs::Unicode);
@@ -2083,10 +2183,12 @@ pub(crate) mod tests {
             status: FileStatus::Modified,
             additions: 1,
             deletions: 0,
-            staged: Some(staged),
-            shown: Some(Shown {
-                workdir: Some(format!("w{path}")),
-                index: Some(format!("i{path}")),
+            staging: Some(ocelli_core::model::Staging {
+                staged,
+                shown: Shown {
+                    workdir: Some(format!("w{path}")),
+                    index: Some(format!("i{path}")),
+                },
             }),
         };
         app.on_msg(Msg::Files {
@@ -2129,14 +2231,13 @@ pub(crate) mod tests {
                 status: FileStatus::Modified,
                 additions: 1,
                 deletions: 0,
-                staged: None,
-                shown: None,
+                staging: None,
             }]),
             selected: 0,
         });
         app.focus = Focus::Files;
         press(&mut app, KeyCode::Char('a'));
-        assert_eq!(app.write, None, "a commit's files do not stage");
+        assert_eq!(app.writes.queued(), None, "a commit's files do not stage");
     }
 
     #[test]
@@ -2145,7 +2246,7 @@ pub(crate) mod tests {
         let mut app = on_the_working_node();
         press(&mut app, KeyCode::Char('c'));
         press(&mut app, KeyCode::Enter);
-        assert!(app.write.is_none(), "no commit without a message");
+        assert!(app.writes.queued().is_none(), "no commit without a message");
         type_text(&mut app, "Change f");
         press(&mut app, KeyCode::Enter);
         let commit = Write::Commit {
@@ -2172,14 +2273,14 @@ pub(crate) mod tests {
         let mut app = on_the_working_node();
         app.focus = Focus::Files;
         press(&mut app, KeyCode::Char('u'));
-        assert!(app.write.take().is_some());
+        assert!(app.writes.take().is_some());
         press(&mut app, KeyCode::Char('u'));
-        assert_eq!(app.write, None);
+        assert_eq!(app.writes.queued(), None);
         assert_eq!(app.status, "A write is still running");
         app.on_msg(Msg::Written(Err("refused".into())));
         press(&mut app, KeyCode::Char('u'));
         assert!(
-            app.write.is_some(),
+            app.writes.queued().is_some(),
             "the result is in, the next write starts"
         );
     }
@@ -2255,13 +2356,13 @@ pub(crate) mod tests {
             } else {
                 assert_eq!(app.confirm(), Some(&delete(false)));
                 press(&mut app, KeyCode::Char('n'));
-                assert_eq!(app.write, None);
+                assert_eq!(app.writes.queued(), None);
             }
         }
         let mut app = loaded_app();
         on_the_entry(&mut app, 1, "main");
         press(&mut app, KeyCode::Char('d'));
-        assert_eq!((app.modal.clone(), app.write.clone()), (None, None));
+        assert_eq!((app.modal.clone(), app.writes.queued()), (None, None));
         assert_eq!(app.status, "main is checked out");
     }
 
@@ -2273,22 +2374,22 @@ pub(crate) mod tests {
         let fetch = Write::Fetch {
             remote: "origin".into(),
         };
-        assert_eq!(app.write.take(), Some((fetch, Confirmation::Absent)));
+        assert_eq!(app.writes.take(), Some((fetch, Confirmation::Absent)));
         app.on_msg(Msg::WriteProgress("Fetching origin: 3 of 9 objects".into()));
         assert_eq!(app.status, "Fetching origin: 3 of 9 objects");
         press(&mut app, KeyCode::Esc);
-        assert!(app.cancel);
+        assert!(app.writes.take_cancel());
         assert!(app.active, "Esc cancels the fetch rather than deselecting");
         app.on_msg(Msg::Written(
             Err("the fetch of origin was cancelled".into()),
         ));
-        assert!(!app.writing);
+        assert!(!app.writes.running());
 
         let mut app = loaded_app();
         app.data.as_mut().unwrap().default_remote = None;
         press(&mut app, KeyCode::Char('f'));
         assert_eq!(
-            (app.write.clone(), app.status.as_str()),
+            (app.writes.queued(), app.status.as_str()),
             (None, "No remote to fetch")
         );
     }
@@ -2303,13 +2404,13 @@ pub(crate) mod tests {
             branch: "main".into(),
             tip: "d".into(),
         };
-        assert_eq!(app.write.take(), Some((pull, Confirmation::Absent)));
-        assert!(app.cancellable);
+        assert_eq!(app.writes.take(), Some((pull, Confirmation::Absent)));
+        assert!(app.writes.cancellable());
 
         let mut app = loaded_app();
         app.data.as_mut().unwrap().locals[0].upstream = None;
         press(&mut app, KeyCode::Char('U'));
-        assert_eq!(app.write, None);
+        assert_eq!(app.writes.queued(), None);
         assert_eq!(app.status, "main has no upstream to pull from");
     }
 
@@ -2322,13 +2423,13 @@ pub(crate) mod tests {
             branch: "main".into(),
             tip: "d".into(),
         };
-        assert_eq!(app.write.take(), Some((push, Confirmation::Absent)));
+        assert_eq!(app.writes.take(), Some((push, Confirmation::Absent)));
 
         let mut app = loaded_app();
         app.data.as_mut().unwrap().default_remote = None;
         app.data.as_mut().unwrap().locals[0].upstream = None;
         press(&mut app, KeyCode::Char('P'));
-        assert_eq!(app.write, None);
+        assert_eq!(app.writes.queued(), None);
         assert_eq!(app.status, "There is no remote to push main to");
     }
 
@@ -2339,7 +2440,7 @@ pub(crate) mod tests {
         app.data.as_mut().unwrap().locals[0].upstream = Some("origin/main".into());
         press(&mut app, KeyCode::Char('j'));
         press(&mut app, KeyCode::Char('U'));
-        assert!(app.write.take().is_some());
+        assert!(app.writes.take().is_some());
         app.on_msg(Msg::Written(Err(
             "'main' and its upstream have diverged".into()
         )));
@@ -2356,9 +2457,162 @@ pub(crate) mod tests {
 
         // A write that reaches no remote is refused without a reload.
         let mut app = loaded_app();
-        app.writing = true;
+        let tag = writes::tag_request("d", "v1", String::new()).unwrap();
+        assert!(app.writes.queue(tag, Confirmation::Absent));
         app.on_msg(Msg::Written(Err("a tag named 'v1' exists already".into())));
         assert_eq!(app.reload, None);
+    }
+
+    #[test]
+    // Verifies: ADR-0033, G-5
+    fn the_checked_out_commit_offers_only_a_revert_and_a_reset() {
+        let mut app = loaded_app();
+        let row = app.data.as_ref().unwrap().row_of("d").unwrap();
+        app.select(row);
+        for key in ['m', 'R', 'C'] {
+            press(&mut app, KeyCode::Char(key));
+            assert_eq!(app.writes.queued(), None, "{key}");
+            assert_eq!(
+                app.status, "The checked-out commit offers only a revert and a reset",
+                "{key}"
+            );
+        }
+        press(&mut app, KeyCode::Char('V'));
+        assert!(matches!(taken(&mut app), Some((Write::Revert { .. }, _))));
+    }
+
+    #[test]
+    fn the_history_keys_merge_rebase_pick_revert_and_reset_onto_the_selected_commit() {
+        let on_b = || {
+            let mut app = loaded_app();
+            let row = app.data.as_ref().unwrap().row_of("b").unwrap();
+            app.select(row);
+            app
+        };
+        let (branch, tip, commit) = ("main".to_string(), "d".to_string(), "b".to_string());
+        let mut app = on_b();
+        press(&mut app, KeyCode::Char('m'));
+        let merge = Write::Merge {
+            branch: branch.clone(),
+            tip: tip.clone(),
+            commit: commit.clone(),
+            name: Some("feat/x".into()),
+        };
+        assert_eq!(taken(&mut app), Some((merge, Confirmation::Absent)));
+        for (key, write) in [
+            (
+                'R',
+                Write::Rebase {
+                    branch: branch.clone(),
+                    tip: tip.clone(),
+                    onto: commit.clone(),
+                },
+            ),
+            (
+                'C',
+                Write::CherryPick {
+                    branch: branch.clone(),
+                    tip: tip.clone(),
+                    commit: commit.clone(),
+                },
+            ),
+            (
+                'V',
+                Write::Revert {
+                    branch: branch.clone(),
+                    tip: tip.clone(),
+                    commit: commit.clone(),
+                },
+            ),
+        ] {
+            let mut app = on_b();
+            press(&mut app, KeyCode::Char(key));
+            assert_eq!(
+                taken(&mut app),
+                Some((write, Confirmation::Absent)),
+                "{key}"
+            );
+        }
+
+        // A reset asks for its mode; a hard one is asked about once more.
+        let mut app = on_b();
+        press(&mut app, KeyCode::Char('X'));
+        press(&mut app, KeyCode::Enter);
+        let reset = |mode| Write::Reset {
+            branch: branch.clone(),
+            tip: tip.clone(),
+            commit: commit.clone(),
+            mode,
+        };
+        assert_eq!(
+            taken(&mut app),
+            Some((reset(ResetMode::Mixed), Confirmation::Absent))
+        );
+        press(&mut app, KeyCode::Char('X'));
+        press(&mut app, KeyCode::Tab);
+        press(&mut app, KeyCode::Enter);
+        assert_eq!(app.confirm(), Some(&reset(ResetMode::Hard)));
+        press(&mut app, KeyCode::Char('y'));
+        assert_eq!(
+            taken(&mut app),
+            Some((reset(ResetMode::Hard), Confirmation::Given))
+        );
+    }
+
+    #[test]
+    // Verifies: ADR-0033, G-6
+    fn the_conflicts_resolve_continue_and_abort_after_a_confirmation() {
+        let conflict = ocelli_core::model::Conflict {
+            path: "f".into(),
+            ancestor: Some("a".into()),
+            ours: Some("o".into()),
+            theirs: Some("t".into()),
+        };
+        let mut app = loaded_app();
+        app.data.as_mut().unwrap().in_progress = Some(InProgress {
+            operation: ocelli_core::model::Operation::Merge,
+            conflicts: vec![conflict.clone()],
+            head: "d".into(),
+        });
+        press(&mut app, KeyCode::Char('!'));
+        press(&mut app, KeyCode::Char('e'));
+        let resolve = |take| Write::Resolve {
+            path: "f".into(),
+            conflict: conflict.clone(),
+            take,
+        };
+        assert_eq!(
+            taken(&mut app),
+            Some((resolve(Take::AsEdited), Confirmation::Absent))
+        );
+        press(&mut app, KeyCode::Char('!'));
+        press(&mut app, KeyCode::Char('t'));
+        assert_eq!(
+            app.confirm(),
+            Some(&resolve(Take::Theirs)),
+            "an edit may be lost"
+        );
+        press(&mut app, KeyCode::Char('y'));
+        assert_eq!(
+            taken(&mut app),
+            Some((resolve(Take::Theirs), Confirmation::Given))
+        );
+        press(&mut app, KeyCode::Char('!'));
+        press(&mut app, KeyCode::Char('c'));
+        let carry_on = Write::Continue {
+            operation: ocelli_core::model::Operation::Merge,
+            head: "d".into(),
+        };
+        assert_eq!(taken(&mut app), Some((carry_on, Confirmation::Absent)));
+        press(&mut app, KeyCode::Char('!'));
+        press(&mut app, KeyCode::Char('A'));
+        assert!(matches!(app.confirm(), Some(Write::Abort { .. })));
+        press(&mut app, KeyCode::Char('n'));
+        assert_eq!(app.writes.queued(), None, "declined, nothing aborted");
+
+        let mut app = loaded_app();
+        press(&mut app, KeyCode::Char('!'));
+        assert_eq!(app.status, "No operation is in progress");
     }
 
     #[test]
@@ -2368,7 +2622,7 @@ pub(crate) mod tests {
             press(&mut app, KeyCode::Char(key));
         }
         assert_eq!(app.confirm(), None);
-        assert_eq!(app.write, None);
+        assert_eq!(app.writes.queued(), None);
     }
 
     #[test]

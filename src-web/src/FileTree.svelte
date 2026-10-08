@@ -56,8 +56,8 @@
       onkeydown={(e) => e.key === 'Enter' && onSelectFile(node.file)}
     >
       <span class="file-spacer"></span>
-      {#if onStage && node.file.staged}
-        <StageToggle file={node.file} disabled={staging} {onStage} />
+      {#if onStage && node.file.staging}
+        <StageToggle file={node.file} staged={node.file.staging.staged} disabled={staging} {onStage} />
       {/if}
       <span class="file-status {node.file.status}">{node.file.status[0]}</span>
       <span class="file-path" title={node.file.path}>

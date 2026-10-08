@@ -25,7 +25,8 @@ than anywhere else, and none beats one that has stopped being true.
 ```
 
 Ocelli reads repositories on the local file system through git2, and writes to them through git2
-only what the developer asks for, a tag, a stash, the index, a commit, or a branch
+only what the developer asks for, a tag, a stash, the index, a commit, a branch, a merge, a
+rebase, a cherry-pick, a revert, a reset, and the resolution of their conflicts
 ([ADR-0033](adr/0033-writes-what-git-writes.md)). It reaches a remote only when
 the developer fetches, pulls, or pushes, through libgit2's own transports with the credentials of
 the developer's own setup
@@ -55,36 +56,49 @@ golden path and the test pattern an agent copies from are named here.
   ([ADR-0030](adr/0030-edge-shapes-and-tracks-out-of-the-main-line.md)). `History` in `history.rs`
   keeps the graph laid out so far and answers the front ends' reads of it: a window of rows with the
   edges crossing it, search, and lineage ([ADR-0031](adr/0031-front-ends-read-row-windows.md)).
+  `transfer.rs` decides the fetch, pull, and push of the checked-out branch the refs make possible,
+  or why there is none, and which transfer can be stopped, and `operations.rs` which operations of
+  G-5 a commit offers on the checked-out branch, for both front ends to draw; the desktop host
+  sends these answers to the web interface, which restates none of them
+  ([ADR-0036](adr/0036-desktop-host-answers-what-the-core-decides.md)).
   `load.rs` runs a load session through the port, and a `LoadSession` is what a front end keeps of
   it, its `History` and its status line, for both front ends and the measurement alike.
-- **Git adapter** (`crates/git`, `ocelli-git`) — `GitReader`, the repository port implemented
-  with git2: the main line's tip, the history in chunks of 3 000 commits, the first with the stash
-  and working-directory nodes, the refs the sidebar lists with whether each local branch is
-  merged, changed files, the working-directory node's with how much of each is staged and the
-  content shown, and diffs
-  ([ADR-0019](adr/0019-git2-repository-reader.md),
+- **Git adapter** (`crates/git`, `ocelli-git`) — `GitReader`, the repository port implemented with
+  git2: the main line's tip, the history in chunks of 3 000 commits, the first with the stash and
+  working-directory nodes, the refs the sidebar lists with whether each local branch is merged,
+  changed files, the working-directory node's with how much of each is staged and the content shown,
+  and diffs ([ADR-0019](adr/0019-git2-repository-reader.md),
   [ADR-0016](adr/0016-history-loads-in-chunks.md),
   [ADR-0024](adr/0024-synthetic-nodes-in-the-first-chunk.md)); the walk runs in commit-date order
-  and turns libgit2's object cache off for the whole process. `GitWriter` implements the writer
-  port in `write.rs`, each write checked against the state it names before anything changes,
-  and returns the commit a write made
-  ([ADR-0033](adr/0033-writes-what-git-writes.md)); a commit or an
-  annotated tag is refused where the configuration asks for a signature
-  ([ADR-0033](adr/0033-writes-what-git-writes.md)). A fetch, a pull,
-  which then fast-forwards the checked-out branch, and a push, never by force and where
-  `push.default` sends it, reach the remote through libgit2's own transports with the SSH agent
+  and turns libgit2's object cache off for the whole process. `operations.rs` holds the history
+  operations of G-5 from a clean tree, stopping on a conflict in git's own state, and
+  `conflicts.rs` resolves such a conflict file by file and continues or aborts the operation;
+  the refs carry the operation in progress with its conflicts, read in `refs.rs` from git's
+  state whoever started it. `GitWriter` implements the writer port in `write.rs`, which
+  dispatches each write and holds the tag, index, commit, and branch writes, the stash's in
+  `stash.rs`, each checked against the state it names before anything changes by the checks of
+  `guard.rs`, the index and the working directory written through `checkout.rs` and a message
+  cleaned up by `message.rs` as `git` cleans it up, and returns the commit a write made; a
+  commit or an annotated tag is refused where the configuration asks for a signature. Each write
+  does what `git` does for the same command, and where it departs, the one ADR of the writer
+  lists why ([ADR-0033](adr/0033-writes-what-git-writes.md)). A fetch, a pull, which then
+  fast-forwards the checked-out branch, and a push, never by force and where `push.default` sends
+  it, live in `remote.rs` and reach the remote through libgit2's own transports with the SSH agent
   and the credential helper of the developer's global and system configuration, a helper asked
   only for a remote named by its domain over HTTPS, and with libgit2's server timeouts set once
   for the process, the git adapter's one `unsafe` block
-  ([ADR-0035](adr/0035-remotes-through-libgit2-transports.md)).
-  The refs name the remote a fetch reaches without one named. Neither `GitReader` nor
-  `GitWriter` starts a program a repository names, a hook included (Q-4).
+  ([ADR-0035](adr/0035-remotes-through-libgit2-transports.md)). The refs
+  name the default remote. Neither `GitReader` nor `GitWriter` starts a program a repository
+  names, a hook included (Q-4).
 - **Terminal application** (`crates/tui`, `ocelli-cli`) — draws the core's graph with box-drawing
   characters on ratatui; it loads and lays out the history chunk by chunk on a loader thread, keeps
   the core's `History` at its event loop, reads files and diffs through `GitReader` on a worker
-  thread, writes through `GitWriter` on a thread of its own, one write at a time, showing a
-  transfer's progress in the status line and stopping a fetch or a pull on `Esc`, and keeps its
-  view state in a file
+  thread, writes through `GitWriter` on a thread of its own, one write at a time, which
+  `writes.rs` holds with the requests the keys build, as `writes.ts` does for the web interface,
+  showing a
+  transfer's progress in the status line and stopping a fetch or a pull on `Esc`, lists an
+  operation in progress with its conflicts, resolved, continued, or aborted from there, and keeps
+  its view state in a file
   ([ADR-0028](adr/0028-terminal-application-ratatui.md), [ADR-0029](adr/0029-cli-state-file.md)).
 - **Measurement** (`crates/measure`, `ocelli-measure`) — a command that lays out a repository as
   the front ends do and measures a quality goal on it: the number of edge crossings for Q-1, next
@@ -117,10 +131,14 @@ golden path and the test pattern an agent copies from are named here.
   blocks outside its tests, libgit2's timeouts the other.
 - **Web interface** (`src-web`) — Svelte and TypeScript: the canvas, which holds only the window of
   rows it draws, the sidebar, the commit detail with its tag and branch forms, its stash actions,
-  its ref chips' switch and delete, and the working-directory node's stage toggles and commit form,
-  the diff overlay, the search field, the dialogs that describe a stash and confirm a write that
-  discards work, the toolbar's Fetch, Pull, and Push, which give way to a Cancel while a fetch or
-  a pull runs, and themes; `writes.ts` holds the writes it hands the host, one at a time
+  its ref chips' switch and delete, its merge, rebase, cherry-pick, revert, and reset onto the
+  checked-out branch, and the working-directory node's stage toggles and commit form,
+  the diff overlay, the search field, the banner of an operation in progress with its conflicted
+  files, the dialogs that describe a stash and confirm a write that discards work, the toolbar's
+  Fetch, Pull, and Push, which give way to a Cancel while a fetch or a pull runs, and themes;
+  `writes.ts` holds the writes it hands the host, one at a time; the toolbar draws the transfers
+  the host sends with the refs and the commit detail the history operations it sends with the
+  selection, and `refChips.ts` decides which ref each chip switches to or deletes
   ([ADR-0022](adr/0022-svelte-web-interface.md), [ADR-0017](adr/0017-virtual-rendering.md),
   [ADR-0020](adr/0020-diff-overlay-and-file-list.md),
   [ADR-0021](adr/0021-themes-tokens-and-palettes.md), [ADR-0026](adr/0026-repository-sidebar.md)).
@@ -131,7 +149,17 @@ in `crates/git/src/lib.rs`. **The test pattern** is a reference test: a fixed or
 input and the output the reference implementation produced, compared exactly
 (`crates/core/tests/layout_reference.rs`, `crates/git/tests/load_reference.rs`), beside the
 structural tests of the shape in `crates/core/tests/structure.rs`. A write is tested on a
-repository `git` made, and what it did is read back with `git` (`crates/git/tests/write.rs`).
+repository `git` made, and what it did is read back with `git` (`crates/git/tests/write.rs`,
+`crates/git/tests/history.rs`); a refused write goes through `refused`, which compares one
+snapshot of the repository before and after. Each local write also runs beside the `git` command
+it stands for, on two copies of a repository in every state that changes its outcome
+(`crates/git/tests/git_parity.rs`), each departure listed with the ADR that decides it, and the
+two copies' snapshots compared with the commits each side made alone read by content. The scratch
+directory, the test's `git`, the snapshot, and `refused` are written once, in
+`crates/git/tests/support/mod.rs`; every test starts `git` through
+`crates/git/tests/git_command/mod.rs`. Where the web interface spells the JSON of a core value,
+the core's `tests/write_fixture.rs` writes an example to `crates/core/tests/fixtures/` and the web
+interface's test reads it against its types.
 
 ## How it runs
 
@@ -146,15 +174,18 @@ lives between them. Only what a newcomer would otherwise reconstruct from code.
   events, each chunk to be appended to a `LoadSession`. The terminal application receives the
   events at its event loop as messages and reads the window of rows in view from its session. The
   desktop host runs the load on Tokio's blocking pool, appends the chunks to the `LoadSession` of
-  its current load, and tells the web interface as `history-grew` and `load-refs` events; the web
+  its current load, and tells the web interface as `history-grew` and `load-refs` events, the
+  refs with the transfers the core decides from them; the web
   interface then reads the window of rows in view, searches, and selects through commands, and a
   newer load refuses an older one's chunks, which stops its walk. A path on the command line opens
   the same way: `ocelli-cli [PATH]` from the start, and the desktop host hands its path to the web
   interface through the `startup_repo` command once the interface's listeners stand, so the load
   runs as one the developer started.
 - **Selecting a commit.** The core computes the commit's lineage, which the windows read after
-  light up, and the front end asks `GitReader` for the changed files, and for the diff
-  of a file once one is opened; the working-directory node's sentinel SHA reads the uncommitted
+  light up, and the history operations it offers, which the desktop host answers with the
+  selection once its load's refs are read, and the front end asks `GitReader` for the changed
+  files, and for the diff of a file once one is opened; the working-directory node's sentinel SHA
+  reads the uncommitted
   changes, each file with how much of it is staged and the content shown, which staging expects.
 - **Writing.** The front end hands the core's `Write` to `port::perform` off the thread that
   draws, which passes it to `GitWriter`; a write that discards work, as `Write::discards` names

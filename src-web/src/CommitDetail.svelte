@@ -3,9 +3,11 @@
   import StageToggle from './StageToggle.svelte';
   import { buildFileTree } from './fileTree.ts';
   import {
-    OneWrite, branchRequest, commitRequest, stageToggle, tagRequest, type Write,
+    OneWrite, branchRequest, commitRequest, stageToggle, tagRequest, type ResetMode, type Write,
+    type WriteOf,
   } from './writes.ts';
-  import type { NodeJson, FileChange, LocalBranch, Relative, Tag } from './types.ts';
+  import type { Chip } from './refChips.ts';
+  import type { NodeJson, FileChange, Relative } from './types.ts';
 
   interface Props {
     node: NodeJson | null;
@@ -16,20 +18,31 @@
     diffFile: string | null;
     onSelectFile: (file: FileChange) => void;
     onJumpToRow: (row: number) => void;
-    /** The tags on `node`, as the refs read them. */
-    tags: Tag[];
-    /** The local branches on `node`. */
-    locals: LocalBranch[];
-    /** The remote branches on `node`, by remote. */
-    remotes: { remote: string; branch: string; tip: string }[];
+    /** The ref chips of `node`, each with what it offers. */
+    chips: Chip[];
+    /** The operations of G-5 the commit offers on the checked-out branch, as the core decides. */
+    operations: Write[];
     /** Performs a write on `node` (G-7), asking first where it discards work (ADR-0034);
         resolves with why it was refused, or null. */
     onWrite: (write: Write) => Promise<string | null>;
   }
   let {
-    node, relatives, showAvatars, changedFiles, diffFile, onSelectFile, onJumpToRow, tags, locals,
-    remotes, onWrite,
+    node, relatives, showAvatars, changedFiles, diffFile, onSelectFile, onJumpToRow, chips, operations,
+    onWrite,
   }: Props = $props();
+
+  // The reset's mode, mixed as git's default.
+  let resetMode = $state<ResetMode>('mixed');
+
+  /** Runs an operation of G-5 the core offered, a reset in the mode chosen (ADR-0033). */
+  function run(action: Write): void {
+    void write(action.kind === 'reset' ? { ...action, mode: resetMode } : action);
+  }
+
+  /** The offered operation of `kind`, where the commit offers it. */
+  function offered<K extends Write['kind']>(kind: K): WriteOf<K> | undefined {
+    return operations.find((a): a is WriteOf<K> => a.kind === kind);
+  }
 
   /** The place of `node` in the stash, when it is a stash node. */
   const stash = $derived(node?.stash ?? null);
@@ -62,7 +75,8 @@
 
   /** Stages or unstages a file of the uncommitted changes. */
   function onStage(file: FileChange): void {
-    if (file.staged) void write(stageToggle(file));
+    const toggle = stageToggle(file);
+    if (toggle) void write(toggle);
   }
 
   // The commit form of the working-directory node, on its parent, the checked-out commit.
@@ -70,15 +84,13 @@
   const commit = $derived(
     node?.kind === 'working' ? commitRequest(node.parents[0] ?? null, commitMessage) : null,
   );
-  const anyStaged = $derived(changedFiles.some((f) => f.staged === 'yes' || f.staged === 'partly'));
+  const anyStaged = $derived(
+    changedFiles.some((f) => f.staging?.staged === 'yes' || f.staging?.staged === 'partly'),
+  );
 
   async function submitCommit(e: SubmitEvent): Promise<void> {
     e.preventDefault();
     if (commit && (await write(commit))) commitMessage = '';
-  }
-
-  function deleteTag(tag: Tag): void {
-    void write({ kind: 'deleteTag', name: tag.name, commit: tag.sha, annotated: tag.annotated });
   }
 
   // The branch form: a name, and whether to switch to the branch.
@@ -89,21 +101,6 @@
   async function submitBranch(e: SubmitEvent): Promise<void> {
     e.preventDefault();
     if (branch && (await write(branch))) form = null;
-  }
-
-  /** The local branch a chip shows. */
-  function localOf(ref: string): LocalBranch | undefined {
-    return locals.find(b => b.name === ref);
-  }
-
-  /** The remote branch a chip shows. */
-  function remoteOf(ref: string): { remote: string; branch: string; tip: string } | undefined {
-    return remotes.find(r => `${r.remote}/${r.branch}` === ref);
-  }
-
-  /** The tag a `🏷 name` chip shows, when the refs have read it. */
-  function tagOf(ref: string): Tag | undefined {
-    return ref.startsWith('🏷') ? tags.find(t => `🏷 ${t.name}` === ref) : undefined;
   }
 
   let fileViewMode = $state<'flat' | 'tree'>('tree');
@@ -182,32 +179,16 @@
         </button>
       {/if}
 
-      {#if node.refs.length > 0}
+      {#if chips.length > 0}
         <div class="detail-refs">
-          {#each node.refs as ref}
-            {@const tag = tagOf(ref)}
-            {@const local = localOf(ref)}
-            {@const remote = remoteOf(ref)}
-            <span class="ref-chip {ref.startsWith('🏷') ? 'tag' : ref.includes('/') ? 'remote' : 'local'}">
-              {ref}
-              {#if tag}
-                <button class="chip-delete" disabled={writing} title="Delete the tag {tag.name}"
-                        aria-label="Delete the tag {tag.name}" onclick={() => deleteTag(tag)}>×</button>
-              {/if}
-              {#if local && !local.isHead}
-                <button class="chip-delete" disabled={writing} title="Switch to {local.name}"
-                        aria-label="Switch to {local.name}"
-                        onclick={() => void write({ kind: 'switchBranch', name: local.name, tip: local.sha })}>⇄</button>
-                <button class="chip-delete" disabled={writing} title="Delete the branch {local.name}"
-                        aria-label="Delete the branch {local.name}"
-                        onclick={() => void write({
-                          kind: 'deleteBranch', name: local.name, tip: local.sha, merged: local.merged,
-                        })}>×</button>
-              {:else if remote}
-                <button class="chip-delete" disabled={writing}
-                        title="Switch to a local branch tracking {ref}" aria-label="Switch to {ref}"
-                        onclick={() => void write({ kind: 'trackRemote', ...remote })}>⇄</button>
-              {/if}
+          {#each chips as chip}
+            <span class="ref-chip {chip.kind}">
+              {chip.ref}
+              {#each chip.offers as offer}
+                <button class="chip-delete" disabled={writing} title={offer.label}
+                        aria-label={offer.label}
+                        onclick={() => void write(offer.write)}>{offer.action === 'switch' ? '⇄' : '×'}</button>
+              {/each}
             </span>
           {/each}
         </div>
@@ -280,6 +261,35 @@
                 Switch here
               </button>
             </div>
+            {#if operations.length > 0}
+              <div class="tag-actions commit-actions">
+                {#each operations.filter(a => a.kind !== 'reset') as action (action.kind)}
+                  {#if action.kind === 'merge'}
+                    <button class="tag-btn" disabled={writing} onclick={() => run(action)}
+                            title="Merge this commit into {action.branch}">Merge into {action.branch}</button>
+                  {:else if action.kind === 'rebase'}
+                    <button class="tag-btn" disabled={writing} onclick={() => run(action)}
+                            title="Replay {action.branch} onto this commit">Rebase onto</button>
+                  {:else if action.kind === 'cherryPick'}
+                    <button class="tag-btn" disabled={writing} onclick={() => run(action)}>Cherry-pick</button>
+                  {:else if action.kind === 'revert'}
+                    <button class="tag-btn" disabled={writing} onclick={() => run(action)}>Revert</button>
+                  {/if}
+                {/each}
+              </div>
+              {@const reset = offered('reset')}
+              {#if reset}
+                <div class="tag-actions commit-actions">
+                  <select class="tag-input" aria-label="Reset mode" bind:value={resetMode}>
+                    <option value="soft">soft</option>
+                    <option value="mixed">mixed</option>
+                    <option value="hard">hard</option>
+                  </select>
+                  <button class="tag-btn" disabled={writing} onclick={() => run(reset)}
+                          title="Move {reset.branch} to this commit">Reset {reset.branch} here</button>
+                </div>
+              {/if}
+            {/if}
           {/if}
         {/if}
       {/if}
@@ -417,8 +427,8 @@
             tabindex="0"
             onkeydown={(e) => e.key === 'Enter' && onSelectFile(file)}
           >
-            {#if node.kind === 'working' && file.staged}
-              <StageToggle {file} disabled={writing} {onStage} />
+            {#if file.staging}
+              <StageToggle {file} staged={file.staging.staged} disabled={writing} {onStage} />
             {/if}
             <span class="file-status {file.status}">{file.status[0]}</span>
             <span class="file-path" title={file.path}>

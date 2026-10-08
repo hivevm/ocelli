@@ -14,6 +14,7 @@ mod sidebar;
 mod state;
 mod theme;
 mod ui;
+mod writes;
 
 use app::App;
 use loader::{Msg, Request};
@@ -134,7 +135,7 @@ fn run(
         if let Some(path) = app.reload.take() {
             session = Session::start(&path);
         }
-        if let Some((write, confirmation)) = app.write.take() {
+        if let Some((write, confirmation)) = app.writes.take() {
             cancel = Arc::new(AtomicBool::new(false));
             let flag = Arc::clone(&cancel);
             loader::spawn_write(
@@ -145,7 +146,7 @@ fn run(
                 written_tx.clone(),
             );
         }
-        if std::mem::take(&mut app.cancel) {
+        if app.writes.take_cancel() {
             cancel.store(true, Ordering::Relaxed);
         }
         while let Ok(msg) = session.rx.try_recv() {

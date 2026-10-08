@@ -1,6 +1,8 @@
 use crate::session::{Found, Selected, Session, WindowJson};
 use ocelli_core::load::{self, Event};
+use ocelli_core::model::RepoRefs;
 use ocelli_core::port::{self, Confirmation, RepositoryReader, Write};
+use ocelli_core::transfer::Transfers;
 use ocelli_git::{GitReader, GitWriter};
 use serde::Serialize;
 use std::path::{Path, PathBuf};
@@ -73,6 +75,24 @@ impl Report for Window {
     }
 }
 
+/// The `load-refs` payload: the refs the sidebar lists, and the transfers the toolbar offers as
+/// the core decides them from the same refs, which the web interface draws without restating
+/// (ADR-0036).
+#[derive(Debug, Clone, Serialize)]
+pub struct LoadedRefs<'a> {
+    pub refs: &'a RepoRefs,
+    pub transfers: Transfers,
+}
+
+impl<'a> LoadedRefs<'a> {
+    pub fn of(refs: &'a RepoRefs) -> Self {
+        LoadedRefs {
+            refs,
+            transfers: refs.transfers(),
+        }
+    }
+}
+
 /// Loads the history of `path` into `session` (ADR-0016), laying each chunk out on this thread,
 /// and tells the window how far it has come. A newer load refuses this one's chunks, which stops
 /// its walk, and keeps it from writing the status line.
@@ -99,9 +119,10 @@ fn load(
             true
         }
         Event::Refs(refs) => {
-            let current = session.is_current(generation);
+            let refs: Arc<RepoRefs> = Arc::from(refs);
+            let current = session.keep_refs(generation, Arc::clone(&refs));
             if current {
-                window.report("load-refs", &refs);
+                window.report("load-refs", LoadedRefs::of(&refs));
             }
             current
         }
@@ -270,7 +291,7 @@ pub async fn perform_write(
     if state.writing.swap(true, Ordering::AcqRel) {
         return Err("A write is still running".into());
     }
-    // A write that takes long reports how far it has come as `write-progress` events, at most
+    // A transfer reports how far it has come as `write-progress` events, at most
     // every tenth of a second, and stops once `cancel_write` sets the flag this write was handed
     // (ADR-0035).
     let cancel = Arc::new(AtomicBool::new(false));
@@ -327,12 +348,12 @@ pub async fn get_file_diff(
 mod tests {
     use super::*;
     use crate::session::tests::three;
-    use ocelli_core::model::{CommitData, DiffLine, FileChange, RepoRefs};
+    use ocelli_core::model::{CommitData, DiffLine, FileChange, LocalBranch};
     use std::cell::RefCell;
 
-    /// Records what a load reports, one line per event.
+    /// Records what a load reports, one line per event, and the payloads of `load-refs`.
     #[derive(Default)]
-    struct Recorder(RefCell<Vec<String>>);
+    struct Recorder(RefCell<Vec<String>>, RefCell<Vec<serde_json::Value>>);
 
     impl Report for Recorder {
         fn report<S: Serialize + Clone>(&self, event: &str, payload: S) {
@@ -347,7 +368,10 @@ mod tests {
                         ""
                     }
                 ),
-                "load-refs" => "refs".to_string(),
+                "load-refs" => {
+                    self.1.borrow_mut().push(value);
+                    "refs".to_string()
+                }
                 _ => format!("{event} {}", value.as_str().unwrap_or_default()),
             };
             self.0.borrow_mut().push(line);
@@ -397,7 +421,22 @@ mod tests {
             if self.refs_fail {
                 anyhow::bail!("refs failed");
             }
-            Ok(RepoRefs::default())
+            // `main` checked out at the first chunk's newest commit, with no upstream, beside a
+            // remote to fetch and push to.
+            Ok(RepoRefs {
+                locals: vec![LocalBranch {
+                    name: "main".into(),
+                    sha: "c9".into(),
+                    short_sha: "c9".into(),
+                    is_head: true,
+                    upstream: None,
+                    ahead: 0,
+                    behind: 0,
+                    merged: true,
+                }],
+                default_remote: Some("origin".into()),
+                ..RepoRefs::default()
+            })
         }
 
         fn load_commit_files(&self, _: &Path, _: &str) -> anyhow::Result<Vec<FileChange>> {
@@ -521,5 +560,39 @@ mod tests {
             "refs",
             "nothing after the newer load began"
         );
+    }
+
+    #[test]
+    // Verifies: ADR-0036, ADR-0035, ADR-0033
+    fn the_refs_arrive_with_the_core_s_transfers_and_the_selection_with_its_operations() {
+        let fake = Fake {
+            chunks: vec![three(9)],
+            ..Fake::default()
+        };
+        let session = Session::default();
+        let recorder = Recorder::default();
+        load(
+            &fake,
+            Path::new("/repo"),
+            &session,
+            session.begin(None),
+            &recorder,
+        );
+        let payloads = recorder.1.into_inner();
+        assert_eq!(payloads.len(), 1);
+        let refs = fake.load_refs(Path::new("/repo")).unwrap();
+        assert_eq!(payloads[0]["refs"], serde_json::to_value(&refs).unwrap());
+        assert_eq!(
+            payloads[0]["transfers"],
+            serde_json::to_value(refs.transfers()).unwrap()
+        );
+        assert_eq!(
+            payloads[0]["transfers"]["pull"]["reason"],
+            "main has no upstream to pull from"
+        );
+        assert_eq!(payloads[0]["transfers"]["fetch"]["canStop"], true);
+        let picked = session.select(1).unwrap();
+        assert_eq!(picked.node.sha, "c8");
+        assert_eq!(picked.operations, Some(refs.offered("c8")));
     }
 }

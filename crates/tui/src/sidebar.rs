@@ -614,6 +614,7 @@ pub(crate) mod tests {
                 path: "/super".into(),
             }),
             default_remote: Some("origin".into()),
+            in_progress: None,
         }
     }
 

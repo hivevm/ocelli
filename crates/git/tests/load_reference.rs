@@ -5,30 +5,21 @@
 //! and lists its refs, changed files, and diffs exactly as the reference implementation did,
 //! with a clean and with a dirty working tree.
 
+#![allow(
+    clippy::disallowed_methods,
+    reason = "a test sets a repository up by hand, the way a developer would"
+)]
+
 mod fixture_repo;
+mod support;
 
 use ocelli_core::graph::build_graph;
 use ocelli_core::model::WORKDIR_SHA;
 use ocelli_core::port::RepositoryReader;
 use ocelli_git::GitReader;
 use serde_json::Value;
-use std::path::{Path, PathBuf};
-
-struct Scratch(PathBuf);
-
-impl Drop for Scratch {
-    fn drop(&mut self) {
-        let _ = std::fs::remove_dir_all(&self.0);
-    }
-}
-
-fn scratch() -> (Scratch, PathBuf) {
-    let root = std::env::temp_dir().join(format!("ocelli-load-reference-{}", std::process::id()));
-    let _ = std::fs::remove_dir_all(&root);
-    let dir = root.join("repo");
-    std::fs::create_dir_all(&dir).unwrap();
-    (Scratch(root), dir)
-}
+use std::path::Path;
+use support::Scratch;
 
 fn expected(name: &str) -> Value {
     let path = Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -55,7 +46,9 @@ fn stash_places(graph: &mut Value) -> Vec<(String, Value)> {
 
 #[test]
 fn a_fixed_repository_loads_as_the_reference_did() {
-    let (_guard, dir) = scratch();
+    let scratch = Scratch::new("reference");
+    let dir = scratch.0.join("repo");
+    std::fs::create_dir_all(&dir).unwrap();
     fixture_repo::build(&dir);
     let reader = GitReader;
     let mut quiet = |_: String| {};
@@ -104,6 +97,9 @@ fn a_fixed_repository_loads_as_the_reference_did() {
         .remove("defaultRemote")
         .unwrap();
     assert_eq!(default_remote, serde_json::Value::Null);
+    // So did the operation in progress (G-6): none in the fixture.
+    let in_progress = refs.as_object_mut().unwrap().remove("inProgress").unwrap();
+    assert_eq!(in_progress, serde_json::Value::Null);
     assert_eq!(refs, expected("repo-refs.json"));
 
     let (head, merge) = {
@@ -143,12 +139,12 @@ fn a_fixed_repository_loads_as_the_reference_did() {
         .iter_mut()
         .map(|f| {
             let f = f.as_object_mut().unwrap();
-            let shown = f.remove("shown").unwrap();
+            let staging = f.remove("staging").unwrap();
             assert!(
-                shown["workdir"].is_string(),
+                staging["shown"]["workdir"].is_string(),
                 "both files are in the working directory"
             );
-            f.remove("staged").unwrap()
+            staging["staged"].clone()
         })
         .collect();
     assert!(

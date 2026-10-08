@@ -43,7 +43,10 @@
   // Debian archive, so the pre-push hook runs the shell lint CI runs; without it the lint skips
   // itself locally.
   "postCreateCommand": {
-    "shellcheck": "sudo apt-get update && sudo apt-get install -y --no-install-recommends shellcheck"
+    "shellcheck": "sudo apt-get update && sudo apt-get install -y --no-install-recommends shellcheck",
+    // The Windows build's lint in scripts/check-build.sh: the target and cargo-xwin, pinned; the
+    // MSVC runtime and SDK it fetches on its first run.
+    "xwin": "rustup target add x86_64-pc-windows-msvc && cargo install cargo-xwin --locked --version 0.23.1"
   },
 
   // DevContainer Features layered on top of the base image. The container intentionally has NO

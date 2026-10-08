@@ -9,13 +9,16 @@
   import RepoSidebar from './RepoSidebar.svelte';
   import StatusBar, { READY_STATUS } from './StatusBar.svelte';
   import ConfirmDialog from './ConfirmDialog.svelte';
+  import InProgress from './InProgress.svelte';
   import { refShas } from './refTree.ts';
+  import { commitChips } from './refChips.ts';
   import type { RowRange } from './rowWindow.ts';
   import { Newest } from './hostAnswers.ts';
   import { actionLabel, confirmedWrite, type Outcome, type Write } from './writes.ts';
   import StashDialog from './StashDialog.svelte';
   import type {
     NodeJson, FileChange, DiffLine, RepoRefs, Growth, RowWindow, Relative, Selected, Found,
+    LoadedRefs, Offered, Transfer, Transfers,
   } from './types.ts';
   import { applyTheme, storedTheme, type Theme } from './theme/palette.ts';
 
@@ -48,6 +51,8 @@
   let growth          = $state<Growth | null>(null);
   let view            = $state<RowWindow | null>(null);
   let repoRefs        = $state<RepoRefs | null>(null);
+  // The transfers the core decides from the refs, sent with them (ADR-0036).
+  let transfers       = $state<Transfers | null>(null);
   let status          = $state(READY_STATUS);
   let repoLabel       = $state('(no repository)');
   let currentRepoPath = $state<string | null>(null);
@@ -85,21 +90,28 @@
   let notice = $state<string | null>(null);
   // Whether the dialog that describes a new stash is open.
   let stashing = $state(false);
-  // Whether a transfer to or from a remote runs, and whether the toolbar's button can cancel it:
-  // libgit2 cannot stop a push once its objects are sent (ADR-0035).
+  // Whether a transfer to or from a remote runs, and whether the toolbar's button can cancel it,
+  // as the core decides (ADR-0035).
   let fetching = $state(false);
   let cancellable = $state(false);
-  // The checked-out branch, which a pull moves, where it has an upstream.
-  const pullable = $derived(repoRefs?.locals.find(b => b.isHead && b.upstream !== null) ?? null);
+  // The fetch, pull, and push the refs make possible, or why there is none, as the host sends them.
+  const closed = { reason: 'No repository is open' };
+  const fetchable = $derived<Transfer<'fetch'>>(transfers?.fetch ?? closed);
+  const pullable = $derived<Transfer<'pull'>>(transfers?.pull ?? closed);
+  const pushable = $derived<Transfer<'push'>>(transfers?.push ?? closed);
 
   /** Runs a transfer, the toolbar's buttons turning into one that cancels it. A transfer refused
       may have moved remote branches by its fetch, so the repository is read again, the refusal
       kept in view (ADR-0035). */
-  async function transfer(write: Write, doing: string): Promise<void> {
+  async function transfer(answer: { write: Write; canStop: boolean } | { reason: string }, doing: string): Promise<void> {
+    if (!('write' in answer)) {
+      status = answer.reason;
+      return;
+    }
     fetching = true;
-    cancellable = write.kind !== 'push';
+    cancellable = answer.canStop;
     status = doing;
-    const error = await performWrite(write);
+    const error = await performWrite(answer.write);
     fetching = false;
     if (error) {
       await reloadAfterWrite(null);
@@ -107,52 +119,31 @@
     }
   }
 
-  /** Fetches the remote a fetch reaches without one named; the reload after shows its branches. */
+  /** Fetches the default remote; the reload after shows its branches. */
   async function fetchRemote(): Promise<void> {
-    const remote = repoRefs?.defaultRemote;
-    if (!remote) {
-      status = 'No remote to fetch';
-      return;
-    }
-    await transfer({ kind: 'fetch', remote }, `Fetching ${remote}…`);
+    await transfer(fetchable, 'write' in fetchable ? `Fetching ${fetchable.write.remote}…` : '');
   }
-
-  // The checked-out branch, which a push sends, where a remote takes it.
-  const pushable = $derived(
-    repoRefs?.locals.find(b => b.isHead && (b.upstream !== null || repoRefs?.defaultRemote)) ?? null,
-  );
 
   /** Pushes the checked-out branch to its upstream, or sets one; never by force. */
   async function pushBranch(): Promise<void> {
-    if (!pushable) return;
-    await transfer(
-      { kind: 'push', branch: pushable.name, tip: pushable.sha },
-      `Pushing ${pushable.name}…`,
-    );
+    await transfer(pushable, 'write' in pushable ? `Pushing ${pushable.write.branch}…` : '');
   }
 
   /** Pulls the checked-out branch from its upstream, fast-forward only. */
   async function pullBranch(): Promise<void> {
-    if (!pullable) return;
-    await transfer(
-      { kind: 'pull', branch: pullable.name, tip: pullable.sha },
-      `Pulling ${pullable.name}…`,
-    );
+    await transfer(pullable, 'write' in pullable ? `Pulling ${pullable.write.branch}…` : '');
   }
-  const selectedTags = $derived(
-    selectedNode ? (repoRefs?.tags ?? []).filter(t => t.sha === selectedNode?.sha) : [],
+  // The selected commit's ref chips, each with the switch or delete it offers.
+  const selectedChips = $derived(
+    selectedNode ? commitChips(selectedNode.refs, repoRefs, selectedNode.sha) : [],
   );
-  // The local and remote branches on the selected commit, which its chips switch to or delete.
-  const selectedLocals = $derived(
-    selectedNode ? (repoRefs?.locals ?? []).filter(b => b.sha === selectedNode?.sha) : [],
-  );
-  const selectedRemotes = $derived(
-    selectedNode
-      ? (repoRefs?.remotes ?? []).flatMap(r => r.branches
-        .filter(b => b.sha === selectedNode?.sha)
-        .map(b => ({ remote: r.name, branch: b.name, tip: b.sha })))
-      : [],
-  );
+  // The operations of G-5 the selected commit offers on the checked-out branch, as the host's
+  // answer to selecting it says (ADR-0033, ADR-0036).
+  let offered = $state<Offered | null>(null);
+  // Whether the refs of the load on screen have arrived, after which every commit has its
+  // operations: an answer without them was computed before, and is asked for again.
+  let refsArrived = false;
+  const selectedOperations = $derived(offered && 'operations' in offered ? offered.operations : []);
 
   /** A command that failed: the status bar says so. */
   function report(e: unknown): void {
@@ -198,6 +189,8 @@
       refreshes.drop();
       selectedNode = null;
       relatives = new Map();
+      offered = null;
+      refsArrived = false;
       changedFiles = [];
       diffFile = null;
       diffLines = [];
@@ -206,16 +199,19 @@
     rereadWindow();
     void updateLoadedRefs();
     // The selection's parents and lineage may reach into the rows just added.
-    if (selectedNode) void refreshRelatives(selectedNode.sha);
+    if (selectedNode) void refreshSelection(selectedNode.sha);
     // The commit a write left selected, which the core names once this load has laid it out.
     if (next.select !== null) jumpToRow(next.select);
   }
 
-  async function refreshRelatives(sha: string): Promise<void> {
+  /** Asks for the selection again: its relatives as far as they have loaded, and its operations
+      once the load's refs are read. */
+  async function refreshSelection(sha: string): Promise<void> {
     try {
       const selected = await refreshes.ask(() => invoke<Selected | null>('selection'), currentLoad);
       if (selected && selected.node.sha === sha && selectedNode?.sha === sha) {
         relatives = relativesOf(selected);
+        offered = selected.operations;
       }
     } catch (e) {
       report(e);
@@ -257,6 +253,7 @@
     refreshes.drop();
     selectedNode = null;
     relatives = new Map();
+    offered = null;
     invoke('deselect').then(rereadWindow, report);
     changedFiles = [];
     diffFile = null;
@@ -298,13 +295,13 @@
       listen<Growth>('history-grew', (e) => onGrowth(e.payload)),
       // Refs come from the same repository read as the graph (ADR-0026), so the
       // sidebar never describes a different state than the commits on screen.
-      listen<string>('load-refs', (e) => {
-        try {
-          repoRefs = typeof e.payload === 'string' ? JSON.parse(e.payload) : e.payload;
-        } catch {
-          repoRefs = null;
-        }
+      listen<LoadedRefs>('load-refs', (e) => {
+        repoRefs = e.payload.refs;
+        transfers = e.payload.transfers;
+        refsArrived = true;
         void updateLoadedRefs();
+        // A commit selected before the refs were read gets its operations now.
+        if (selectedNode) void refreshSelection(selectedNode.sha);
       }),
       listen<string>('set-status',     (e) => { status = e.payload; }),
       listen<string>('write-progress', (e) => { if (fetching) status = e.payload; }),
@@ -368,6 +365,19 @@
       after it shows the result, the commit selected again. Resolves with why the host refused
       it, or null once written or kept. */
   async function performWrite(write: Write): Promise<string | null> {
+    // One write at a time, from whichever panel asks for it.
+    if (writeRunning) return 'A write is still running';
+    writeRunning = true;
+    try {
+      return await performOneWrite(write);
+    } finally {
+      writeRunning = false;
+    }
+  }
+
+  let writeRunning = false;
+
+  async function performOneWrite(write: Write): Promise<string | null> {
     notice = null;
     let done: Outcome;
     try {
@@ -415,6 +425,11 @@
     refreshes.drop();
     selectedNode = selected.node;
     relatives = relativesOf(selected);
+    offered = selected.operations;
+    // Answered before the refs were read, which have arrived since: ask again for the operations.
+    if (selected.operations === null && selected.node.kind === 'commit' && refsArrived) {
+      void refreshSelection(selected.node.sha);
+    }
     changedFiles = [];
     diffFile = null;
     diffLines = [];
@@ -498,17 +513,18 @@
         {cancellable ? 'Cancel' : 'Pushing…'}
       </button>
     {:else}
-      <button class="tb-btn" onclick={fetchRemote} disabled={!repoRefs?.defaultRemote}
-              title="Fetch {repoRefs?.defaultRemote ?? 'a remote'}">
+      <button class="tb-btn" onclick={fetchRemote} disabled={!('write' in fetchable)}
+              title={'write' in fetchable ? `Fetch ${fetchable.write.remote}` : fetchable.reason}>
         Fetch
       </button>
-      <button class="tb-btn" onclick={pullBranch} disabled={!pullable}
-              title={pullable ? `Pull ${pullable.name} from ${pullable.upstream}, fast-forward only`
-                : 'The checked-out branch has no upstream to pull from'}>
+      <button class="tb-btn" onclick={pullBranch} disabled={!('write' in pullable)}
+              title={'write' in pullable
+                ? `Pull ${pullable.write.branch} from ${repoRefs?.locals.find(b => b.isHead)?.upstream}, fast-forward only`
+                : pullable.reason}>
         Pull
       </button>
-      <button class="tb-btn" onclick={pushBranch} disabled={!pushable}
-              title={pushable ? `Push ${pushable.name}` : 'There is no branch or remote to push to'}>
+      <button class="tb-btn" onclick={pushBranch} disabled={!('write' in pushable)}
+              title={'write' in pushable ? `Push ${pushable.write.branch}` : pushable.reason}>
         Push
       </button>
     {/if}
@@ -529,6 +545,9 @@
 <svelte:window onkeydown={onWindowKeydown} />
 
 <!-- ── Main content area ──────────────────────────────────────────────────── -->
+{#if repoRefs?.inProgress}
+  <InProgress stopped={repoRefs.inProgress} onWrite={performWrite} />
+{/if}
 <div id="main">
   <div id="top-pane">
     <RepoSidebar
@@ -584,9 +603,8 @@
       {diffFile}
       {onSelectFile}
       onJumpToRow={jumpToRow}
-      tags={selectedTags}
-      locals={selectedLocals}
-      remotes={selectedRemotes}
+      chips={selectedChips}
+      operations={selectedOperations}
       onWrite={performWrite}
     />
   </div><!-- end #top-pane -->

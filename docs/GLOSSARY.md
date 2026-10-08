@@ -19,6 +19,16 @@ to invent.
 - **Commit graph** — the commits of a repository drawn as nodes, each joined by an edge to its
   parents, with every branch and tag shown.
   _Avoid:_ tree, history graph, log graph.
+- **Conflict** — a file the index holds in more than one stage after an operation in progress
+  stopped on it; resolved by taking ours, taking theirs, or as the developer edited it.
+  _Avoid:_ clash, collision.
+- **Default remote** — the remote a fetch reaches without one named, and a push of a branch
+  without an upstream: the checked-out branch's upstream's remote, else `origin`, else the only
+  remote there is.
+  _Avoid:_ main remote, primary remote.
+- **Departure** — a write whose outcome differs on purpose from what `git` does for the same
+  command, an ADR deciding it.
+  _Avoid:_ deviation, known difference.
 - **Edge** — the line joining a commit to one of its children in the commit graph; a branch edge
   or a merge edge.
   _Avoid:_ link, connector.
@@ -34,6 +44,10 @@ to invent.
 - **Front end** — one of the three ways a developer uses Ocelli: the desktop application, the web
   interface, and the terminal application.
   _Avoid:_ client, UI, frontend.
+- **History operation** — a merge, rebase, cherry-pick, revert, or reset of the checked-out
+  branch, offered on a commit of the commit graph (G-5); one stopped on a conflict is an operation
+  in progress.
+  _Avoid:_ action.
 - **Lane** — the column of the commit graph in which a branch is drawn.
   _Avoid:_ column, rail.
 - **Lane colour** — the colour a lane is drawn in, taken from one theme-independent list so a
@@ -57,6 +71,9 @@ to invent.
 - **Merge edge** — an edge that joins a parent in another lane to a merge commit, where a branch
   is merged.
   _Avoid:_ merge line.
+- **Operation in progress** — a merge, rebase, cherry-pick, or revert stopped on a conflict, in
+  `git`'s own state, whoever started it; continued or aborted once its conflicts are resolved.
+  _Avoid:_ stopped write, pending merge.
 - **Parent row** — in the sidebar, the row above the sections that leads out of a submodule or a
   linked working tree to the repository one level up, read from Git and never remembered from the
   way in. Not a commit's parent.
@@ -78,6 +95,14 @@ to invent.
   out; determined without cloning or fetching.
 - **Track** — the lane a merge out of the main line runs up between its parent's row and its
   child's, which the layout keeps free over those rows.
+- **Transfer** — a write that reaches a remote: a fetch, a pull, which fetches and then
+  fast-forwards, or a push. A transfer tells its progress as it goes, the repository is read again
+  after it whether it was written or refused, and a fetch, a pull's fetch included, can be stopped
+  while it runs.
+  _Avoid:_ sync, network write, a write that takes long.
+- **Upstream** — the remote branch a local branch follows, which a pull fetches and fast-forwards
+  to and a push sends to; set where the branch tracks one.
+  _Avoid:_ tracking branch (that is the local branch), remote counterpart.
 - **View state** — what a front end remembers between sessions: the theme, the sidebar's width or
   minimised rail, and the diff layout; never anything read from a repository.
 - **Window** — the range of rows a front end is drawing, the same term in both front ends since
@@ -91,4 +116,5 @@ to invent.
   tag or applying a stash, naming the state it expects to find and refused with nothing changed
   where the repository no longer holds it; a write that discards work runs only once the
   developer has confirmed it.
-  _Avoid:_ operation, action, mutation.
+  _Avoid:_ operation, which names a history operation or an operation in progress, action,
+  mutation.
