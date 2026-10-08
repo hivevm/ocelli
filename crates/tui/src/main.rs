@@ -22,6 +22,8 @@ use ratatui::DefaultTerminal;
 use ratatui::crossterm::event::{self, Event, KeyEventKind};
 use std::io::Write;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{Receiver, Sender, channel};
 use std::time::Duration;
 
@@ -115,6 +117,8 @@ fn run(
     // Writes report on a channel of their own, which outlives every session: a
     // refresh while a write runs must not lose what it did or why it failed.
     let (written_tx, written_rx) = channel();
+    // Set to stop the write that runs; a new one gets a flag of its own.
+    let mut cancel = Arc::new(AtomicBool::new(false));
     let mut saved = app.view_state();
 
     while !app.quit {
@@ -131,7 +135,18 @@ fn run(
             session = Session::start(&path);
         }
         if let Some((write, confirmation)) = app.write.take() {
-            loader::spawn_write(app.repo.clone(), write, confirmation, written_tx.clone());
+            cancel = Arc::new(AtomicBool::new(false));
+            let flag = Arc::clone(&cancel);
+            loader::spawn_write(
+                app.repo.clone(),
+                write,
+                confirmation,
+                flag,
+                written_tx.clone(),
+            );
+        }
+        if std::mem::take(&mut app.cancel) {
+            cancel.store(true, Ordering::Relaxed);
         }
         while let Ok(msg) = session.rx.try_recv() {
             app.on_msg(msg);

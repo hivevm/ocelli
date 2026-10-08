@@ -9,6 +9,8 @@ use ocelli_core::model::{DiffLine, FileChange};
 use ocelli_core::port::{self, Confirmation, RepositoryReader, Write};
 use ocelli_git::{GitReader, GitWriter};
 use std::path::PathBuf;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{Receiver, Sender, channel};
 use std::thread;
 
@@ -25,6 +27,8 @@ pub enum Msg {
         path: String,
         lines: Result<Vec<DiffLine>, String>,
     },
+    /// How far a write that takes long has come.
+    WriteProgress(String),
     /// A write done, with the commit it made where it made one, or refused with nothing changed.
     Written(Result<Option<String>, String>),
 }
@@ -45,11 +49,23 @@ pub fn spawn_load(path: PathBuf, tx: Sender<Msg>) {
 
 /// Performs a write on a thread of its own: unlike reads, a write is never
 /// collapsed into a newer one. The core refuses one that discards work
-/// without the developer's confirmation (ADR-0034).
-pub fn spawn_write(path: PathBuf, write: Write, confirmation: Confirmation, tx: Sender<Msg>) {
+/// without the developer's confirmation (ADR-0034). A write that reports its
+/// progress sends it along, and stops once `cancel` is set (ADR-0035).
+pub fn spawn_write(
+    path: PathBuf,
+    write: Write,
+    confirmation: Confirmation,
+    cancel: Arc<AtomicBool>,
+    tx: Sender<Msg>,
+) {
     thread::spawn(move || {
-        let result =
-            port::perform(&GitWriter, &path, &write, confirmation).map_err(|e| e.to_string());
+        let progress_tx = tx.clone();
+        let mut progress = |p: &str| {
+            let _ = progress_tx.send(Msg::WriteProgress(p.to_string()));
+            !cancel.load(Ordering::Relaxed)
+        };
+        let result = port::perform(&GitWriter, &path, &write, confirmation, &mut progress)
+            .map_err(|e| e.to_string());
         let _ = tx.send(Msg::Written(result));
     });
 }

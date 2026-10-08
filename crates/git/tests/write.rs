@@ -6,7 +6,7 @@
 
 #![cfg(unix)]
 
-use ocelli_core::port::{RepositoryWriter, Write};
+use ocelli_core::port::{RepositoryReader, RepositoryWriter, Write};
 use ocelli_git::GitWriter;
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -151,6 +151,22 @@ fn a_tag_on_a_commit_no_longer_there_or_with_a_bad_name_is_refused() {
 fn writing_a_repository_runs_none_of_its_programs() {
     let scratch = with_file("programs");
     let one = git(&scratch.0, &["rev-parse", "HEAD"]);
+    let remote = Scratch::new("programs-remote");
+    std::fs::remove_dir_all(&remote.0).unwrap();
+    git(
+        Path::new("/"),
+        &[
+            "clone",
+            "--quiet",
+            "--bare",
+            scratch.0.to_str().unwrap(),
+            remote.0.to_str().unwrap(),
+        ],
+    );
+    git(
+        &scratch.0,
+        &["remote", "add", "origin", remote.0.to_str().unwrap()],
+    );
     // Outside the repository, so that stashing the untracked files leaves them be.
     let tools = Scratch::new("programs-ran");
     let markers = programs::set_everywhere(&scratch.0, &tools.0);
@@ -222,6 +238,10 @@ fn writing_a_repository_runs_none_of_its_programs() {
         merged: true,
     };
     GitWriter.write(&scratch.0, &delete).unwrap();
+    let fetch = Write::Fetch {
+        remote: "origin".into(),
+    };
+    GitWriter.write(&scratch.0, &fetch).unwrap();
     let ran = markers.ran();
     assert!(ran.is_empty(), "programs ran: {ran:?}");
 }
@@ -1334,4 +1354,91 @@ fn a_branch_whose_name_clashes_with_another_is_refused_with_nothing_changed() {
     let error = GitWriter.write(&scratch.0, &create).unwrap_err();
     assert!(error.to_string().contains("in the way"), "{error}");
     assert_eq!(all_of(&scratch.0), before);
+}
+
+/// A bare remote made with `git` from a repository with `f`, a clone of it with `origin` pointing
+/// there, and a commit pushed to the remote after the clone: (remote, clone, the commit).
+fn with_remote(name: &str) -> (Scratch, Scratch, String) {
+    let work = with_file(&format!("{name}-work"));
+    let remote = Scratch::new(&format!("{name}-remote"));
+    std::fs::remove_dir_all(&remote.0).unwrap();
+    git(
+        Path::new("/"),
+        &[
+            "clone",
+            "--quiet",
+            "--bare",
+            work.0.to_str().unwrap(),
+            remote.0.to_str().unwrap(),
+        ],
+    );
+    let clone = Scratch::new(&format!("{name}-clone"));
+    std::fs::remove_dir_all(&clone.0).unwrap();
+    git(
+        Path::new("/"),
+        &[
+            "clone",
+            "--quiet",
+            remote.0.to_str().unwrap(),
+            clone.0.to_str().unwrap(),
+        ],
+    );
+    write_file(&work.0, "f", "later\n");
+    git(&work.0, &["commit", "--quiet", "-am", "later"]);
+    git(
+        &work.0,
+        &["push", "--quiet", remote.0.to_str().unwrap(), "main"],
+    );
+    let later = git(&work.0, &["rev-parse", "HEAD"]);
+    (remote, clone, later)
+}
+
+#[test]
+// Verifies: ADR-0035, G-4
+fn a_fetch_moves_the_remote_branches_as_git_fetch_does() {
+    let (_remote, clone, later) = with_remote("fetch");
+    let before = all_of(&clone.0);
+    let mut told = Vec::new();
+    GitWriter
+        .write_reporting(
+            &clone.0,
+            &Write::Fetch {
+                remote: "origin".into(),
+            },
+            &mut |p| {
+                told.push(p.to_string());
+                true
+            },
+        )
+        .unwrap();
+    assert_eq!(git(&clone.0, &["rev-parse", "origin/main"]), later);
+    assert_eq!(all_of(&clone.0), before, "only the remote branches move");
+    let refs = ocelli_git::GitReader.load_refs(&clone.0).unwrap();
+    assert_eq!(
+        refs.default_remote.as_deref(),
+        Some("origin"),
+        "main's upstream's remote"
+    );
+    assert!(!told.is_empty(), "the fetch told how far it came");
+    assert!(
+        told.iter().all(|t| t.starts_with("Fetching origin")),
+        "{told:?}"
+    );
+}
+
+#[test]
+// Verifies: ADR-0035
+fn a_fetch_cancelled_or_of_no_remote_changes_nothing() {
+    let (_remote, clone, _) = with_remote("fetch-cancel");
+    let origin = git(&clone.0, &["rev-parse", "origin/main"]);
+    let fetch = |name: &str| Write::Fetch {
+        remote: name.into(),
+    };
+    let error = GitWriter
+        .write_reporting(&clone.0, &fetch("origin"), &mut |_| false)
+        .unwrap_err();
+    assert!(error.to_string().contains("cancelled"), "{error}");
+    let error = GitWriter.write(&clone.0, &fetch("nowhere")).unwrap_err();
+    assert!(error.to_string().contains("no remote named"), "{error}");
+    assert_eq!(git(&clone.0, &["rev-parse", "origin/main"]), origin);
 }

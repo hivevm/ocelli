@@ -49,6 +49,8 @@ pub struct Loaded {
     pub tags: Vec<Tag>,
     /// The local branches as read, for where one points and whether it is merged.
     pub locals: Vec<LocalBranch>,
+    /// The remote a fetch reaches without one named.
+    pub default_remote: Option<String>,
 }
 
 impl Loaded {
@@ -69,6 +71,7 @@ impl Loaded {
             sidebar: sidebar::Data::new(&RepoRefs::default()),
             tags: Vec::new(),
             locals: Vec::new(),
+            default_remote: None,
         }
     }
 
@@ -77,6 +80,7 @@ impl Loaded {
         self.sidebar = sidebar::Data::new(&repo_refs);
         self.tags = repo_refs.tags.clone();
         self.locals = repo_refs.locals.clone();
+        self.default_remote = repo_refs.default_remote.clone();
         self.refs = RefContext {
             head: repo_refs
                 .locals
@@ -226,6 +230,10 @@ pub struct App {
     pub write: Option<(Write, Confirmation)>,
     /// Whether a write runs: no second one starts until its result is in.
     pub writing: bool,
+    /// Asks the event loop to stop the write that runs, taken by it.
+    pub cancel: bool,
+    /// Whether the write that runs can be stopped: one that reaches a remote.
+    pub cancellable: bool,
     /// The commit a write left selected, handed to the core's load session of the reload with
     /// its first chunk; the session names its row once laid out (ADR-0033).
     pub select_again: Option<String>,
@@ -278,6 +286,8 @@ impl App {
             reload: None,
             write: None,
             writing: false,
+            cancel: false,
+            cancellable: false,
             select_again: None,
             clipboard: None,
         }
@@ -338,8 +348,11 @@ impl App {
                     });
                 }
             }
+            Msg::WriteProgress(p) if self.writing => self.status = p,
+            Msg::WriteProgress(_) => {}
             Msg::Written(Err(e)) => {
                 self.writing = false;
+                self.cancellable = false;
                 self.status = format!("Not written: {e}");
             }
             // The repository is read again, the commit the write made, or else
@@ -347,6 +360,7 @@ impl App {
             // (ADR-0033).
             Msg::Written(Ok(made)) => {
                 self.writing = false;
+                self.cancellable = false;
                 let select_again = made.or_else(|| self.selected_sha());
                 self.open_repo(self.repo.clone(), "Written — reloading…");
                 self.select_again = select_again;
@@ -522,8 +536,14 @@ impl App {
         if matches!(key.code, KeyCode::Char(_)) && typed(key).is_none() && !chord {
             return;
         }
+        if self.cancellable && key.code == KeyCode::Esc {
+            self.cancel = true;
+            self.status = "Cancelling…".to_string();
+            return;
+        }
         match key.code {
             KeyCode::Char('q') => self.quit = true,
+            KeyCode::Char('f') if self.focus != Focus::Sidebar => self.start_fetch(None),
             KeyCode::Char('1') => self.side.toggle_minimised(),
             KeyCode::Char('T') => self.theme = self.theme.toggled(),
             KeyCode::Char('o') => self.modal = Some(Modal::Open(self.repo.display().to_string())),
@@ -882,6 +902,22 @@ impl App {
         }
     }
 
+    /// `f`: fetches `remote`, or the one a fetch reaches without one named
+    /// (ADR-0035); `Esc` cancels it while it runs.
+    fn start_fetch(&mut self, remote: Option<String>) {
+        let Some(remote) = remote.or_else(|| self.data.as_ref()?.default_remote.clone()) else {
+            self.status = "No remote to fetch".to_string();
+            return;
+        };
+        if self.writing {
+            self.status = "A write is still running".to_string();
+            return;
+        }
+        self.status = format!("Fetching {remote}… Esc cancels");
+        self.queue(Write::Fetch { remote }, Confirmation::Absent);
+        self.cancellable = true;
+    }
+
     /// `b` on a commit: asks for the name of a branch there.
     fn start_branch(&mut self) {
         let Some(node) = self.selected_node() else {
@@ -1031,6 +1067,10 @@ impl App {
             KeyCode::Char('/') if !minimised => self.side.editing = true,
             KeyCode::Char('d') if !minimised => self.start_delete(),
             KeyCode::Char('w') if !minimised => self.start_switch(),
+            KeyCode::Char('f') => {
+                let remote = self.sidebar_item().and_then(|item| item.remote);
+                self.start_fetch(remote);
+            }
             KeyCode::Char('l') | KeyCode::Right if minimised => self.activate_sidebar(),
             KeyCode::Char('l') | KeyCode::Right => self.move_focus(1),
             KeyCode::Enter | KeyCode::Char(' ') => self.activate_sidebar(),
@@ -2143,6 +2183,34 @@ pub(crate) mod tests {
         press(&mut app, KeyCode::Char('d'));
         assert_eq!((app.modal.clone(), app.write.clone()), (None, None));
         assert_eq!(app.status, "main is checked out");
+    }
+
+    #[test]
+    // Verifies: ADR-0035, G-4
+    fn f_fetches_the_default_remote_shows_its_progress_and_esc_cancels_it() {
+        let mut app = loaded_app();
+        press(&mut app, KeyCode::Char('f'));
+        let fetch = Write::Fetch {
+            remote: "origin".into(),
+        };
+        assert_eq!(app.write.take(), Some((fetch, Confirmation::Absent)));
+        app.on_msg(Msg::WriteProgress("Fetching origin: 3 of 9 objects".into()));
+        assert_eq!(app.status, "Fetching origin: 3 of 9 objects");
+        press(&mut app, KeyCode::Esc);
+        assert!(app.cancel);
+        assert!(app.active, "Esc cancels the fetch rather than deselecting");
+        app.on_msg(Msg::Written(
+            Err("the fetch of origin was cancelled".into()),
+        ));
+        assert!(!app.writing);
+
+        let mut app = loaded_app();
+        app.data.as_mut().unwrap().default_remote = None;
+        press(&mut app, KeyCode::Char('f'));
+        assert_eq!(
+            (app.write.clone(), app.status.as_str()),
+            (None, "No remote to fetch")
+        );
     }
 
     #[test]

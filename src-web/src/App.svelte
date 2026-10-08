@@ -82,6 +82,22 @@
   >(null);
   // Whether the dialog that describes a new stash is open.
   let stashing = $state(false);
+  // Whether a fetch runs, which the toolbar's button then cancels (ADR-0035).
+  let fetching = $state(false);
+
+  /** Fetches the remote a fetch reaches without one named; the reload after shows its branches. */
+  async function fetchRemote(): Promise<void> {
+    const remote = repoRefs?.defaultRemote;
+    if (!remote) {
+      status = 'No remote to fetch';
+      return;
+    }
+    fetching = true;
+    status = `Fetching ${remote}…`;
+    const error = await performWrite({ kind: 'fetch', remote });
+    fetching = false;
+    if (error) report(error);
+  }
   const selectedTags = $derived(
     selectedNode ? (repoRefs?.tags ?? []).filter(t => t.sha === selectedNode?.sha) : [],
   );
@@ -250,6 +266,7 @@
         void updateLoadedRefs();
       }),
       listen<string>('set-status',     (e) => { status = e.payload; }),
+      listen<string>('write-progress', (e) => { if (fetching) status = e.payload; }),
       listen<string>('commit-files', (e) => {
         try {
           changedFiles = typeof e.payload === 'string' ? JSON.parse(e.payload) : e.payload;
@@ -429,6 +446,14 @@
             title="Put the uncommitted changes aside as a stash">
       Stash…
     </button>
+    {#if fetching}
+      <button class="tb-btn" onclick={() => invoke('cancel_write').catch(report)}>Cancel fetch</button>
+    {:else}
+      <button class="tb-btn" onclick={fetchRemote} disabled={!repoRefs?.defaultRemote}
+              title="Fetch {repoRefs?.defaultRemote ?? 'a remote'}">
+        Fetch
+      </button>
+    {/if}
 
     <div class="repo-breadcrumb">
       <svg viewBox="0 0 16 16" fill="#4caf7d" class="repo-icon">

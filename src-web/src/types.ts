@@ -168,6 +168,8 @@ export interface RepoRefs {
   submodules: Submodule[];
   /** Null when this repository is neither a submodule nor a linked worktree. */
   parent: ParentRepo | null;
+  /** The remote a fetch reaches without one named, null where there is none to choose. */
+  defaultRemote: string | null;
 }
 
 /** Serde serializes the Rust enum variants camelCase — the statuses arrive lowercase. */
