@@ -2,7 +2,7 @@
 //! fetch, pull, and push the refs a front end holds make possible, or why there is none, and
 //! which write is a transfer and which of those can be stopped while it runs.
 
-use crate::model::{LocalBranch, RepoRefs};
+use crate::model::RepoRefs;
 use crate::port::Write;
 
 impl RepoRefs {
@@ -35,11 +35,6 @@ impl RepoRefs {
             branch: head.name.clone(),
             tip: head.sha.clone(),
         })
-    }
-
-    /// The checked-out branch, where one is.
-    fn head(&self) -> Option<&LocalBranch> {
-        self.locals.iter().find(|b| b.is_head)
     }
 }
 

@@ -16,38 +16,9 @@ use ocelli_core::model::{ParentKind, SubmoduleState};
 use ocelli_git::refs::load_repo_refs;
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicUsize, Ordering};
 
-/// A temp directory that removes itself, so a failing assertion does not leave
-/// repositories behind. `Drop` runs on unwind, which is what makes it safe to
-/// assert freely in the tests below.
-struct Scratch(PathBuf);
-
-impl Scratch {
-    fn new(label: &str) -> Self {
-        static COUNTER: AtomicUsize = AtomicUsize::new(0);
-        let unique = format!(
-            "ocelli-git-{}-{}-{}",
-            label,
-            std::process::id(),
-            COUNTER.fetch_add(1, Ordering::Relaxed)
-        );
-        let path = std::env::temp_dir().join(unique);
-        let _ = fs::remove_dir_all(&path);
-        fs::create_dir_all(&path).expect("a scratch directory");
-        Self(path)
-    }
-
-    fn join(&self, name: &str) -> PathBuf {
-        self.0.join(name)
-    }
-}
-
-impl Drop for Scratch {
-    fn drop(&mut self) {
-        let _ = fs::remove_dir_all(&self.0);
-    }
-}
+mod support;
+use support::Scratch;
 
 /// Compares a path the reader produced with the fixture's own, through the
 /// filesystem, so a symlinked temp directory does not fail the comparison.
@@ -90,10 +61,10 @@ fn commit_all(repo: &Repository, message: &str) {
 /// second repository in the same scratch directory. Local paths only — the
 /// clone is a filesystem copy, never egress (ADR-0023).
 fn superproject_with_submodule(scratch: &Scratch) -> (PathBuf, PathBuf) {
-    let child_path = scratch.join("child");
+    let child_path = scratch.0.join("child");
     repo_with_a_commit(&child_path, "child.txt");
 
-    let super_path = scratch.join("super");
+    let super_path = scratch.0.join("super");
     let super_repo = repo_with_a_commit(&super_path, "super.txt");
 
     let url = child_path.to_string_lossy().to_string();
@@ -161,7 +132,7 @@ fn a_never_initialized_submodule_offers_no_path() {
     let scratch = Scratch::new("uninit");
     let (super_path, _) = superproject_with_submodule(&scratch);
 
-    let clone_path = scratch.join("clone");
+    let clone_path = scratch.0.join("clone");
     Repository::clone(&super_path.to_string_lossy(), &clone_path).expect("a local clone");
 
     let refs = load_repo_refs(&clone_path).expect("the repository state");
@@ -203,7 +174,7 @@ fn a_submodule_names_its_superproject_as_parent() {
 #[test]
 fn a_nested_but_unconfigured_repository_has_no_parent() {
     let scratch = Scratch::new("nested");
-    let outer = scratch.join("outer");
+    let outer = scratch.0.join("outer");
     repo_with_a_commit(&outer, "outer.txt");
 
     let inner = outer.join("inner");
@@ -222,10 +193,10 @@ fn a_nested_but_unconfigured_repository_has_no_parent() {
 #[test]
 fn a_linked_worktree_sees_the_main_tree_as_parent() {
     let scratch = Scratch::new("worktree");
-    let main_path = scratch.join("main");
+    let main_path = scratch.0.join("main");
     let repo = repo_with_a_commit(&main_path, "main.txt");
 
-    let linked_path = scratch.join("linked");
+    let linked_path = scratch.0.join("linked");
     repo.worktree("linked", &linked_path, None)
         .expect("a linked worktree");
 

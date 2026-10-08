@@ -955,15 +955,15 @@ impl App {
 
     /// The operation of G-5 the commit `sha` offers that `wanted` picks, as the core decides,
     /// or `None` after saying why there is none.
-    fn history_action(&mut self, sha: &str, wanted: fn(&Write) -> bool) -> Option<Write> {
-        let actions = self.refs_answer_with(|refs| refs.history_actions(sha));
-        match actions {
-            Ok(actions) => {
-                let action = actions.into_iter().find(wanted);
-                if action.is_none() {
+    fn history_operation(&mut self, sha: &str, wanted: fn(&Write) -> bool) -> Option<Write> {
+        let operations = self.refs_answer_with(|refs| refs.history_operations(sha));
+        match operations {
+            Ok(operations) => {
+                let operation = operations.into_iter().find(wanted);
+                if operation.is_none() {
                     self.status = "The checked-out commit offers only a revert and a reset".into();
                 }
-                action
+                operation
             }
             Err(why) => {
                 self.status = why;
@@ -990,7 +990,7 @@ impl App {
             'V' => |w| matches!(w, Write::Revert { .. }),
             _ => |w| matches!(w, Write::Reset { .. }),
         };
-        let Some(write) = self.history_action(&commit, wanted) else {
+        let Some(write) = self.history_operation(&commit, wanted) else {
             return;
         };
         if let Write::Reset { .. } = write {
@@ -1012,7 +1012,7 @@ impl App {
                 ResetMode::Hard => ResetMode::Soft,
             },
             KeyCode::Enter => {
-                let reset = self.history_action(&commit, |w| matches!(w, Write::Reset { .. }));
+                let reset = self.history_operation(&commit, |w| matches!(w, Write::Reset { .. }));
                 if let Some(Write::Reset {
                     branch,
                     tip,

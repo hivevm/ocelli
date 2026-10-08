@@ -3,9 +3,9 @@
 //! is configured and no signature is asked for (ADR-0033). Each check is written once here, for
 //! the local writes, the transfers, and the operations alike.
 
+use crate::refs::operation_of;
 use anyhow::{Context, Result, bail};
 use git2::{BranchType, Reference, Repository, RepositoryState};
-use ocelli_core::model::Operation;
 
 /// The refusal where no identity is configured to write with.
 pub(crate) const NO_IDENTITY: &str =
@@ -36,21 +36,6 @@ pub(crate) fn as_shown(
         bail!("{path} changed since it was shown: reload to see it as it is");
     }
     Ok(())
-}
-
-/// The operation in progress `state` names, where Ocelli can continue or abort it (ADR-0033).
-pub(crate) fn operation_of(state: RepositoryState) -> Option<Operation> {
-    match state {
-        RepositoryState::Merge => Some(Operation::Merge),
-        RepositoryState::Revert | RepositoryState::RevertSequence => Some(Operation::Revert),
-        RepositoryState::CherryPick | RepositoryState::CherryPickSequence => {
-            Some(Operation::CherryPick)
-        }
-        RepositoryState::Rebase
-        | RepositoryState::RebaseInteractive
-        | RepositoryState::RebaseMerge => Some(Operation::Rebase),
-        _ => None,
-    }
 }
 
 /// Refuses while the repository is in the middle of anything, a bisect too unless `bisect`

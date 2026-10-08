@@ -10,11 +10,7 @@ use crate::guard::{
 };
 use crate::message::{Made, cleaned, stripped};
 use anyhow::{Context, Result, bail};
-use git2::build::CheckoutBuilder;
-use git2::{
-    BranchType, Commit, ErrorCode, ObjectType, Oid, Reference, Repository, StashApplyOptions,
-    StashFlags, Status, TreeWalkMode, TreeWalkResult,
-};
+use git2::{BranchType, Commit, ObjectType, Oid, Reference, Repository, Status};
 use ocelli_core::port::Write;
 use std::path::Path;
 
@@ -59,11 +55,11 @@ pub fn write(
             path,
             conflict,
             take,
-        } => crate::operations::resolve(&repo, path, conflict, *take),
+        } => crate::conflicts::resolve(&repo, path, conflict, *take),
         Write::Continue { operation, head } => {
-            return crate::operations::continue_stopped(&repo, *operation, head);
+            return crate::conflicts::continue_stopped(&repo, *operation, head);
         }
-        Write::Abort { operation, head } => crate::operations::abort(&repo, *operation, head),
+        Write::Abort { operation, head } => crate::conflicts::abort(&repo, *operation, head),
         Write::Commit { message, head } => {
             return commit(&repo, message, head.as_deref()).map(Some);
         }
@@ -109,34 +105,14 @@ pub fn write(
             annotated,
         } => delete_tag(&repo, name, commit, *annotated),
         Write::CreateStash { message, untracked } => {
-            create_stash(&mut repo, message.as_deref(), *untracked)
+            crate::stash::create(&mut repo, message.as_deref(), *untracked)
         }
         Write::ApplyStash {
             index,
             commit,
             drop,
-        } => {
-            stash_as_shown(&mut repo, *index, commit)?;
-            check_applies(&repo, *index, commit)?;
-            // A second guard behind the check: an ignored file is never overwritten.
-            let mut checkout = CheckoutBuilder::new();
-            checkout.overwrite_ignored(false);
-            let mut options = StashApplyOptions::new();
-            options.checkout_options(checkout);
-            repo.stash_apply(*index, Some(&mut options))?;
-            if *drop {
-                // Applied by now: a stash pushed meanwhile moves the entry, which then stays.
-                stash_as_shown(&mut repo, *index, commit)
-                    .context("the stash is applied but not dropped")?;
-                repo.stash_drop(*index)?;
-            }
-            Ok(())
-        }
-        Write::DropStash { index, commit } => {
-            stash_as_shown(&mut repo, *index, commit)?;
-            repo.stash_drop(*index)?;
-            Ok(())
-        }
+        } => crate::stash::apply(&mut repo, *index, commit, *drop),
+        Write::DropStash { index, commit } => crate::stash::drop(&mut repo, *index, commit),
     };
     done.map(|()| None)
 }
@@ -185,196 +161,6 @@ fn delete_tag(repo: &Repository, name: &str, commit: &str, annotated: bool) -> R
         bail!("the tag '{name}' is no longer the one shown: reload to see it as it is");
     }
     reference.delete()?;
-    Ok(())
-}
-
-/// Stashes the uncommitted changes, the untracked files with them where `untracked` says so.
-fn create_stash(repo: &mut Repository, message: Option<&str>, untracked: bool) -> Result<()> {
-    let stasher = repo.signature().context(NO_IDENTITY)?;
-    let mut flags = StashFlags::DEFAULT;
-    if untracked {
-        flags |= StashFlags::INCLUDE_UNTRACKED;
-    }
-    let message = message.map(str::trim).filter(|m| !m.is_empty());
-    // A stash during an operation in progress would drop the operation with it, as `git stash`
-    // does, a bisect aside (ADR-0033).
-    nothing_in_progress(repo, true)?;
-    let made = match repo.stash_save2(&stasher, message, Some(flags)) {
-        Err(e) if e.code() == ErrorCode::NotFound => bail!("there is nothing to stash"),
-        result => result?,
-    };
-    messages_as_git_writes_them(repo, made)?;
-    // libgit2 leaves a staged change in the index where the working directory holds the file as
-    // committed; the stash holds it now, and `git stash` resets to the checked-out commit.
-    let head = repo.head()?.peel_to_commit()?;
-    repo.reset(head.as_object(), git2::ResetType::Hard, None)?;
-    Ok(())
-}
-
-/// The stash `made` with the messages `git stash` writes: libgit2 ends the stash commit's in a
-/// line break and its index and untracked commits' in two, where `git` ends them in none and in
-/// one. The commits are made again with those messages, and the stash's newest entry names the
-/// new one; the entry libgit2 wrote goes first, so the stash keeps one entry for it.
-fn messages_as_git_writes_them(repo: &Repository, made: Oid) -> Result<()> {
-    let trimmed = |c: &Commit| -> String {
-        let m = c.message().unwrap_or_default();
-        m.strip_suffix('\n').unwrap_or(m).to_string()
-    };
-    let again = |c: &Commit| -> Result<Commit> {
-        let parents: Vec<Commit> = c.parents().collect();
-        let oid = repo.commit(
-            None,
-            &c.author(),
-            &c.committer(),
-            &trimmed(c),
-            &c.tree()?,
-            &parents.iter().collect::<Vec<_>>(),
-        )?;
-        Ok(repo.find_commit(oid)?)
-    };
-    let stash = repo.find_commit(made)?;
-    let mut parents: Vec<Commit> = stash.parents().collect();
-    for parent in parents.iter_mut().skip(1) {
-        *parent = again(parent)?;
-    }
-    let new_stash = repo.commit(
-        None,
-        &stash.author(),
-        &stash.committer(),
-        &trimmed(&stash),
-        &stash.tree()?,
-        &parents.iter().collect::<Vec<_>>(),
-    )?;
-    let mut reflog = repo.reflog("refs/stash")?;
-    let entry = reflog
-        .get(0)
-        .context("the stash has no entry for what it stashed")?;
-    let said = entry.message().unwrap_or_default().to_string();
-    reflog.remove(0, false)?;
-    reflog.write()?;
-    repo.reference("refs/stash", new_stash, true, &said)?;
-    Ok(())
-}
-
-/// Refuses unless the stash at `index` is still the entry the developer saw, by its commit.
-fn stash_as_shown(repo: &mut Repository, index: usize, commit: &str) -> Result<()> {
-    let mut found = None;
-    repo.stash_foreach(|i, _, oid| {
-        if i == index {
-            found = Some(oid.to_string());
-        }
-        true
-    })?;
-    if found.as_deref() != Some(commit) {
-        bail!(
-            "stash@{{{index}}} is no longer the stash shown: reload to see the stashes as they are"
-        );
-    }
-    Ok(())
-}
-
-/// Refuses a stash that would not apply cleanly, before anything changes: libgit2 writes the
-/// untracked files first, then the changes, and leaves a conflict in the working directory, so
-/// whatever would stop it halfway or overwrite something is looked for here. The index holds
-/// nothing staged, the stash's changes merge with the checked-out commit without a conflict, and
-/// every path the stash writes is free on disk: a file there is one the checked-out commit tracks
-/// unchanged, by exactly that name, and no file stands where it needs a directory nor a
-/// directory where it writes a file. Untracked and ignored files in its way refuse it too, as
-/// does a file whose name differs only in case on a file system that does not tell the two
-/// apart.
-fn check_applies(repo: &Repository, index: usize, commit: &str) -> Result<()> {
-    let stash = repo.find_commit(Oid::from_str(commit)?)?;
-    let base = stash.parent(0)?.tree()?;
-    let changes = stash.tree()?;
-    let head = repo.head()?.peel_to_tree()?;
-    let root = repo
-        .workdir()
-        .context("a bare repository has no working directory to apply a stash to")?;
-    let staged = repo.diff_tree_to_index(Some(&head), None, None)?;
-    if staged.deltas().len() > 0 {
-        bail!("the index holds staged changes: commit or unstage them before applying a stash");
-    }
-    let name = format!("stash@{{{index}}}");
-    if repo
-        .merge_trees(&base, &head, &changes, None)?
-        .has_conflicts()
-    {
-        bail!("{name} conflicts with the checked-out commit, so it is not applied");
-    }
-
-    let mut written = Vec::new();
-    for delta in repo
-        .diff_tree_to_tree(Some(&base), Some(&changes), None)?
-        .deltas()
-    {
-        for file in [delta.old_file(), delta.new_file()] {
-            if let Some(path) = file.path() {
-                written.push(path.to_path_buf());
-            }
-        }
-    }
-    // The third parent, where there is one, holds the untracked files the stash took along;
-    // one the checked-out commit tracks by now would be overwritten.
-    if let Ok(untracked) = stash.parent(2) {
-        let mut files = Vec::new();
-        untracked
-            .tree()?
-            .walk(TreeWalkMode::PreOrder, |dir, entry| {
-                if entry.kind() == Some(ObjectType::Blob)
-                    && let Some(name) = entry.name()
-                {
-                    files.push(Path::new(dir).join(name));
-                }
-                TreeWalkResult::Ok
-            })?;
-        if let Some(tracked) = files.iter().find(|f| head.get_path(f).is_ok()) {
-            bail!(
-                "{} is tracked by now, so {name} would overwrite it",
-                tracked.display()
-            );
-        }
-        written.extend(files);
-    }
-
-    for path in &written {
-        for dir in path
-            .ancestors()
-            .skip(1)
-            .filter(|d| !d.as_os_str().is_empty())
-        {
-            if root.join(dir).symlink_metadata().is_ok_and(|m| !m.is_dir()) {
-                bail!("{} stands where {name} needs a directory", dir.display());
-            }
-        }
-        let tracked = head.get_path(path).is_ok();
-        match root.join(path).symlink_metadata() {
-            Ok(meta) if meta.is_dir() => {
-                bail!(
-                    "{} is a directory where {name} writes a file",
-                    path.display()
-                )
-            }
-            Ok(_) if !tracked => {
-                bail!(
-                    "{} is not tracked, so {name} would overwrite it",
-                    path.display()
-                )
-            }
-            Ok(_) if repo.status_file(path).ok() != Some(Status::CURRENT) => {
-                bail!(
-                    "{} has changes of its own that {name} would overwrite",
-                    path.display()
-                )
-            }
-            Err(_) if tracked => {
-                bail!(
-                    "{} has changes of its own that {name} would overwrite",
-                    path.display()
-                )
-            }
-            _ => {}
-        }
-    }
     Ok(())
 }
 

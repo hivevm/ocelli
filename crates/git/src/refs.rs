@@ -14,10 +14,10 @@
 //! repository itself is fatal, and that fails the history load as well.
 
 use anyhow::Result;
-use git2::{BranchType, ObjectType, Repository};
+use git2::{BranchType, ObjectType, Repository, RepositoryState};
 use ocelli_core::model::{
-    LocalBranch, ParentKind, ParentRepo, Remote, RemoteBranch, RepoRefs, Submodule, SubmoduleState,
-    Tag, Worktree,
+    Conflict, InProgress, LocalBranch, Operation, ParentKind, ParentRepo, Remote, RemoteBranch,
+    RepoRefs, Submodule, SubmoduleState, Tag, Worktree,
 };
 use std::path::Path;
 
@@ -67,7 +67,7 @@ pub fn load_repo_refs(repo_path: &Path) -> Result<RepoRefs> {
         submodules: load_submodules(&repo),
         parent: find_parent(&repo),
         default_remote: default_remote(&repo, &remote_names),
-        in_progress: crate::operations::stopped(&repo),
+        in_progress: stopped(&repo),
     })
 }
 
@@ -471,6 +471,60 @@ fn load_tags(repo: &Repository) -> Vec<Tag> {
         });
     }
 
+    out
+}
+
+/// The operation in progress `state` names, where Ocelli can continue or abort it (ADR-0033).
+pub(crate) fn operation_of(state: RepositoryState) -> Option<Operation> {
+    match state {
+        RepositoryState::Merge => Some(Operation::Merge),
+        RepositoryState::Revert | RepositoryState::RevertSequence => Some(Operation::Revert),
+        RepositoryState::CherryPick | RepositoryState::CherryPickSequence => {
+            Some(Operation::CherryPick)
+        }
+        RepositoryState::Rebase
+        | RepositoryState::RebaseInteractive
+        | RepositoryState::RebaseMerge => Some(Operation::Rebase),
+        _ => None,
+    }
+}
+
+/// The operation stopped in the repository, as `git status` reads it, with its conflicted files
+/// (ADR-0033).
+pub(crate) fn stopped(repo: &Repository) -> Option<InProgress> {
+    let operation = operation_of(repo.state())?;
+    let index = repo.index().ok()?;
+    let conflicts = conflicts_of(&index);
+    let head = repo.head().ok()?.peel_to_commit().ok()?.id().to_string();
+    Some(InProgress {
+        operation,
+        conflicts,
+        head,
+    })
+}
+
+pub(crate) fn conflicts_of(index: &git2::Index) -> Vec<Conflict> {
+    let Ok(conflicts) = index.conflicts() else {
+        return Vec::new();
+    };
+    let mut out: Vec<Conflict> = conflicts
+        .flatten()
+        .filter_map(|c| {
+            let any = c
+                .our
+                .as_ref()
+                .or(c.their.as_ref())
+                .or(c.ancestor.as_ref())?;
+            let id = |e: &Option<git2::IndexEntry>| e.as_ref().map(|e| e.id.to_string());
+            Some(Conflict {
+                path: String::from_utf8_lossy(&any.path).into_owned(),
+                ancestor: id(&c.ancestor),
+                ours: id(&c.our),
+                theirs: id(&c.their),
+            })
+        })
+        .collect();
+    out.sort_by(|a, b| a.path.cmp(&b.path));
     out
 }
 

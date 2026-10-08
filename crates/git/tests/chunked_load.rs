@@ -9,8 +9,7 @@
     reason = "a test sets a repository up by hand, the way a developer would"
 )]
 
-mod git_command;
-use git_command::git_command;
+mod support;
 use ocelli_core::graph::build_graph;
 use ocelli_core::history::History;
 use ocelli_core::model::{CHUNK_COMMITS, CommitData, CommitKind};
@@ -18,39 +17,9 @@ use ocelli_core::port::RepositoryReader;
 use ocelli_git::GitReader;
 use std::collections::{HashMap, HashSet};
 use std::io::Write;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::process::Stdio;
-
-struct Scratch(PathBuf);
-
-impl Scratch {
-    fn new(name: &str) -> Self {
-        let dir = std::env::temp_dir().join(format!("ocelli-chunks-{name}-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&dir);
-        std::fs::create_dir_all(&dir).unwrap();
-        Scratch(dir)
-    }
-}
-
-impl Drop for Scratch {
-    fn drop(&mut self) {
-        let _ = std::fs::remove_dir_all(&self.0);
-    }
-}
-
-fn git(dir: &Path, args: &[&str]) -> String {
-    let out = git_command(dir)
-        .args(["-c", "user.name=F", "-c", "user.email=f@example.invalid"])
-        .args(args)
-        .output()
-        .unwrap();
-    assert!(
-        out.status.success(),
-        "git {args:?}: {}",
-        String::from_utf8_lossy(&out.stderr)
-    );
-    String::from_utf8(out.stdout).unwrap()
-}
+use support::{Scratch, git, git_command};
 
 /// A repository of `commits` commits on a main line with a branch of three merged back every
 /// twenty, written by fast-import at fixed times, with a work tree checked out.

@@ -11,28 +11,22 @@
 )]
 #![cfg(unix)]
 
-mod git_command;
+mod support;
 use ocelli_core::graph::build_graph;
 use ocelli_core::model::WORKDIR_SHA;
 use ocelli_core::port::RepositoryReader;
 use ocelli_git::GitReader;
 use std::path::{Path, PathBuf};
+use support::Scratch;
+// The programs start `git` through it.
+use support::git_command;
 
 mod programs;
 
-struct Scratch(PathBuf);
-
-impl Drop for Scratch {
-    fn drop(&mut self) {
-        let _ = std::fs::remove_dir_all(&self.0);
-    }
-}
-
 #[test]
 fn reading_a_repository_runs_none_of_its_programs() {
-    let root = std::env::temp_dir().join(format!("ocelli-no-repo-code-{}", std::process::id()));
-    let _ = std::fs::remove_dir_all(&root);
-    let _guard = Scratch(root.clone());
+    let scratch = Scratch::new("read");
+    let root = scratch.0.clone();
     let dir = root.join("repo");
 
     let repo = git2::Repository::init(&dir).unwrap();

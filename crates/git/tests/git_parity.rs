@@ -18,51 +18,12 @@
 )]
 #![cfg(unix)]
 
-mod git_command;
-use git_command::git_command;
+mod support;
 use ocelli_core::port::{RepositoryWriter, ResetMode, Write};
 use ocelli_git::GitWriter;
-use std::collections::{BTreeMap, HashMap};
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::process::Command;
-
-struct Scratch(PathBuf);
-
-impl Scratch {
-    fn new(name: &str) -> Self {
-        let dir = std::env::temp_dir().join(format!("ocelli-parity-{name}-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&dir);
-        std::fs::create_dir_all(&dir).unwrap();
-        Scratch(dir)
-    }
-}
-
-impl Drop for Scratch {
-    fn drop(&mut self) {
-        let _ = std::fs::remove_dir_all(&self.0);
-    }
-}
-
-/// Runs `git` and returns whether it succeeded and what it printed.
-fn run(dir: &Path, args: &[&str]) -> (bool, String) {
-    let out = git_command(dir).args(args).output().unwrap();
-    let text = if out.status.success() {
-        String::from_utf8_lossy(&out.stdout).into_owned()
-    } else {
-        String::from_utf8_lossy(&out.stderr).into_owned()
-    };
-    (out.status.success(), text)
-}
-
-fn git(dir: &Path, args: &[&str]) -> String {
-    let (ok, text) = run(dir, args);
-    assert!(ok, "git {args:?}: {text}");
-    text.trim_end().to_string()
-}
-
-fn put(dir: &Path, path: &str, content: &str) {
-    std::fs::write(dir.join(path), content).unwrap();
-}
+use support::{Scratch, Snapshot, git, git_output, snapshot, snapshots_as_twins, write_file};
 
 /// Copies the directory `from`, a repository and the linked working tree beside it where there
 /// is one, to `to`, and points the two at each other again.
@@ -80,7 +41,7 @@ fn copy(from: &Path, to: &Path) {
     }
     // The copy has new inodes; `git` and libgit2 then read each file again rather than trust the
     // index's record of it. Refreshing the index exits non-zero where a file is changed.
-    run(&repo, &["update-index", "-q", "--refresh"]);
+    git_output(&repo, &["update-index", "-q", "--refresh"]);
 }
 
 /// The commits every state starts from.
@@ -106,27 +67,27 @@ fn base(dir: &Path) -> Base {
     git(d, &["init", "--quiet", "-b", "main"]);
     git(d, &["config", "user.name", "Ada"]);
     git(d, &["config", "user.email", "ada@example.invalid"]);
-    put(d, ".gitignore", "*.log\n");
+    write_file(d, ".gitignore", "*.log\n");
     for f in ["a", "b", "k"] {
-        put(d, f, "1\n");
+        write_file(d, f, "1\n");
     }
     git(d, &["add", "."]);
     git(d, &["commit", "--quiet", "-m", "one"]);
     let one = git(d, &["rev-parse", "HEAD"]);
     git(d, &["tag", "old"]);
-    put(d, "a", "2\n");
+    write_file(d, "a", "2\n");
     git(d, &["commit", "--quiet", "-am", "two"]);
     let two = git(d, &["rev-parse", "HEAD"]);
     git(d, &["branch", "done"]);
-    put(d, "k", "main\n");
-    put(d, "c", "c\n");
+    write_file(d, "k", "main\n");
+    write_file(d, "c", "c\n");
     git(d, &["add", "k", "c"]);
     git(d, &["commit", "--quiet", "-m", "three"]);
 
     git(d, &["switch", "--quiet", "-c", "other"]);
-    put(d, "a", "other\n");
-    put(d, "n", "n\n");
-    put(d, "t.log", "t\n");
+    write_file(d, "a", "other\n");
+    write_file(d, "n", "n\n");
+    write_file(d, "t.log", "t\n");
     git(d, &["add", "-f", "a", "n", "t.log"]);
     git(d, &["commit", "--quiet", "-m", "other work"]);
     let other = git(d, &["rev-parse", "HEAD"]);
@@ -134,15 +95,15 @@ fn base(dir: &Path) -> Base {
     git(d, &["update-ref", "refs/remotes/origin/feature", &other]);
 
     git(d, &["switch", "--quiet", "-c", "clash", &one]);
-    put(d, "k", "clash\n");
+    write_file(d, "k", "clash\n");
     git(d, &["commit", "--quiet", "-am", "clash work"]);
 
     git(d, &["switch", "--quiet", "main"]);
-    put(d, "d", "d\n");
+    write_file(d, "d", "d\n");
     git(d, &["add", "d"]);
     git(d, &["commit", "--quiet", "-m", "four"]);
     let main = git(d, &["rev-parse", "HEAD"]);
-    put(d, "a", "stashed\n");
+    write_file(d, "a", "stashed\n");
     git(d, &["stash", "push", "--quiet", "-m", "base"]);
     Base {
         one,
@@ -154,7 +115,7 @@ fn base(dir: &Path) -> Base {
 
 /// Resolves the conflict on k that an operation stopped on, as a developer would.
 fn resolve_k(d: &Path) {
-    put(d, "k", "resolved\n");
+    write_file(d, "k", "resolved\n");
     git(d, &["add", "k"]);
 }
 
@@ -165,26 +126,26 @@ type MakeState = fn(&Path);
 const STATES: &[(&str, MakeState)] = &[
     ("clean", |_| {}),
     ("merge in progress", |d| {
-        assert!(!run(d, &["merge", "--no-edit", "clash"]).0);
+        assert!(!git_output(d, &["merge", "--no-edit", "clash"]).0);
         resolve_k(d);
     }),
     ("cherry-pick in progress", |d| {
-        assert!(!run(d, &["cherry-pick", "clash"]).0);
+        assert!(!git_output(d, &["cherry-pick", "clash"]).0);
         resolve_k(d);
     }),
     ("revert in progress", |d| {
-        assert!(!run(d, &["revert", "--no-edit", "clash"]).0);
+        assert!(!git_output(d, &["revert", "--no-edit", "clash"]).0);
         resolve_k(d);
     }),
     ("rebase in progress", |d| {
-        assert!(!run(d, &["rebase", "clash"]).0);
+        assert!(!git_output(d, &["rebase", "clash"]).0);
         resolve_k(d);
     }),
     ("bisect in progress", |d| {
         git(d, &["bisect", "start"]);
     }),
     ("staged change on a touched path", |d| {
-        put(d, "a", "staged\n");
+        write_file(d, "a", "staged\n");
         git(d, &["add", "a"]);
     }),
     // libgit2's checkout compares the working directory alone with the checked-out commit, so
@@ -192,32 +153,32 @@ const STATES: &[(&str, MakeState)] = &[
     (
         "staged change on a touched path, the working directory as committed",
         |d| {
-            put(d, "a", "staged\n");
+            write_file(d, "a", "staged\n");
             git(d, &["add", "a"]);
-            put(d, "a", "2\n");
+            write_file(d, "a", "2\n");
         },
     ),
     ("staged change on a path left alone", |d| {
-        put(d, "b", "staged\n");
+        write_file(d, "b", "staged\n");
         git(d, &["add", "b"]);
     }),
     ("unstaged change on a touched path", |d| {
-        put(d, "a", "unstaged\n")
+        write_file(d, "a", "unstaged\n")
     }),
     ("unstaged change on a path left alone", |d| {
-        put(d, "b", "unstaged\n")
+        write_file(d, "b", "unstaged\n")
     }),
     ("untracked file on a touched path", |d| {
-        put(d, "n", "untracked\n")
+        write_file(d, "n", "untracked\n")
     }),
     ("untracked file on a path left alone", |d| {
-        put(d, "u", "untracked\n")
+        write_file(d, "u", "untracked\n")
     }),
     ("ignored file on a touched path", |d| {
-        put(d, "t.log", "ignored\n")
+        write_file(d, "t.log", "ignored\n")
     }),
     ("ignored file on a path left alone", |d| {
-        put(d, "x.log", "ignored\n")
+        write_file(d, "x.log", "ignored\n")
     }),
     ("touched file deleted", |d| {
         std::fs::remove_file(d.join("a")).unwrap()
@@ -243,7 +204,7 @@ const STATES: &[(&str, MakeState)] = &[
     }),
     ("signing asked with a change staged", |d| {
         git(d, &["config", "commit.gpgSign", "true"]);
-        put(d, "b", "staged\n");
+        write_file(d, "b", "staged\n");
         git(d, &["add", "b"]);
     }),
 ];
@@ -539,6 +500,32 @@ const TRACKED_CHANGES: &[&str] = &[
     "file left alone deleted",
     "signing asked with a change staged",
 ];
+/// The states with a change to a tracked file or an operation stopped with its own.
+const STASHED: &[&str] = &[
+    "staged change on a touched path",
+    "staged change on a touched path, the working directory as committed",
+    "staged change on a path left alone",
+    "unstaged change on a touched path",
+    "unstaged change on a path left alone",
+    "touched file deleted",
+    "file left alone deleted",
+    "signing asked with a change staged",
+];
+
+/// The states with a change a stash with the untracked files takes.
+const STASHED_UNTRACKED: &[&str] = &[
+    "staged change on a touched path",
+    "staged change on a touched path, the working directory as committed",
+    "staged change on a path left alone",
+    "unstaged change on a touched path",
+    "unstaged change on a path left alone",
+    "touched file deleted",
+    "file left alone deleted",
+    "signing asked with a change staged",
+    "untracked file on a touched path",
+    "untracked file on a path left alone",
+];
+
 /// A group of cases: the states, the writes, and why they are listed.
 type Cases = (
     &'static [&'static str],
@@ -608,132 +595,27 @@ const DEPARTURES: &[Cases] = &[
 
 /// Where the writer differs from `git` and no ADR decides it: each group a finding for the
 /// maintainer, asserted case by case to still differ, so that a fix fails here and removes it.
-const MISMATCHES: &[Cases] = &[];
+const MISMATCHES: &[Cases] = &[
+    (
+        STASHED,
+        &["stash"],
+        "the stash commit's message ends in a line break and its index commit's in two, where \
+         git's end in none and in one",
+    ),
+    (
+        STASHED_UNTRACKED,
+        &["stash with untracked files"],
+        "the stash, index, and untracked commits' messages end in one line break more than \
+         git's",
+    ),
+];
 
-/// Everything a write can change, read with `git`.
-#[derive(Debug, PartialEq, Eq, Clone)]
-struct Snapshot {
-    head: String,
-    refs: Vec<String>,
-    stashes: Vec<String>,
-    upstreams: String,
-    index: String,
-    status: String,
-    in_progress: Vec<&'static str>,
-    files: BTreeMap<String, String>,
-}
-
-/// A commit as content, its id aside: two copies make the same commit at different times.
-fn fingerprint(sha: &str, commits: &HashMap<String, (String, Vec<String>)>) -> String {
-    match commits.get(sha) {
-        Some((own, parents)) => {
-            let parents: Vec<_> = parents.iter().map(|p| fingerprint(p, commits)).collect();
-            format!("{own} <- [{}]", parents.join(", "))
-        }
-        None => format!("unknown {sha}"),
-    }
-}
-
-fn files(root: &Path, dir: &Path, found: &mut BTreeMap<String, String>) {
-    for entry in std::fs::read_dir(dir).unwrap() {
-        let path = entry.unwrap().path();
-        let name = path.strip_prefix(root).unwrap().display().to_string();
-        if name == ".git" {
-            continue;
-        }
-        if path.is_dir() {
-            files(root, &path, found);
-        } else {
-            let content = std::fs::read(&path).unwrap();
-            found.insert(name, String::from_utf8_lossy(&content).into_owned());
-        }
-    }
-}
-
-fn snapshot(d: &Path) -> Snapshot {
-    let mut commits = HashMap::new();
-    let log = git(
-        d,
-        &[
-            "log",
-            "--all",
-            "--reflog",
-            "-z",
-            "--format=%H%x1f%T%x1f%P%x1f%an <%ae>%x1f%B",
-        ],
-    );
-    for record in log.split('\0').filter(|r| !r.is_empty()) {
-        let fields: Vec<_> = record.splitn(5, '\x1f').collect();
-        let own = format!("{} by {}: {:?}", fields[1], fields[3], fields[4]);
-        let parents = fields[2].split_whitespace().map(str::to_string).collect();
-        commits.insert(fields[0].trim().to_string(), (own, parents));
-    }
-    let head = match run(d, &["symbolic-ref", "-q", "HEAD"]) {
-        (true, name) => name.trim().to_string(),
-        _ => "detached".to_string(),
-    };
-    let head_sha = run(d, &["rev-parse", "-q", "--verify", "HEAD"]).1;
-    let head = format!("{head} at {}", fingerprint(head_sha.trim(), &commits));
-    let refs = git(
-        d,
-        &[
-            "for-each-ref",
-            "--format=%(refname)%1f%(objecttype)%1f%(objectname)%1f%(*objectname)%1f%(contents)%1e",
-        ],
-    );
-    let refs = refs
-        .split('\x1e')
-        .map(str::trim)
-        .filter(|r| !r.is_empty() && !r.starts_with("refs/stash"))
-        .map(|r| {
-            let f: Vec<_> = r.splitn(5, '\x1f').collect();
-            match f[1] {
-                "tag" => format!("{} tag {:?} on {}", f[0], f[4], fingerprint(f[3], &commits)),
-                _ => format!("{} {}", f[0], fingerprint(f[2], &commits)),
-            }
-        })
-        .collect();
-    let stashes = git(d, &["stash", "list", "--format=%H"])
-        .lines()
-        .map(|s| fingerprint(s, &commits))
-        .collect();
-    let upstreams = run(d, &["config", "--get-regexp", r"^branch\."]).1;
-    let status = git(
-        d,
-        &[
-            "status",
-            "--porcelain=v1",
-            "--ignored",
-            "--untracked-files=all",
-        ],
-    );
-    let index = git(d, &["ls-files", "--stage"]);
-    let git_dir = d.join(".git");
-    let in_progress = [
-        "MERGE_HEAD",
-        "CHERRY_PICK_HEAD",
-        "REVERT_HEAD",
-        "rebase-merge",
-        "rebase-apply",
-        "BISECT_LOG",
-        "sequencer",
-    ]
-    .into_iter()
-    .filter(|f| git_dir.join(f).exists())
-    .collect();
-    let mut found = BTreeMap::new();
-    files(d, d, &mut found);
-    Snapshot {
-        head,
-        refs,
-        stashes,
-        upstreams,
-        index,
-        status,
-        in_progress,
-        files: found,
-    }
-}
+/// The files of an operation the writer is known to leave otherwise than `git` in every state
+/// without an ADR, left out where the two are compared: `git`'s merge leaves `AUTO_MERGE`, the
+/// tree it merged, after a cherry-pick, a revert, a rebase, and a stash applied, which libgit2's
+/// merge never writes. A case where it differs is asserted to occur, so that a fix shows up as a
+/// failure that removes the entry.
+const UNCOMPARED: &[&str] = &["AUTO_MERGE"];
 
 /// What each side did with one write in one state.
 struct Outcome {
@@ -743,6 +625,8 @@ struct Outcome {
     by_git: Snapshot,
     ocelli: Result<(), String>,
     by_ocelli: Snapshot,
+    /// What `git` and the writer left, read as twins: a commit one side made alone by content.
+    alike: (Snapshot, Snapshot),
 }
 
 impl Outcome {
@@ -752,8 +636,14 @@ impl Outcome {
         if !self.git_ok && self.by_git == self.before {
             self.refused()
         } else {
-            self.by_ocelli == self.by_git
+            self.alike.0.without(UNCOMPARED) == self.alike.1.without(UNCOMPARED)
         }
+    }
+
+    /// The writer left a file of `UNCOMPARED` otherwise than `git`.
+    fn uncompared_differ(&self) -> bool {
+        self.alike.0 != self.alike.1
+            && self.alike.0.without(UNCOMPARED) == self.alike.1.without(UNCOMPARED)
     }
 
     /// The writer refused with nothing changed.
@@ -767,37 +657,10 @@ impl Outcome {
     }
 
     fn describe(&self) -> String {
-        let mut diff = Vec::new();
-        let (g, o) = (&self.by_git, &self.by_ocelli);
-        let fields: [(&str, String, String); 8] = [
-            ("HEAD", g.head.clone(), o.head.clone()),
-            ("refs", format!("{:#?}", g.refs), format!("{:#?}", o.refs)),
-            (
-                "stashes",
-                format!("{:#?}", g.stashes),
-                format!("{:#?}", o.stashes),
-            ),
-            ("upstreams", g.upstreams.clone(), o.upstreams.clone()),
-            ("index", g.index.clone(), o.index.clone()),
-            ("status", g.status.clone(), o.status.clone()),
-            (
-                "in progress",
-                format!("{:?}", g.in_progress),
-                format!("{:?}", o.in_progress),
-            ),
-            (
-                "files",
-                format!("{:#?}", g.files),
-                format!("{:#?}", o.files),
-            ),
-        ];
-        for (name, by_git, by_ocelli) in fields {
-            if by_git != by_ocelli {
-                diff.push(format!(
-                    "    {name} by git:\n{by_git}\n    {name} by Ocelli:\n{by_ocelli}"
-                ));
-            }
-        }
+        let diff = self
+            .alike
+            .0
+            .differences(&self.alike.1, ("by git", "by Ocelli"));
         format!(
             "  git {}{}, Ocelli {:?}; git changed {}, Ocelli changed {}\n{}",
             if self.git_ok {
@@ -843,10 +706,12 @@ fn expected(state: &str, write: &str) -> Expected {
 }
 
 /// What one state's cases came to: the cases that do not hold, and the groups of `DEPARTURES`
-/// with a case where `git` changed the repository.
+/// with a case where `git` changed the repository, and whether a case differed in `UNCOMPARED`
+/// alone.
 struct Verdicts {
     failures: Vec<String>,
     departures_taken: Vec<usize>,
+    uncompared_differ: bool,
 }
 
 /// Runs every write in one state.
@@ -860,28 +725,37 @@ fn run_state(root: &Path, origin: &Path, base: &Base, index: usize) -> Verdicts 
     let mut verdicts = Verdicts {
         failures: Vec::new(),
         departures_taken: Vec::new(),
+        uncompared_differ: false,
     };
     for (case, (write, make_write, args)) in WRITES.iter().enumerate() {
         let by_git_dir = root.join(format!("state-{index}-{case}-git"));
         let by_ocelli_dir = root.join(format!("state-{index}-{case}-ocelli"));
         copy(&dir, &by_git_dir);
         copy(&dir, &by_ocelli_dir);
-        let (git_ok, git_said) = run(&by_git_dir.join("repo"), args);
+        let (git_ok, git_said) = git_output(&by_git_dir.join("repo"), args);
         let ocelli = GitWriter
             .write(&by_ocelli_dir.join("repo"), &make_write(&shown))
             .map(|_| ())
             .map_err(|e| e.to_string());
+        let (git_repo, ocelli_repo) = (by_git_dir.join("repo"), by_ocelli_dir.join("repo"));
+        let (by_git, by_ocelli) = (snapshot(&git_repo), snapshot(&ocelli_repo));
+        let alike = snapshots_as_twins(
+            (&git_repo, by_git.clone()),
+            (&ocelli_repo, by_ocelli.clone()),
+        );
         let outcome = Outcome {
             before: before.clone(),
             git_ok,
             git_said,
-            by_git: snapshot(&by_git_dir.join("repo")),
+            by_git,
             ocelli,
-            by_ocelli: snapshot(&by_ocelli_dir.join("repo")),
+            by_ocelli,
+            alike,
         };
         let _ = std::fs::remove_dir_all(&by_git_dir);
         let _ = std::fs::remove_dir_all(&by_ocelli_dir);
         let verdict = expected(state, write);
+        verdicts.uncompared_differ |= outcome.uncompared_differ();
         let holds = match verdict {
             Expected::AsGit => outcome.as_git(),
             Expected::RefusedPer(group, _) => {
@@ -933,6 +807,12 @@ fn each_write_does_what_git_does_in_every_state_or_an_adr_says_why_not() {
                  {adr} decides nothing here"
             ));
         }
+    }
+    if !verdicts.iter().any(|v| v.uncompared_differ) {
+        failures.push(format!(
+            "{UNCOMPARED:?}: the writer leaves them as git does in every case, so they can be \
+             compared"
+        ));
     }
     assert!(
         failures.is_empty(),

@@ -11,29 +11,15 @@
 )]
 
 mod fixture_repo;
+mod support;
 
 use ocelli_core::graph::build_graph;
 use ocelli_core::model::WORKDIR_SHA;
 use ocelli_core::port::RepositoryReader;
 use ocelli_git::GitReader;
 use serde_json::Value;
-use std::path::{Path, PathBuf};
-
-struct Scratch(PathBuf);
-
-impl Drop for Scratch {
-    fn drop(&mut self) {
-        let _ = std::fs::remove_dir_all(&self.0);
-    }
-}
-
-fn scratch() -> (Scratch, PathBuf) {
-    let root = std::env::temp_dir().join(format!("ocelli-load-reference-{}", std::process::id()));
-    let _ = std::fs::remove_dir_all(&root);
-    let dir = root.join("repo");
-    std::fs::create_dir_all(&dir).unwrap();
-    (Scratch(root), dir)
-}
+use std::path::Path;
+use support::Scratch;
 
 fn expected(name: &str) -> Value {
     let path = Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -60,7 +46,9 @@ fn stash_places(graph: &mut Value) -> Vec<(String, Value)> {
 
 #[test]
 fn a_fixed_repository_loads_as_the_reference_did() {
-    let (_guard, dir) = scratch();
+    let scratch = Scratch::new("reference");
+    let dir = scratch.0.join("repo");
+    std::fs::create_dir_all(&dir).unwrap();
     fixture_repo::build(&dir);
     let reader = GitReader;
     let mut quiet = |_: String| {};
