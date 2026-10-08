@@ -38,7 +38,7 @@ pub fn load_chunks(
     // and gain little from the cache.
     git2::opts::enable_caching(false);
     // 1. Open repo (walks up to find .git, supports bare repos)
-    let repo = Repository::discover(repo_path)?;
+    let repo = crate::confine::open(repo_path)?;
 
     // 2. Collect all refs and map peeled SHA -> Vec<String> ref names
     let mut refs_by_sha: HashMap<String, Vec<String>> = HashMap::new();
@@ -148,7 +148,7 @@ fn with_synthetic_nodes(
     repo_path: &Path,
     commits: &mut Vec<CommitData>,
 ) -> Result<Vec<CommitData>> {
-    let mut repo = Repository::discover(repo_path)?;
+    let mut repo = crate::confine::open(repo_path)?;
     // Stash entries, each a node hanging off its base commit.
     let walked = commits.len();
     load_stashes(&mut repo, commits);
@@ -225,8 +225,16 @@ fn working_dir_node(repo: &Repository) -> Option<CommitData> {
         return None;
     }
 
-    // Author the node with the repo's configured identity, when available.
-    let (name, email) = match repo.signature() {
+    // Author the node with the repo's configured identity, when available. Confined to a server
+    // root, it is not read: the configuration libgit2 reads, the developer's global one and the
+    // files a repository's own one includes, lies outside what ADR-0039 confines, and the
+    // identity is the one value of it the node would show.
+    let signature = if crate::confine::confined() {
+        Err(git2::Error::from_str("not read under confinement"))
+    } else {
+        repo.signature()
+    };
+    let (name, email) = match signature {
         Ok(sig) => (
             sig.name().unwrap_or("").to_string(),
             sig.email().unwrap_or("").to_string(),
@@ -284,7 +292,7 @@ pub(crate) const WORKTREE: Status = Status::WT_NEW
 /// Loads the changed files for a single commit SHA.
 /// The synthetic [`WORKDIR_SHA`] yields the uncommitted working-directory diff.
 pub fn load_commit_files(repo_path: &Path, sha: &str) -> Result<Vec<FileChange>> {
-    let repo = Repository::discover(repo_path)?;
+    let repo = crate::confine::open(repo_path)?;
 
     let mut opts = DiffOptions::new();
     opts.ignore_whitespace(false);
@@ -386,9 +394,7 @@ pub fn load_commit_files(repo_path: &Path, sha: &str) -> Result<Vec<FileChange>>
 pub(crate) fn shown(repo: &Repository, path: &str) -> Shown {
     let workdir = repo
         .workdir()
-        .map(|root| root.join(path))
-        .filter(|file| file.symlink_metadata().is_ok())
-        .and_then(|file| git2::Oid::hash_file(git2::ObjectType::Blob, file).ok())
+        .and_then(|root| working_blob(root, path))
         .map(|oid| oid.to_string());
     let index = repo
         .index()
@@ -396,6 +402,38 @@ pub(crate) fn shown(repo: &Repository, path: &str) -> Shown {
         .and_then(|index| index.get_path(Path::new(path), 0))
         .map(|entry| entry.id.to_string());
     Shown { workdir, index }
+}
+
+/// The blob id `git` gives `path` in the working directory `root`, as `git` reads it: a link as
+/// its target's text, never the file it names, and nothing for a path that passes through a
+/// linked folder, which `git` sees as the link it is and Ocelli never reads through (ADR-0039);
+/// nothing for a path that is not there.
+fn working_blob(root: &Path, path: &str) -> Option<git2::Oid> {
+    let relative = Path::new(path);
+    let mut at = root.to_path_buf();
+    let mut parts = relative.components().peekable();
+    while let Some(part) = parts.next() {
+        if !matches!(part, std::path::Component::Normal(_)) {
+            return None;
+        }
+        at.push(part);
+        let meta = at.symlink_metadata().ok()?;
+        if parts.peek().is_some() {
+            if !meta.is_dir() {
+                return None;
+            }
+        } else if meta.file_type().is_symlink() {
+            let target = std::fs::read_link(&at).ok()?;
+            return git2::Oid::hash_object(
+                git2::ObjectType::Blob,
+                target.to_string_lossy().as_bytes(),
+            )
+            .ok();
+        } else if !meta.is_file() {
+            return None;
+        }
+    }
+    git2::Oid::hash_file(git2::ObjectType::Blob, &at).ok()
 }
 
 /// How much of `path`'s uncommitted change the index holds.
@@ -410,7 +448,7 @@ fn staged(repo: &Repository, path: &str) -> Staged {
 
 /// Returns the unified diff of a single file in a commit as a Vec of DiffLine.
 pub fn load_file_diff(repo_path: &Path, sha: &str, file_path: &str) -> Result<Vec<DiffLine>> {
-    let repo = Repository::discover(repo_path)?;
+    let repo = crate::confine::open(repo_path)?;
 
     let mut opts = DiffOptions::new();
     // The path as written, never a pattern that takes other files with it.

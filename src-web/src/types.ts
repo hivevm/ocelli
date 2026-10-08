@@ -110,6 +110,24 @@ export interface Found {
   hits: NodeJson[];
 }
 
+/** A folder below the remote server's root, marked where it holds a `.git` (ADR-0039). */
+export interface Folder {
+  name: string;
+  /** Relative to the server root, as `open_repo` and `list_folders` take it. */
+  path: string;
+  repository: boolean;
+}
+
+/** The remote server's `list_folders` answer: its counterpart of the desktop's folder dialog. */
+export interface Listing {
+  /** The folder listed, relative to the server root, `.` for the root itself. */
+  path: string;
+  repository: boolean;
+  folders: Folder[];
+  /** Whether the folder holds more than the server lists. */
+  more: boolean;
+}
+
 // ── Repository sidebar (ADR-0026) ──────────────────────────────────────────
 // Refs and checkout locations, not history: each entry only carries the commit
 // it resolves to, which is all the sidebar needs to navigate there.

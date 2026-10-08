@@ -90,7 +90,8 @@ Install the dependencies from the lockfile first, and again after a dependency c
   warnings`, and `bun run --cwd src-web lint`
 - **Run:** the desktop application with `bun run tauri dev`; the terminal application with
   `cargo run -p ocelli-cli -- [--ascii] [PATH]`; the remote server with
-  `cargo run -p ocelli-server -- --root <folder> [--port <port>]`, which embeds the web
+  `cargo run -p ocelli-server -- --root <folder> [--port <port>] [--listen <address>[:<port>]
+  [--cert <file> --key <file>]]`, which embeds the web
   interface's build, so `bun run --cwd src-web build` runs before it is built
 
 ## Usage
@@ -132,8 +133,17 @@ URL that carries a secret token; opening it logs the browser in with a session c
 request without it, or from another web page, is refused
 ([ADR-0038](docs/adr/0038-remote-server-localhost-tls-session-cookie.md)).
 From another machine, forward the port through SSH (`ssh -L 8000:localhost:8000 host`, the server
-started with `--port 8000`) and open the URL there. The browser opens the repository the server
-root is and nothing outside the root
+started with `--port 8000`) and open the URL there. Or name an address with `--listen
+<address>[:<port>]`: the server then listens there alone and only over TLS, with the certificate
+and key given with `--cert <file> --key <file>`, or with a self-signed certificate it makes on
+the first start and keeps in the user's configuration directory (`ocelli/server/`), printing its
+SHA-256 fingerprint to compare with what the browser shows before accepting it. That certificate
+names the address listened on, or, for `0.0.0.0` or `::`, the machine's host name alone, and the
+server answers only under a name its certificate carries; it refuses to start where the one it
+keeps does not name the address or the host name any more, or where only half of it, or a key
+other accounts may read, is kept, and says what to remove. The browser opens
+the repository the server root is, or one chosen with Open Repo from the folders below the root,
+and nothing outside the root
 ([ADR-0039](docs/adr/0039-git-adapter-confined-to-the-server-root.md)); the
 server only reads, and every restart prints a new URL.
 

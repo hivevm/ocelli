@@ -3,6 +3,7 @@
 //! writing a repository starts no program the repository names (Q-4).
 
 mod checkout;
+pub mod confine;
 mod conflicts;
 pub mod git;
 mod guard;

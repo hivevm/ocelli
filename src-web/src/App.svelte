@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { invoke, listen } from './host.ts';
+  import { invoke, listen, remote } from './host.ts';
   import { onMount } from 'svelte';
   import GraphCanvas, { EMPTY_GRAPH_WIDTH, REFS_WIDTH, graphAreaWidth } from './GraphCanvas.svelte';
   import DiffViewer from './DiffViewer.svelte';
@@ -15,6 +15,8 @@
   import { Newest } from './hostAnswers.ts';
   import { actionLabel, confirmedWrite, type Outcome, type Write } from './writes.ts';
   import StashDialog from './StashDialog.svelte';
+  import FolderDialog from './FolderDialog.svelte';
+  import { avatarsOn } from './avatars.ts';
   import type {
     NodeJson, FileChange, DiffLine, RepoRefs, Growth, RowWindow, Relative, Selected, Found,
     LoadedRefs, Offered, Transfer, Transfers,
@@ -34,7 +36,7 @@
 
   // ── Avatars — opt-in, default off (ADR-0023) ─────────────────────────────
   const storedAvatars = typeof localStorage !== 'undefined' ? localStorage.getItem('avatars') : null;
-  let showAvatars = $state(storedAvatars === 'on');
+  let showAvatars = $state(avatarsOn(storedAvatars));
 
   $effect(() => {
     try { localStorage.setItem('avatars', showAvatars ? 'on' : 'off'); } catch { /* ignore */ }
@@ -89,6 +91,8 @@
   let notice = $state<string | null>(null);
   // Whether the dialog that describes a new stash is open.
   let stashing = $state(false);
+  /** The remote server's folder listing is open, in place of the desktop's folder dialog. */
+  let choosingFolder = $state(false);
   // Whether a transfer to or from a remote runs, and whether the toolbar's button can cancel it,
   // as the core decides (ADR-0035).
   let fetching = $state(false);
@@ -329,6 +333,10 @@
   // ── Actions ────────────────────────────────────────────────────────────────
   async function browseRepo(): Promise<void> {
     notice = null;
+    if (remote) {
+      choosingFolder = true;
+      return;
+    }
     status = 'Selecting repository…';
     await invoke('browse_repo').catch((e: unknown) => { status = 'Error: ' + e; });
   }
@@ -608,6 +616,10 @@
     />
   </div><!-- end #top-pane -->
 </div><!-- end #main -->
+
+{#if choosingFolder}
+  <FolderDialog onOpen={(path) => void openRepoPath(path)} onClose={() => (choosingFolder = false)} />
+{/if}
 
 {#if stashing}
   <StashDialog onStash={performWrite} onClose={() => (stashing = false)} />

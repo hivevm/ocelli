@@ -91,7 +91,11 @@ skimmed. The design revision drops what prevented nothing
   cannot keep.** A second click on a write that has not answered yet writes twice, or is refused
   for a state the first one changed; a Cancel on a push, which libgit2 cannot stop once its
   objects are sent, tells the developer that nothing was pushed when it was.
-- **What a repository's configuration chooses is untrusted wherever it is passed on.** A remote's
+- **What a repository's configuration or layout chooses is untrusted wherever it is passed on.**
+  A check that a repository stays inside a boundary names each thing libgit2 reads or follows on
+  its own, as the pinned libgit2 parses it (a `.git` file, `commondir`, `core.worktree`,
+  alternates and how a line ends, a link anywhere in the git directory, a submodule's git
+  directory, a search upwards), and its tests build each one as a way out. A remote's
   address and the user name in it are checked for what the receiving side reads as structure, a
   line break for a credential helper, before they reach it, as CVE-2020-5260 showed; where two
   parsers read one value, as git2 and libgit2 read an address, it goes on only where both read
