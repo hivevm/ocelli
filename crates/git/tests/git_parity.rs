@@ -539,39 +539,6 @@ const TRACKED_CHANGES: &[&str] = &[
     "file left alone deleted",
     "signing asked with a change staged",
 ];
-/// The states with a change to a tracked file or an operation stopped with its own.
-const STASHED: &[&str] = &[
-    "merge in progress",
-    "cherry-pick in progress",
-    "revert in progress",
-    "rebase in progress",
-    "staged change on a touched path",
-    "staged change on a touched path, the working directory as committed",
-    "staged change on a path left alone",
-    "unstaged change on a touched path",
-    "unstaged change on a path left alone",
-    "touched file deleted",
-    "file left alone deleted",
-    "signing asked with a change staged",
-];
-/// The states with a change a stash with the untracked files takes.
-const STASHED_UNTRACKED: &[&str] = &[
-    "merge in progress",
-    "cherry-pick in progress",
-    "revert in progress",
-    "rebase in progress",
-    "staged change on a touched path",
-    "staged change on a touched path, the working directory as committed",
-    "staged change on a path left alone",
-    "unstaged change on a touched path",
-    "unstaged change on a path left alone",
-    "touched file deleted",
-    "file left alone deleted",
-    "signing asked with a change staged",
-    "untracked file on a touched path",
-    "untracked file on a path left alone",
-];
-
 /// A group of cases: the states, the writes, and why they are listed.
 type Cases = (
     &'static [&'static str],
@@ -608,6 +575,28 @@ const DEPARTURES: &[Cases] = &[
         &["apply stash", "pop stash"],
         "ADR-0033",
     ),
+    // A stash is made, applied, and popped only where nothing is in progress, which `git stash`
+    // would drop, and applied only over an index that holds no staged change and a working
+    // directory that holds every file it changes (ADR-0033).
+    (
+        STOPPED,
+        &[
+            "stash",
+            "stash with untracked files",
+            "apply stash",
+            "pop stash",
+        ],
+        "ADR-0033",
+    ),
+    (
+        &[
+            "staged change on a path left alone",
+            "signing asked with a change staged",
+            "touched file deleted",
+        ],
+        &["apply stash", "pop stash"],
+        "ADR-0033",
+    ),
     // A refusal changes nothing, where `git switch -c` writes the target's tree to the index and
     // the working directory before it finds the name taken, and stops there.
     (
@@ -619,39 +608,7 @@ const DEPARTURES: &[Cases] = &[
 
 /// Where the writer differs from `git` and no ADR decides it: each group a finding for the
 /// maintainer, asserted case by case to still differ, so that a fix fails here and removes it.
-const MISMATCHES: &[Cases] = &[
-    (
-        STASHED,
-        &["stash"],
-        "the stash commit's message ends in a line break and its index commit's in two, where \
-         git's end in none and in one",
-    ),
-    (
-        STASHED_UNTRACKED,
-        &["stash with untracked files"],
-        "the stash commit's message ends in a line break and its index commit's in two, where \
-         git's end in none and in one",
-    ),
-    (
-        &[
-            "merge in progress",
-            "cherry-pick in progress",
-            "revert in progress",
-            "rebase in progress",
-            "staged change on a path left alone",
-            "signing asked with a change staged",
-        ],
-        &["apply stash", "pop stash"],
-        "a stash is refused while the index holds any staged change, where git applies it beside \
-         a staged change on a path the stash does not touch, an operation in progress or not",
-    ),
-    (
-        &["touched file deleted"],
-        &["apply stash", "pop stash"],
-        "a stash that changes a file deleted in the working directory is refused, where git \
-         writes the stashed file back",
-    ),
-];
+const MISMATCHES: &[Cases] = &[];
 
 /// Everything a write can change, read with `git`.
 #[derive(Debug, PartialEq, Eq, Clone)]

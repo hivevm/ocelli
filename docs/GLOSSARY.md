@@ -26,6 +26,9 @@ to invent.
   without an upstream: the checked-out branch's upstream's remote, else `origin`, else the only
   remote there is.
   _Avoid:_ main remote, primary remote.
+- **Departure** — a write whose outcome differs on purpose from what `git` does for the same
+  command, an ADR deciding it.
+  _Avoid:_ deviation, known difference.
 - **Edge** — the line joining a commit to one of its children in the commit graph; a branch edge
   or a merge edge.
   _Avoid:_ link, connector.
@@ -41,6 +44,10 @@ to invent.
 - **Front end** — one of the three ways a developer uses Ocelli: the desktop application, the web
   interface, and the terminal application.
   _Avoid:_ client, UI, frontend.
+- **History operation** — a merge, rebase, cherry-pick, revert, or reset of the checked-out
+  branch, offered on a commit of the commit graph (G-5); one stopped on a conflict is an operation
+  in progress.
+  _Avoid:_ action.
 - **Lane** — the column of the commit graph in which a branch is drawn.
   _Avoid:_ column, rail.
 - **Lane colour** — the colour a lane is drawn in, taken from one theme-independent list so a
@@ -109,4 +116,5 @@ to invent.
   tag or applying a stash, naming the state it expects to find and refused with nothing changed
   where the repository no longer holds it; a write that discards work runs only once the
   developer has confirmed it.
-  _Avoid:_ operation, which names an operation in progress, action, mutation.
+  _Avoid:_ operation, which names a history operation or an operation in progress, action,
+  mutation.

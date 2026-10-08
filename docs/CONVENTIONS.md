@@ -12,10 +12,9 @@ an ADR. What the golden path already shows needs none. Few entries that hold bea
 skimmed. The design revision drops what prevented nothing
 ([`AGENTS.md` §5](../AGENTS.md#5-quality-bar--definition-of-done)).
 
-- **Behaviour carried over is pinned before it moves.** Code that takes over behaviour from the
-  reference implementation lands with a reference test that compares against that
-  implementation's own output, captured before the move; a test written after the move only
-  restates the new code.
+- **A test looks only for what it started.** A process or a file it checks for carries its own
+  run's mark, its scratch directory or its process group: a machine-wide search sees another
+  session's run.
 - **Logic lives in a pure helper beside the component, not inside it.** Grouping refs into
   folders, choosing the rows to ask the host for, rounding an edge's path through its corners,
   deriving a file tree, and pairing diff lines are each a function over plain data in a module of

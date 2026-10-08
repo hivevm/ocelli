@@ -1978,3 +1978,26 @@ fn a_switch_that_puts_a_file_where_a_directory_holds_untracked_files_is_refused(
         );
     }
 }
+
+#[test]
+// Verifies: ADR-0033, Q-6
+fn a_stash_during_a_stopped_operation_is_refused_with_the_operation_kept() {
+    let scratch = with_file("stash-stopped");
+    let d = &scratch.0;
+    git(d, &["switch", "--quiet", "-c", "side"]);
+    std::fs::write(d.join("f"), "theirs\n").unwrap();
+    git(d, &["commit", "--quiet", "-am", "theirs"]);
+    git(d, &["switch", "--quiet", "main"]);
+    std::fs::write(d.join("f"), "ours\n").unwrap();
+    git(d, &["commit", "--quiet", "-am", "ours"]);
+    let _ = git_command(d).args(["merge", "side"]).output().unwrap();
+    std::fs::write(d.join("f"), "resolved\n").unwrap();
+    refused(
+        d,
+        &Write::CreateStash {
+            message: None,
+            untracked: false,
+        },
+        "a merge is in progress",
+    );
+}

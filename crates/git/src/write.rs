@@ -196,10 +196,64 @@ fn create_stash(repo: &mut Repository, message: Option<&str>, untracked: bool) -
         flags |= StashFlags::INCLUDE_UNTRACKED;
     }
     let message = message.map(str::trim).filter(|m| !m.is_empty());
-    match repo.stash_save2(&stasher, message, Some(flags)) {
+    // A stash during an operation in progress would drop the operation with it, as `git stash`
+    // does, a bisect aside (ADR-0033).
+    nothing_in_progress(repo, true)?;
+    let made = match repo.stash_save2(&stasher, message, Some(flags)) {
         Err(e) if e.code() == ErrorCode::NotFound => bail!("there is nothing to stash"),
-        result => result.map(|_| ()).map_err(Into::into),
+        result => result?,
+    };
+    messages_as_git_writes_them(repo, made)?;
+    // libgit2 leaves a staged change in the index where the working directory holds the file as
+    // committed; the stash holds it now, and `git stash` resets to the checked-out commit.
+    let head = repo.head()?.peel_to_commit()?;
+    repo.reset(head.as_object(), git2::ResetType::Hard, None)?;
+    Ok(())
+}
+
+/// The stash `made` with the messages `git stash` writes: libgit2 ends the stash commit's in a
+/// line break and its index and untracked commits' in two, where `git` ends them in none and in
+/// one. The commits are made again with those messages, and the stash's newest entry names the
+/// new one; the entry libgit2 wrote goes first, so the stash keeps one entry for it.
+fn messages_as_git_writes_them(repo: &Repository, made: Oid) -> Result<()> {
+    let trimmed = |c: &Commit| -> String {
+        let m = c.message().unwrap_or_default();
+        m.strip_suffix('\n').unwrap_or(m).to_string()
+    };
+    let again = |c: &Commit| -> Result<Commit> {
+        let parents: Vec<Commit> = c.parents().collect();
+        let oid = repo.commit(
+            None,
+            &c.author(),
+            &c.committer(),
+            &trimmed(c),
+            &c.tree()?,
+            &parents.iter().collect::<Vec<_>>(),
+        )?;
+        Ok(repo.find_commit(oid)?)
+    };
+    let stash = repo.find_commit(made)?;
+    let mut parents: Vec<Commit> = stash.parents().collect();
+    for parent in parents.iter_mut().skip(1) {
+        *parent = again(parent)?;
     }
+    let new_stash = repo.commit(
+        None,
+        &stash.author(),
+        &stash.committer(),
+        &trimmed(&stash),
+        &stash.tree()?,
+        &parents.iter().collect::<Vec<_>>(),
+    )?;
+    let mut reflog = repo.reflog("refs/stash")?;
+    let entry = reflog
+        .get(0)
+        .context("the stash has no entry for what it stashed")?;
+    let said = entry.message().unwrap_or_default().to_string();
+    reflog.remove(0, false)?;
+    reflog.write()?;
+    repo.reference("refs/stash", new_stash, true, &said)?;
+    Ok(())
 }
 
 /// Refuses unless the stash at `index` is still the entry the developer saw, by its commit.
