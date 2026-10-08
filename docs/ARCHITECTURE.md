@@ -6,7 +6,7 @@
 > is updated in the same change as the structure it describes
 > ([ADR-0001](adr/0001-agent-governance-model.md)).
 >
-> **Last design revision:** 2026-10-07, due after 20 changes. The revision that ran moves the
+> **Last design revision:** 2026-10-08, due after 20 changes. The revision that ran moves the
 > date; the number is this project's to set; a sensor counts the changes outside `docs/` since
 > the commit that set the date and says when the next is due
 > ([ADR-0006](adr/0006-feature-layer.md)).
@@ -27,12 +27,12 @@ than anywhere else, and none beats one that has stopped being true.
 Ocelli reads repositories on the local file system through git2, and writes to them through git2
 only what the developer asks for, a tag, a stash, the index, a commit, or a branch
 ([ADR-0033](adr/0033-writes-what-git-writes.md)). It reaches a remote only when
-the developer fetches, through libgit2's own transports with the credentials of the developer's own
-setup
+the developer fetches, pulls, or pushes, through libgit2's own transports with the credentials of
+the developer's own setup
 ([ADR-0035](adr/0035-remotes-through-libgit2-transports.md)),
 and makes no other network request but Gravatar avatars in the desktop application, off until the
-developer turns them on ([ADR-0023](adr/0023-no-egress-hardened-webview.md)). The web interface
-runs only inside the desktop host; the remote server of the specification does not exist yet. The
+developer turns them on ([ADR-0023](adr/0023-no-egress-hardened-webview.md)). The web interface runs
+only inside the desktop host; the remote server of the specification does not exist yet. The
 measurement of the quality goals, which ships to nobody, is the one part that runs the git binary
 and fetches over the network: the corpus of public repositories, in the Measure workflow.
 
@@ -44,11 +44,11 @@ golden path and the test pattern an agent copies from are named here.
 
 - **Core** (`crates/core`, `ocelli-core`) — the commit graph's model, its layout, and the repository
   ports, `RepositoryReader` and `RepositoryWriter` with the `Write`s it takes and `perform`, which
-  every front end writes through and which refuses a write that discards work without the
-  developer's confirmation ([ADR-0034](adr/0034-discarding-work-only-after-confirmation.md)). It
-  depends on no technology and no adapter ([ADR-0009](adr/0009-ports-and-adapters.md)); the
-  layout in `graph.rs` is pure functions over values
-  ([ADR-0010](adr/0010-functional-core-layout.md)), laid out after Pvigier
+  every front end writes through, handing on a transfer's progress and the developer's stop, and
+  which refuses a write that discards work without the developer's confirmation
+  ([ADR-0034](adr/0034-discarding-work-only-after-confirmation.md)). It depends on no technology
+  and no adapter ([ADR-0009](adr/0009-ports-and-adapters.md)); the layout in `graph.rs` is pure
+  functions over values ([ADR-0010](adr/0010-functional-core-layout.md)), laid out after Pvigier
   ([ADR-0015](adr/0015-layout-after-pvigier-by-chunk.md)) with the main line alone in the
   leftmost lane ([ADR-0032](adr/0032-main-line-in-the-leftmost-lane.md)) and edges shaped by type, a
   merge out of the main line up a track of its own
@@ -70,16 +70,20 @@ golden path and the test pattern an agent copies from are named here.
   and returns the commit a write made
   ([ADR-0033](adr/0033-writes-what-git-writes.md)); a commit or an
   annotated tag is refused where the configuration asks for a signature
-  ([ADR-0033](adr/0033-writes-what-git-writes.md)). A fetch reaches the remote
-  through libgit2's own transports with the SSH agent and the credential helper of the developer's
-  global configuration, over HTTPS only for a password, and with libgit2's server timeouts set
-  once for the process, the git adapter's one `unsafe` block
+  ([ADR-0033](adr/0033-writes-what-git-writes.md)). A fetch, a pull,
+  which then fast-forwards the checked-out branch, and a push, never by force and where
+  `push.default` sends it, reach the remote through libgit2's own transports with the SSH agent
+  and the credential helper of the developer's global and system configuration, a helper asked
+  only for a remote named by its domain over HTTPS, and with libgit2's server timeouts set once
+  for the process, the git adapter's one `unsafe` block
   ([ADR-0035](adr/0035-remotes-through-libgit2-transports.md)).
-  Neither starts a program a repository names, a hook included (Q-4).
+  The refs name the remote a fetch reaches without one named. Neither `GitReader` nor
+  `GitWriter` starts a program a repository names, a hook included (Q-4).
 - **Terminal application** (`crates/tui`, `ocelli-cli`) — draws the core's graph with box-drawing
   characters on ratatui; it loads and lays out the history chunk by chunk on a loader thread, keeps
   the core's `History` at its event loop, reads files and diffs through `GitReader` on a worker
-  thread, writes through `GitWriter` on a thread of its own, one write at a time, and keeps its
+  thread, writes through `GitWriter` on a thread of its own, one write at a time, showing a
+  transfer's progress in the status line and stopping a fetch or a pull on `Esc`, and keeps its
   view state in a file
   ([ADR-0028](adr/0028-terminal-application-ratatui.md), [ADR-0029](adr/0029-cli-state-file.md)).
 - **Measurement** (`crates/measure`, `ocelli-measure`) — a command that lays out a repository as
@@ -104,16 +108,19 @@ golden path and the test pattern an agent copies from are named here.
 - **Desktop host** (`src-tauri`, `ocelli`) — the Tauri shell: it loads the history through
   `GitReader` on the blocking pool into the `History` of a load session (`session.rs`), and its
   commands answer the web interface's reads of it, windows of rows, search, and the selected
-  commit with its lineage, as JSON, and writes through `GitWriter` on the same pool
+  commit with its lineage, as JSON, and writes through `GitWriter` on the same pool, one write at
+  a time, telling the web interface a transfer's progress as `write-progress` events at most every
+  tenth of a second and stopping it on `cancel_write`
   ([ADR-0018](adr/0018-tauri-desktop-host.md),
   [ADR-0031](adr/0031-front-ends-read-row-windows.md)). Once a load ends it hands the memory the
-  load freed back to the system through glibc's `malloc_trim`, beside libgit2's timeouts the
-  workspace's one other `unsafe` block outside its tests.
+  load freed back to the system through glibc's `malloc_trim`, one of the workspace's two `unsafe`
+  blocks outside its tests, libgit2's timeouts the other.
 - **Web interface** (`src-web`) — Svelte and TypeScript: the canvas, which holds only the window of
   rows it draws, the sidebar, the commit detail with its tag and branch forms, its stash actions,
   its ref chips' switch and delete, and the working-directory node's stage toggles and commit form,
   the diff overlay, the search field, the dialogs that describe a stash and confirm a write that
-  discards work, and themes; `writes.ts` holds the writes it hands the host, one at a time
+  discards work, the toolbar's Fetch, Pull, and Push, which give way to a Cancel while a fetch or
+  a pull runs, and themes; `writes.ts` holds the writes it hands the host, one at a time
   ([ADR-0022](adr/0022-svelte-web-interface.md), [ADR-0017](adr/0017-virtual-rendering.md),
   [ADR-0020](adr/0020-diff-overlay-and-file-list.md),
   [ADR-0021](adr/0021-themes-tokens-and-palettes.md), [ADR-0026](adr/0026-repository-sidebar.md)).
@@ -160,6 +167,14 @@ lives between them. Only what a newcomer would otherwise reconstruct from code.
   names its row once a chunk lays it out, unless the developer has chosen another by then; the
   desktop host passes the row on with `history-grew`, and the front end selects it
   ([ADR-0033](adr/0033-writes-what-git-writes.md)).
+- **Transferring.** A fetch, a pull, or a push is a `Write` like any other, handed to
+  `port::perform` with a callback that the git adapter tells how far the transfer has come and
+  that answers whether to go on; the front end shows the progress in its status line, and a stop
+  the developer asks for ends a fetch, or a pull while it fetches, at libgit2's next callback. A
+  push has no stop: libgit2 cannot end one once its objects are sent. A transfer done reloads as
+  every write does; a refused one leaves the view as it was, the remote branches a pull's fetch
+  moved before its refusal included, until the next reload
+  ([ADR-0035](adr/0035-remotes-through-libgit2-transports.md)).
 - **State between sessions.** The web interface keeps the theme, the avatars toggle, the diff
   layout, and the sidebar in `localStorage`; the terminal application keeps the same in
   `ocelli/cli-state.json` under the user's state directory.

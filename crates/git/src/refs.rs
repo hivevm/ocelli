@@ -71,7 +71,7 @@ pub fn load_repo_refs(repo_path: &Path) -> Result<RepoRefs> {
 }
 
 /// The remote of the checked-out branch's upstream, else `origin`, else the only remote.
-fn default_remote(repo: &Repository, names: &[String]) -> Option<String> {
+pub(crate) fn default_remote(repo: &Repository, names: &[String]) -> Option<String> {
     repo.head()
         .ok()
         .filter(|head| head.is_branch())
@@ -89,7 +89,7 @@ fn short(sha: &str) -> String {
     sha[..sha.len().min(7)].to_string()
 }
 
-fn remote_names(repo: &Repository) -> Vec<String> {
+pub(crate) fn remote_names(repo: &Repository) -> Vec<String> {
     repo.remotes()
         .map(|names| names.iter().flatten().map(str::to_string).collect())
         .unwrap_or_default()

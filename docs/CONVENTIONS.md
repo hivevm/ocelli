@@ -49,6 +49,13 @@ skimmed. The design revision drops what prevented nothing
   tested on each verdict and at its boundary, since a flipped or truncated comparison passes a
   test that sees one side only. A test of a computed size or count uses an input past every floor
   or clamp applied to it, so a wrong count changes the outcome.
+- **A test that something did not happen first shows that it could have.** A test that no
+  credential was sent asserts that the server asked for one, over a transport that asks, which
+  the local file transport never does; a test of progress asserts that some was reported; a test
+  of a refusal accepts only the reason of the guard it is about, not that of another guard in
+  front of it. What a library does on its own, such as libgit2 sending the user name an address
+  carries, is read off the library run on the same input, never recalled. A test that cannot fail
+  is true by construction and guards nothing.
 - **A property test excepts a case only where the specification or an ADR names the exception.**
   The exception cites that clause where it is made and counts that the excepted case occurs; an
   exception no clause names weakens the suite.
@@ -75,9 +82,19 @@ skimmed. The design revision drops what prevented nothing
   libgit2 can stop halfway; one only libgit2 can find, such as a branch name clashing with
   another, goes first, and a refusal after it undoes it. Its test compares everything the write
   can change before and after: `HEAD`, the refs, the index, and the working directory's status,
-  ignored files included. Every repository Ocelli touches stays one `git` knows what to do with.
-- **A control that writes takes no second press while its write runs.** A second click on a write
-  that has not answered yet writes twice, or is refused for a state the first one changed.
+  ignored files included. A write that waits, on a remote or on a lock, checks what it expects
+  again after the wait, under a lock on what it moves, since a commit can land meanwhile. Every
+  repository Ocelli touches stays one `git` knows what to do with.
+- **A control that writes takes no second press while its write runs, and offers no stop it
+  cannot keep.** A second click on a write that has not answered yet writes twice, or is refused
+  for a state the first one changed; a Cancel on a push, which libgit2 cannot stop once its
+  objects are sent, tells the developer that nothing was pushed when it was.
+- **What a repository's configuration chooses is untrusted wherever it is passed on.** A remote's
+  address and the user name in it are checked for what the receiving side reads as structure, a
+  line break for a credential helper, before they reach it, as CVE-2020-5260 showed; where two
+  parsers read one value, as git2 and libgit2 read an address, it goes on only where both read
+  it alike. A cloned repository's configuration is written by anyone, and the developer's
+  credentials are the asset it is after.
 - **Configuration that grants a capability carries a test that reads it.** The WebView's content
   security policy and the lockfile set are asserted against the files that ship
   (`src-web/src/hardening.test.ts`), because a regression in a JSON file is silent.
