@@ -92,7 +92,8 @@ restates nothing, and a rule this file does not state is not a rule of this proj
   the same change that raised it. One a check can decide becomes the check
   ([§5](#5-quality-bar--definition-of-done)); one that constrains future choices becomes an ADR.
 - **Plan work larger than one session on the issue tracker:** a feature spec cut into
-  tracer-bullet tickets ([ADR-0006](docs/adr/0006-feature-layer.md)). Skill: `plan-feature`.
+  tracer-bullet tickets ([ADR-0006](docs/adr/0006-feature-layer.md)).
+  Skill: `plan-feature`.
 - **Work with the human:** small steps, reasoning surfaced, feedback sought early. A task runs
   unattended only when its ticket answers for it: a test decides its criteria, its scope is
   isolated and a wrong result costs one revert, it touches nothing the harness ADR keeps with

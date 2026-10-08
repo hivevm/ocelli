@@ -6,9 +6,9 @@ description: Plan work larger than one agent session on the issue tracker — a 
 # Plan a feature
 
 The rule is [`AGENTS.md` §4](../../../AGENTS.md#4-working-style); the artifacts and their
-lifecycle are decided in [ADR-0006](../../../docs/adr/0006-feature-layer.md). The shapes are the
-issue templates under [`.github/ISSUE_TEMPLATE/`](../../../.github/ISSUE_TEMPLATE/). This skill
-is the order of work and states no rule of its own
+lifecycle are decided in [ADR-0006](../../../docs/adr/0006-feature-layer.md). The
+shapes are the issue templates under [`.github/ISSUE_TEMPLATE/`](../../../.github/ISSUE_TEMPLATE/).
+This skill is the order of work and states no rule of its own
 ([ADR-0003](../../../docs/adr/0003-procedures-as-skills.md)).
 
 ## 1. Decide the artifact

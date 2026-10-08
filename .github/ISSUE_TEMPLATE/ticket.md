@@ -8,7 +8,8 @@ labels: ticket
 <!-- A vertical slice: a narrow but complete path through every layer the change touches, demoable
      or verifiable on its own, sized to one fresh agent session. A child of its feature spec.
      Claim it by assigning yourself BEFORE any work, so parallel sessions skip it. Closed by the
-     pull request that lands it ("Closes #<this>"). Decided in docs/adr/0006-feature-layer.md. -->
+     pull request that lands it ("Closes #<this>"). Decided in
+     docs/adr/0006-feature-layer.md. -->
 
 ## Parent
 

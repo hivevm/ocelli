@@ -25,9 +25,9 @@ and the cap on open agent work.
   context, a stronger model where one exists; the parts the specification's *Threats & Forbidden
   Actions* protects get a second reviewer of a different kind and the human who owns the part.
 - **Unattended tickets under a cap**: tickets whose *Mode* allows it run without the human
-  ([ADR-0006](../../../../docs/adr/0006-feature-layer.md)); parallel sessions are kept apart by a
-  worktree or a container each; an unattended session claims a ticket from the frontier by
-  assigning itself; and the open agent work is capped at what the humans can review.
+  ([ADR-0006](../../../../docs/adr/0006-feature-layer.md)); parallel sessions are
+  kept apart by a worktree or a container each; an unattended session claims a ticket from the
+  frontier by assigning itself; and the open agent work is capped at what the humans can review.
 
 Whichever fits, the ADR answers: which agent and model implements and which reviews; how parallel
 sessions are kept apart, if there are any; how much agent work may be open at once; and which

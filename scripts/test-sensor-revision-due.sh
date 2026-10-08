@@ -5,9 +5,10 @@
 # Each case builds a throwaway git repository under a temporary directory with a
 # docs/ARCHITECTURE.md carrying the 'Last design revision' line and commits on chosen dates,
 # runs the sensor against it, and asserts the exit code and the line a reader would meet. The
-# cases cover the count from the first commit and from the commit that set the date, what is not
-# counted (a docs-only commit, a merge, a change of the number), the due message with its
-# directories and their changes, and the three ways the line fails to read.
+# cases cover the count from the first commit and from the commit that set the revision number,
+# a second revision on the same day restarting it, what is not counted (a docs-only commit, a
+# merge, a change of the number of changes), the due message with its directories and their
+# changes, and the ways the line fails to read.
 #
 # Usage:
 #     scripts/test-sensor-revision-due.sh
@@ -94,10 +95,10 @@ expect 0 "no revision yet counts from the first commit" "$d" "2 of 20 changes ou
 d="$(repo since-date)"
 code "$d" src/a.py 2026-01-10
 code "$d" src/b.py 2026-01-11
-overview "$d" "**Last design revision:** 2026-02-01, due after 20 changes."
+overview "$d" "**Last design revision:** 2026-02-01 (no. 1), due after 20 changes."
 commit "$d" "2026-02-01" "revision"
 code "$d" src/c.py 2026-03-01
-expect 0 "only the changes after the date count" "$d" "1 of 20 changes outside docs/ since 2026-02-01"
+expect 0 "only the changes after the revision count" "$d" "1 of 20 changes outside docs/ since 2026-02-01 (no. 1)"
 
 d="$(repo docs-only)"
 mkdir -p "$d/docs"; echo "x" > "$d/docs/GLOSSARY.md"
@@ -122,29 +123,52 @@ commit "$d" "2026-01-13" "lower the number"
 expect 0 "the number reached marks the revision due" "$d" "3 changes outside docs/ since the first commit, due after 3 — DUE"
 expect 0 "the due message lists the directories touched" "$d" "  - src/ (2 changes)"
 
-# The count starts at the commit that set the date, not at a moment the clock derives from it:
-# a change committed just after the revision, on the same day, counts whenever the sensor runs.
+# The count starts at the commit that set the revision number, not at a moment the clock derives
+# from it: a change committed just after the revision, on the same day, counts whenever the
+# sensor runs.
 d="$(repo same-day)"
 code "$d" src/a.py 2026-01-10
-overview "$d" "**Last design revision:** 2026-02-01, due after 20 changes."
+overview "$d" "**Last design revision:** 2026-02-01 (no. 1), due after 20 changes."
 commit_at "$d" "2026-02-01T00:00:10" "revision"
 mkdir -p "$d/src"; echo "x" >> "$d/src/b.py"
 commit_at "$d" "2026-02-01T00:00:20" "change on the day of the revision"
-expect 0 "a change on the day of the revision counts" "$d" "1 of 20 changes outside docs/ since 2026-02-01"
+expect 0 "a change on the day of the revision counts" "$d" "1 of 20 changes outside docs/ since 2026-02-01 (no. 1)"
+
+# A second revision on the day of the first raises the number, and the count restarts at it.
+d="$(repo second-revision-same-day)"
+overview "$d" "**Last design revision:** 2026-02-01 (no. 1), due after 20 changes."
+commit_at "$d" "2026-02-01T09:00:00" "first revision"
+code "$d" src/a.py 2026-02-01
+code "$d" src/b.py 2026-02-01
+overview "$d" "**Last design revision:** 2026-02-01 (no. 2), due after 20 changes."
+commit_at "$d" "2026-02-01T18:00:00" "second revision"
+code "$d" src/c.py 2026-02-02
+expect 0 "a second revision on the same day restarts the count" "$d" "1 of 20 changes outside docs/ since 2026-02-01 (no. 2)"
 
 d="$(repo number-only)"
-overview "$d" "**Last design revision:** 2026-02-01, due after 20 changes."
+overview "$d" "**Last design revision:** 2026-02-01 (no. 1), due after 20 changes."
 commit "$d" "2026-02-01" "revision"
 code "$d" src/a.py 2026-02-02
-overview "$d" "**Last design revision:** 2026-02-01, due after 30 changes."
+overview "$d" "**Last design revision:** 2026-02-01 (no. 1), due after 30 changes."
 commit "$d" "2026-02-03" "raise the number"
 code "$d" src/b.py 2026-02-04
-expect 0 "a change of the number alone does not reset the count" "$d" "2 of 30 changes"
+expect 0 "a change of the number of changes alone does not reset the count" "$d" "2 of 30 changes"
+
+# The revision number, not the date, anchors the count: a later revision number that is a
+# suffix of an earlier one's digits does not match the earlier line.
+d="$(repo number-digits)"
+overview "$d" "**Last design revision:** 2026-02-01 (no. 12), due after 20 changes."
+commit "$d" "2026-02-01" "revision twelve"
+code "$d" src/a.py 2026-02-02
+overview "$d" "**Last design revision:** 2026-02-03 (no. 2), due after 20 changes."
+commit "$d" "2026-02-03" "a revision numbered two"
+code "$d" src/b.py 2026-02-04
+expect 0 "the revision number anchors whole, not as a suffix" "$d" "1 of 20 changes outside docs/ since 2026-02-03 (no. 2)"
 
 d="$(repo uncommitted)"
 code "$d" src/a.py 2026-01-10
-overview "$d" "**Last design revision:** 2099-01-01, due after 20 changes."
-expect 0 "a date not yet committed counts nothing" "$d" "0 of 20 changes outside docs/ since 2099-01-01"
+overview "$d" "**Last design revision:** 2099-01-01 (no. 1), due after 20 changes."
+expect 0 "a revision number not yet committed counts nothing" "$d" "0 of 20 changes outside docs/ since 2099-01-01 (no. 1)"
 
 d="$(repo per-change)"
 mkdir -p "$d/src"; echo x > "$d/src/a.py"; echo x > "$d/src/b.py"
@@ -169,6 +193,11 @@ d="$(repo line-unreadable)"
 overview "$d" "**Last design revision:** soon, due after some changes."
 commit "$d" "2026-01-06" "garble the line"
 expect 1 "a line that names no date and no number" "$d" "is unreadable"
+
+d="$(repo line-no-revision-number)"
+overview "$d" "**Last design revision:** 2026-02-01, due after 20 changes."
+commit "$d" "2026-01-06" "a date without its revision number"
+expect 1 "a date without a revision number is unreadable" "$d" "is unreadable"
 
 d="$(repo number-zero)"
 overview "$d" "**Last design revision:** none yet, due after 0 changes."

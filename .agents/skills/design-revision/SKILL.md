@@ -7,8 +7,8 @@ description: Revisit the design of what recent work touched — the tickets of a
 
 The rule is [`AGENTS.md` §5](../../../AGENTS.md#5-quality-bar--definition-of-done); that a spec
 closes only after this has run, and that it is due after a number of changes without a spec, is
-decided in [ADR-0006](../../../docs/adr/0006-feature-layer.md). This skill runs in a fresh
-session and states no rule of its own
+decided in [ADR-0006](../../../docs/adr/0006-feature-layer.md). This skill runs in
+a fresh session and states no rule of its own
 ([ADR-0003](../../../docs/adr/0003-procedures-as-skills.md)).
 
 ## 1. Scope
@@ -74,5 +74,5 @@ is filed before the revision ends rather than implemented here: a ticket per can
 found, a ticket per check to write, a `proposed` ADR through `propose-adr` where a finding is a
 decision, a consolidating one included, and a drafted specification change handed to the human
 as an issue. Move the `Last design revision` line of
-[`docs/ARCHITECTURE.md`](../../../docs/ARCHITECTURE.md) to today's date. Then a spec in
-scope closes.
+[`docs/ARCHITECTURE.md`](../../../docs/ARCHITECTURE.md) to today's date and raise its revision
+number by one, also when a revision already ran today. Then a spec in scope closes.
