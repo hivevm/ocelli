@@ -22,6 +22,8 @@ pub fn write(
     let mut repo = Repository::discover(repo_path)?;
     let done = match write {
         Write::Fetch { remote } => fetch(&repo, remote, progress),
+        Write::Pull { branch, tip } => pull(&repo, branch, tip, progress),
+        Write::Push { branch, tip } => push(&repo, branch, tip, progress),
         Write::Commit { message, head } => {
             return commit(&repo, message, head.as_deref()).map(Some);
         }
@@ -487,17 +489,29 @@ fn not_checked_out_elsewhere(repo: &Repository, refname: &str) -> Result<()> {
 /// branch checked out in another working tree; libgit2 then finds every other path in the way
 /// before it writes anything, and the refusal names the paths.
 fn switch_to(repo: &Repository, target: &Commit, refname: Option<&str>) -> Result<()> {
+    if let Some(refname) = refname {
+        not_checked_out_elsewhere(repo, refname)?;
+    }
+    check_out(repo, target)?;
+    match refname {
+        Some(refname) => repo.set_head(refname)?,
+        None => repo.set_head_detached(target.id())?,
+    }
+    Ok(())
+}
+
+/// Checks `target`'s tree out over the checked-out one, the uncommitted changes carried along,
+/// or refuses with nothing changed, naming what is in the way: what a switch and a fast-forward
+/// both do to the working directory and the index.
+fn check_out(repo: &Repository, target: &Commit) -> Result<()> {
     if !matches!(
         repo.state(),
         RepositoryState::Clean | RepositoryState::Bisect
     ) {
         bail!(
-            "a {} is in progress: finish it with git before switching",
+            "a {} is in progress: finish it with git first",
             in_progress(repo.state())
         );
-    }
-    if let Some(refname) = refname {
-        not_checked_out_elsewhere(repo, refname)?;
     }
     let head = repo.head().ok().and_then(|h| h.peel_to_tree().ok());
     let goal = target.tree()?;
@@ -544,10 +558,6 @@ fn switch_to(repo: &Repository, target: &Commit, refname: Option<&str>) -> Resul
             );
         }
         result => result?,
-    }
-    match refname {
-        Some(refname) => repo.set_head(refname)?,
-        None => repo.set_head_detached(target.id())?,
     }
     Ok(())
 }
@@ -640,60 +650,257 @@ fn delete_branch(repo: &Repository, name: &str, tip: &str, merged: bool) -> Resu
 }
 
 /// Fetches `remote` through libgit2's own transports, as `git fetch <remote>` does, telling
-/// `progress` how far it has come and stopping where it says so (ADR-0035). No credential helper
-/// or command the repository's configuration names runs, and no server is trusted unseen: libgit2
-/// verifies a certificate against the system's trust store and an SSH host key against the
-/// developer's `known_hosts`, since no certificate check of Ocelli's own overrides it. A server
-/// that stalls is given up after [`SERVER_TIMEOUT_MS`].
+/// `progress` how far it has come and stopping where it says so (ADR-0035).
 fn fetch(repo: &Repository, name: &str, progress: &mut dyn FnMut(&str) -> bool) -> Result<()> {
-    set_server_timeouts();
     let mut remote = repo
         .find_remote(name)
         .with_context(|| format!("there is no remote named '{name}' any more"))?;
     let url = remote.url().unwrap_or_default().to_string();
-    let cancelled = std::cell::Cell::new(false);
-    let progress = std::cell::RefCell::new(progress);
-    let go_on = |message: &str| {
-        let go_on = (progress.borrow_mut())(message);
-        cancelled.set(!go_on);
-        go_on
-    };
-    let mut tried = Tried::default();
-    let mut callbacks = git2::RemoteCallbacks::new();
-    callbacks.credentials(|url, user, allowed| {
-        if !go_on(&format!("Fetching {name}: authenticating")) {
-            return Err(git2::Error::from_str("cancelled"));
-        }
-        tried.credentials(url, user, allowed)
-    });
-    callbacks.sideband_progress(|_| go_on(&format!("Fetching {name}: the server is preparing")));
-    callbacks.transfer_progress(|stats| {
-        go_on(&format!(
-            "Fetching {name}: {} of {} objects",
-            stats.received_objects(),
-            stats.total_objects()
-        ))
-    });
+    let transfer = Transfer::new("Fetching", name, progress);
     let mut options = git2::FetchOptions::new();
-    options.remote_callbacks(callbacks);
+    options.remote_callbacks(transfer.callbacks());
     let fetched = remote.fetch(&[] as &[&str], Some(&mut options), None);
     drop(options);
-    match fetched {
-        Ok(()) => Ok(()),
-        Err(_) if cancelled.get() => bail!("the fetch of {name} was cancelled"),
-        Err(e) if e.code() == ErrorCode::Certificate && is_ssh(&url) => bail!(
-            "{name}'s host key is not in your known_hosts: connect to it once with ssh, and check \
-             its fingerprint, before fetching from Ocelli"
-        ),
-        Err(e) if e.code() == ErrorCode::Certificate => bail!(
-            "{name}'s server could not be verified against the system's certificates: {}",
-            e.message()
-        ),
-        Err(e) if e.code() == ErrorCode::Auth => {
-            bail!("{name} refused the credentials: {}", e.message())
+    fetched.map_err(|e| transfer.refusal(e, &url, "fetching from"))
+}
+
+/// One transfer with a remote, a fetch or a push, through libgit2's own transports (ADR-0035):
+/// what it tells `progress`, whether the developer stopped it, and how a failure reads. No
+/// credential helper or command the repository's configuration names runs, and no server is
+/// trusted unseen: libgit2 verifies a certificate against the system's trust store and an SSH
+/// host key against the developer's `known_hosts`, since no certificate check of Ocelli's own
+/// overrides it. A server that stalls is given up after [`SERVER_TIMEOUT_MS`].
+struct Transfer<'p> {
+    doing: &'static str,
+    name: String,
+    progress: std::cell::RefCell<&'p mut dyn FnMut(&str) -> bool>,
+    cancelled: std::cell::Cell<bool>,
+    tried: std::cell::RefCell<Tried>,
+}
+
+impl<'p> Transfer<'p> {
+    fn new(doing: &'static str, name: &str, progress: &'p mut dyn FnMut(&str) -> bool) -> Self {
+        set_server_timeouts();
+        Self {
+            doing,
+            name: name.to_string(),
+            progress: std::cell::RefCell::new(progress),
+            cancelled: std::cell::Cell::new(false),
+            tried: Default::default(),
         }
-        Err(e) => Err(e.into()),
     }
+
+    /// Tells the developer how far the transfer has come; false once they stopped it.
+    fn go_on(&self, how_far: &str) -> bool {
+        let go_on =
+            (self.progress.borrow_mut())(&format!("{} {}: {how_far}", self.doing, self.name));
+        self.cancelled.set(!go_on);
+        go_on
+    }
+
+    fn callbacks(&self) -> git2::RemoteCallbacks<'_> {
+        let mut callbacks = git2::RemoteCallbacks::new();
+        callbacks.credentials(|url, user, allowed| {
+            if !self.go_on("authenticating") {
+                return Err(git2::Error::from_str("cancelled"));
+            }
+            self.tried.borrow_mut().credentials(url, user, allowed)
+        });
+        callbacks.sideband_progress(|_| self.go_on("the server is preparing"));
+        callbacks.transfer_progress(|stats| {
+            self.go_on(&format!(
+                "{} of {} objects",
+                stats.received_objects(),
+                stats.total_objects()
+            ))
+        });
+        // libgit2 offers no way to stop a push once its objects are sent: told, not asked.
+        callbacks.push_transfer_progress(|current, total, _| {
+            (self.progress.borrow_mut())(&format!(
+                "{} {}: {current} of {total} objects",
+                self.doing, self.name
+            ));
+        });
+        callbacks
+    }
+
+    /// What a failed transfer tells the developer.
+    fn refusal(&self, e: git2::Error, url: &str, direction: &str) -> anyhow::Error {
+        let name = &self.name;
+        let doing = self.doing.to_lowercase();
+        if self.cancelled.get() {
+            return anyhow::anyhow!("{doing} {name} was cancelled");
+        }
+        match e.code() {
+            ErrorCode::Certificate if is_ssh(url) => anyhow::anyhow!(
+                "{name}'s host key is not in your known_hosts: connect to it once with ssh, and \
+                 check its fingerprint, before {direction} it from Ocelli"
+            ),
+            ErrorCode::Certificate => anyhow::anyhow!(
+                "{name}'s server could not be verified against the system's certificates: {}",
+                e.message()
+            ),
+            ErrorCode::Auth => anyhow::anyhow!("{name} refused the credentials: {}", e.message()),
+            ErrorCode::NotFastForward => {
+                anyhow::anyhow!(
+                    "{name} has commits the branch does not: the remote is ahead, so pull first"
+                )
+            }
+            _ => e.into(),
+        }
+    }
+}
+
+/// Pulls the checked-out branch `name`, still at `tip`, as `git pull --ff-only` does: fetches
+/// its upstream's remote and fast-forwards to the upstream, the uncommitted changes carried along;
+/// a branch that has diverged is refused, the fetch kept (ADR-0035).
+fn pull(
+    repo: &Repository,
+    name: &str,
+    tip: &str,
+    progress: &mut dyn FnMut(&str) -> bool,
+) -> Result<()> {
+    let branch = branch_as_shown(repo, name, tip)?;
+    if !branch.is_head() {
+        bail!("'{name}' is not checked out: a pull moves the checked-out branch");
+    }
+    let refname = refname_of(&branch)?;
+    let remote = repo
+        .branch_upstream_remote(&refname)
+        .ok()
+        .and_then(|remote| remote.as_str().map(str::to_string))
+        .with_context(|| format!("'{name}' has no upstream to pull from"))?;
+    // An upstream on `.` is a local branch, with nothing to fetch.
+    if remote != "." {
+        fetch(repo, &remote, progress)?;
+    }
+    let upstream = repo
+        .find_branch(name, BranchType::Local)?
+        .upstream()
+        .map_err(|_| anyhow::anyhow!("the upstream of '{name}' is not there to pull from"))?;
+    let theirs = upstream
+        .get()
+        .target()
+        .context("the upstream points at nothing")?;
+    let ours = Oid::from_str(tip)?;
+    if theirs == ours || repo.graph_descendant_of(ours, theirs)? {
+        return Ok(());
+    }
+    if !repo.graph_descendant_of(theirs, ours)? {
+        bail!(
+            "'{name}' and its upstream have diverged: merge or rebase them with git; only the \
+             fetch was done"
+        );
+    }
+    let target = repo.find_commit(theirs)?;
+    // The branch is locked before anything changes, and checked against `tip` again under the
+    // lock: a commit made while the fetch ran is neither lost nor checked out over, and a lock
+    // another program holds refuses the pull before the working directory moves.
+    let mut transaction = repo.transaction()?;
+    transaction
+        .lock_ref(&refname)
+        .with_context(|| format!("'{name}' is locked by another program: try again later"))?;
+    branch_as_shown(repo, name, tip)?;
+    check_out(repo, &target)?;
+    transaction.set_target(&refname, theirs, None, "pull: Fast-forward")?;
+    transaction.commit()?;
+    Ok(())
+}
+
+/// Pushes the checked-out branch `name`, still at `tip`, as `git push` does, never by force: to
+/// its upstream, or to the remote a fetch reaches without one named, under its own name, which
+/// then becomes its upstream. A push the remote refuses, one that is not a fast-forward, changes
+/// nothing (ADR-0035).
+fn push(
+    repo: &Repository,
+    name: &str,
+    tip: &str,
+    progress: &mut dyn FnMut(&str) -> bool,
+) -> Result<()> {
+    let branch = branch_as_shown(repo, name, tip)?;
+    if !branch.is_head() {
+        bail!("'{name}' is not checked out: a push sends the checked-out branch");
+    }
+    let refname = refname_of(&branch)?;
+    let (remote_name, destination, first) = push_destination(repo, name, &refname)?;
+    let mut remote = repo
+        .find_remote(&remote_name)
+        .with_context(|| format!("there is no remote named '{remote_name}' any more"))?;
+    let url = remote
+        .pushurl()
+        .or(remote.url())
+        .unwrap_or_default()
+        .to_string();
+    let transfer = Transfer::new("Pushing", &remote_name, progress);
+    let refused = std::cell::RefCell::new(None);
+    let mut callbacks = transfer.callbacks();
+    callbacks.push_update_reference(|_, status| {
+        if let Some(why) = status {
+            *refused.borrow_mut() = Some(why.to_string());
+        }
+        Ok(())
+    });
+    let mut options = git2::PushOptions::new();
+    options.remote_callbacks(callbacks);
+    // No `+`: a push that is not a fast-forward is the remote's to refuse.
+    let pushed = remote.push(&[format!("{refname}:{destination}")], Some(&mut options));
+    drop(options);
+    pushed.map_err(|e| transfer.refusal(e, &url, "pushing to"))?;
+    if let Some(why) = refused.into_inner() {
+        bail!("{remote_name} refused '{name}' ({why}): the remote is ahead, so pull first");
+    }
+    if first {
+        repo.find_branch(name, BranchType::Local)?
+            .set_upstream(Some(&format!("{remote_name}/{name}")))
+            .with_context(|| format!("'{name}' was pushed, but its upstream could not be set"))?;
+    }
+    Ok(())
+}
+
+/// Where a push of the branch `name` goes, as `git push` decides with `push.default` and the
+/// branch's push remote: the remote, the reference there, and whether the branch has no upstream
+/// yet, which the push then sets, as `git push -u` would. `simple`, the default, refuses an
+/// upstream named differently; `nothing` and `matching` are left to `git`.
+fn push_destination(
+    repo: &Repository,
+    name: &str,
+    refname: &str,
+) -> Result<(String, String, bool)> {
+    let config = repo.config()?;
+    let setting = |key: &str| config.get_string(key).ok().filter(|v| !v.is_empty());
+    let upstream = repo
+        .branch_upstream_remote(refname)
+        .ok()
+        .and_then(|remote| remote.as_str().map(str::to_string));
+    if upstream.as_deref() == Some(".") {
+        bail!("the upstream of '{name}' is a local branch, which a push does not reach");
+    }
+    let remote = setting(&format!("branch.{name}.pushRemote"))
+        .or_else(|| setting("remote.pushDefault"))
+        .or_else(|| upstream.clone())
+        .or_else(|| crate::refs::default_remote(repo, &crate::refs::remote_names(repo)))
+        .with_context(|| format!("there is no remote to push '{name}' to"))?;
+    let merge = setting(&format!("branch.{name}.merge"));
+    let to_upstream = upstream.as_deref() == Some(remote.as_str());
+    let mode = setting("push.default").unwrap_or_else(|| "simple".to_string());
+    let destination = match mode.as_str() {
+        "nothing" => bail!("push.default is nothing: name what to push with git"),
+        "matching" => bail!("push.default is matching, which pushes every branch: use git for it"),
+        "current" => refname.to_string(),
+        "upstream" | "tracking" => match merge.filter(|_| to_upstream) {
+            Some(merge) if merge.starts_with("refs/heads/") => merge,
+            _ => bail!("'{name}' has no upstream branch on {remote} to push to"),
+        },
+        "simple" => match merge.filter(|_| to_upstream) {
+            Some(merge) if merge != refname => bail!(
+                "the upstream of '{name}' is named differently ({merge}): push it with git, \
+                 naming where"
+            ),
+            _ => refname.to_string(),
+        },
+        other => bail!("push.default is {other}, which Ocelli does not know: use git"),
+    };
+    Ok((remote, destination, upstream.is_none()))
 }
 
 /// How long libgit2 waits for a server to connect, and then for each read, before it gives up.

@@ -110,6 +110,13 @@ pub enum Write {
     },
     /// Fetches `remote`, updating its remote branches (ADR-0035).
     Fetch { remote: String },
+    /// Pulls the checked-out branch `branch`, expected at `tip`, from its upstream, fast-forward
+    /// only (ADR-0035).
+    Pull { branch: String, tip: String },
+    /// Pushes the checked-out branch `branch`, expected at `tip`, to its upstream, or to the
+    /// remote's branch of its name, set as its upstream, where it has none; never by force
+    /// (ADR-0035).
+    Push { branch: String, tip: String },
 }
 
 impl Write {
@@ -128,7 +135,9 @@ impl Write {
             | Write::Detach { .. }
             | Write::TrackRemote { .. }
             | Write::DeleteBranch { merged: true, .. }
-            | Write::Fetch { .. } => None,
+            | Write::Fetch { .. }
+            | Write::Pull { .. }
+            | Write::Push { .. } => None,
             Write::DeleteTag {
                 name,
                 annotated: true,

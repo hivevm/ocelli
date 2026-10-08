@@ -544,6 +544,8 @@ impl App {
         match key.code {
             KeyCode::Char('q') => self.quit = true,
             KeyCode::Char('f') if self.focus != Focus::Sidebar => self.start_fetch(None),
+            KeyCode::Char('U') => self.start_pull(),
+            KeyCode::Char('P') => self.start_push(),
             KeyCode::Char('1') => self.side.toggle_minimised(),
             KeyCode::Char('T') => self.theme = self.theme.toggled(),
             KeyCode::Char('o') => self.modal = Some(Modal::Open(self.repo.display().to_string())),
@@ -916,6 +918,61 @@ impl App {
         self.status = format!("Fetching {remote}… Esc cancels");
         self.queue(Write::Fetch { remote }, Confirmation::Absent);
         self.cancellable = true;
+    }
+
+    /// `U`: pulls the checked-out branch from its upstream, fast-forward only
+    /// (ADR-0035); `Esc` cancels it while it fetches.
+    fn start_pull(&mut self) {
+        let Some(head) = self
+            .data
+            .as_ref()
+            .and_then(|d| d.locals.iter().find(|b| b.is_head))
+        else {
+            self.status = "No branch is checked out to pull".to_string();
+            return;
+        };
+        if head.upstream.is_none() {
+            self.status = format!("{} has no upstream to pull from", head.name);
+            return;
+        }
+        if self.writing {
+            self.status = "A write is still running".to_string();
+            return;
+        }
+        let write = Write::Pull {
+            branch: head.name.clone(),
+            tip: head.sha.clone(),
+        };
+        self.status = format!("Pulling {}… Esc cancels", head.name);
+        self.queue(write, Confirmation::Absent);
+        self.cancellable = true;
+    }
+
+    /// `P`: pushes the checked-out branch to its upstream, or to the remote a
+    /// fetch reaches, under its own name; never by force (ADR-0035).
+    fn start_push(&mut self) {
+        let Some(data) = self.data.as_ref() else {
+            return;
+        };
+        let Some(head) = data.locals.iter().find(|b| b.is_head) else {
+            self.status = "No branch is checked out to push".to_string();
+            return;
+        };
+        if head.upstream.is_none() && data.default_remote.is_none() {
+            self.status = format!("There is no remote to push {} to", head.name);
+            return;
+        }
+        if self.writing {
+            self.status = "A write is still running".to_string();
+            return;
+        }
+        let write = Write::Push {
+            branch: head.name.clone(),
+            tip: head.sha.clone(),
+        };
+        // libgit2 cannot stop a push once its objects are sent, so none is offered.
+        self.status = format!("Pushing {}…", head.name);
+        self.queue(write, Confirmation::Absent);
     }
 
     /// `b` on a commit: asks for the name of a branch there.
@@ -2211,6 +2268,45 @@ pub(crate) mod tests {
             (app.write.clone(), app.status.as_str()),
             (None, "No remote to fetch")
         );
+    }
+
+    #[test]
+    // Verifies: ADR-0035, G-4
+    fn capital_u_pulls_the_checked_out_branch_where_it_has_an_upstream() {
+        let mut app = loaded_app();
+        app.data.as_mut().unwrap().locals[0].upstream = Some("origin/main".into());
+        press(&mut app, KeyCode::Char('U'));
+        let pull = Write::Pull {
+            branch: "main".into(),
+            tip: "d".into(),
+        };
+        assert_eq!(app.write.take(), Some((pull, Confirmation::Absent)));
+        assert!(app.cancellable);
+
+        let mut app = loaded_app();
+        app.data.as_mut().unwrap().locals[0].upstream = None;
+        press(&mut app, KeyCode::Char('U'));
+        assert_eq!(app.write, None);
+        assert_eq!(app.status, "main has no upstream to pull from");
+    }
+
+    #[test]
+    // Verifies: ADR-0035, G-4
+    fn capital_p_pushes_the_checked_out_branch_where_a_remote_takes_it() {
+        let mut app = loaded_app();
+        press(&mut app, KeyCode::Char('P'));
+        let push = Write::Push {
+            branch: "main".into(),
+            tip: "d".into(),
+        };
+        assert_eq!(app.write.take(), Some((push, Confirmation::Absent)));
+
+        let mut app = loaded_app();
+        app.data.as_mut().unwrap().default_remote = None;
+        app.data.as_mut().unwrap().locals[0].upstream = None;
+        press(&mut app, KeyCode::Char('P'));
+        assert_eq!(app.write, None);
+        assert_eq!(app.status, "There is no remote to push main to");
     }
 
     #[test]

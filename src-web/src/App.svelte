@@ -82,8 +82,22 @@
   >(null);
   // Whether the dialog that describes a new stash is open.
   let stashing = $state(false);
-  // Whether a fetch runs, which the toolbar's button then cancels (ADR-0035).
+  // Whether a transfer to or from a remote runs, and whether the toolbar's button can cancel it:
+  // libgit2 cannot stop a push once its objects are sent (ADR-0035).
   let fetching = $state(false);
+  let cancellable = $state(false);
+  // The checked-out branch, which a pull moves, where it has an upstream.
+  const pullable = $derived(repoRefs?.locals.find(b => b.isHead && b.upstream !== null) ?? null);
+
+  /** Runs a transfer, the toolbar's buttons turning into one that cancels it. */
+  async function transfer(write: Write, doing: string): Promise<void> {
+    fetching = true;
+    cancellable = write.kind !== 'push';
+    status = doing;
+    const error = await performWrite(write);
+    fetching = false;
+    if (error) report(error);
+  }
 
   /** Fetches the remote a fetch reaches without one named; the reload after shows its branches. */
   async function fetchRemote(): Promise<void> {
@@ -92,11 +106,30 @@
       status = 'No remote to fetch';
       return;
     }
-    fetching = true;
-    status = `Fetching ${remote}…`;
-    const error = await performWrite({ kind: 'fetch', remote });
-    fetching = false;
-    if (error) report(error);
+    await transfer({ kind: 'fetch', remote }, `Fetching ${remote}…`);
+  }
+
+  // The checked-out branch, which a push sends, where a remote takes it.
+  const pushable = $derived(
+    repoRefs?.locals.find(b => b.isHead && (b.upstream !== null || repoRefs?.defaultRemote)) ?? null,
+  );
+
+  /** Pushes the checked-out branch to its upstream, or sets one; never by force. */
+  async function pushBranch(): Promise<void> {
+    if (!pushable) return;
+    await transfer(
+      { kind: 'push', branch: pushable.name, tip: pushable.sha },
+      `Pushing ${pushable.name}…`,
+    );
+  }
+
+  /** Pulls the checked-out branch from its upstream, fast-forward only. */
+  async function pullBranch(): Promise<void> {
+    if (!pullable) return;
+    await transfer(
+      { kind: 'pull', branch: pullable.name, tip: pullable.sha },
+      `Pulling ${pullable.name}…`,
+    );
   }
   const selectedTags = $derived(
     selectedNode ? (repoRefs?.tags ?? []).filter(t => t.sha === selectedNode?.sha) : [],
@@ -447,11 +480,23 @@
       Stash…
     </button>
     {#if fetching}
-      <button class="tb-btn" onclick={() => invoke('cancel_write').catch(report)}>Cancel fetch</button>
+      <button class="tb-btn" disabled={!cancellable}
+              onclick={() => invoke('cancel_write').catch(report)}>
+        {cancellable ? 'Cancel' : 'Pushing…'}
+      </button>
     {:else}
       <button class="tb-btn" onclick={fetchRemote} disabled={!repoRefs?.defaultRemote}
               title="Fetch {repoRefs?.defaultRemote ?? 'a remote'}">
         Fetch
+      </button>
+      <button class="tb-btn" onclick={pullBranch} disabled={!pullable}
+              title={pullable ? `Pull ${pullable.name} from ${pullable.upstream}, fast-forward only`
+                : 'The checked-out branch has no upstream to pull from'}>
+        Pull
+      </button>
+      <button class="tb-btn" onclick={pushBranch} disabled={!pushable}
+              title={pushable ? `Push ${pushable.name}` : 'There is no branch or remote to push to'}>
+        Push
       </button>
     {/if}
 
