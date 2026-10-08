@@ -613,6 +613,7 @@ pub(crate) mod tests {
                 name: "super".into(),
                 path: "/super".into(),
             }),
+            default_remote: Some("origin".into()),
         }
     }
 

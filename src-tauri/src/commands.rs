@@ -4,6 +4,7 @@ use ocelli_core::port::{self, Confirmation, RepositoryReader, Write};
 use ocelli_git::{GitReader, GitWriter};
 use serde::Serialize;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use tauri::{AppHandle, Emitter, State, Window};
 
@@ -14,6 +15,10 @@ pub struct AppState {
     pub startup_repo: Mutex<Option<String>>,
     /// The history of the newest load (ADR-0031).
     pub session: Arc<Session>,
+    /// The flag that stops the write that runs, replaced for each write.
+    pub cancel: Mutex<Arc<AtomicBool>>,
+    /// Whether a write runs: the host takes one at a time.
+    pub writing: AtomicBool,
 }
 
 /// The repository named on the command line, if any, the first time it is asked for. The web
@@ -249,6 +254,7 @@ pub fn write_discards(write: Write) -> Option<String> {
 pub async fn perform_write(
     write: Write,
     confirmed: bool,
+    window: Window,
     state: State<'_, AppState>,
 ) -> Result<Option<String>, String> {
     let confirmation = if confirmed {
@@ -256,23 +262,44 @@ pub async fn perform_write(
     } else {
         Confirmation::Absent
     };
-    perform(write, confirmation, &state).await
-}
-
-/// Performs `write` on the open repository through the core, on the blocking pool.
-async fn perform(
-    write: Write,
-    confirmation: Confirmation,
-    state: &State<'_, AppState>,
-) -> Result<Option<String>, String> {
     let repo_path = match state.current_repo.lock().unwrap().clone() {
         Some(p) => p,
         None => return Err("No repository open".into()),
     };
-    tokio::task::spawn_blocking(move || port::perform(&GitWriter, &repo_path, &write, confirmation))
-        .await
+    // One write at a time, so that a cancel reaches the write it was meant for.
+    if state.writing.swap(true, Ordering::AcqRel) {
+        return Err("A write is still running".into());
+    }
+    // A write that takes long reports how far it has come as `write-progress` events, at most
+    // every tenth of a second, and stops once `cancel_write` sets the flag this write was handed
+    // (ADR-0035).
+    let cancel = Arc::new(AtomicBool::new(false));
+    *state.cancel.lock().unwrap() = Arc::clone(&cancel);
+    let written = tokio::task::spawn_blocking(move || {
+        let mut told: Option<std::time::Instant> = None;
+        let mut progress = |p: &str| {
+            if told.is_none_or(|t| t.elapsed() >= PROGRESS_EVERY) {
+                told = Some(std::time::Instant::now());
+                window.report("write-progress", p);
+            }
+            !cancel.load(Ordering::Relaxed)
+        };
+        port::perform(&GitWriter, &repo_path, &write, confirmation, &mut progress)
+    })
+    .await;
+    state.writing.store(false, Ordering::Release);
+    written
         .map_err(|e| e.to_string())?
         .map_err(|e| e.to_string())
+}
+
+/// How often a write's progress reaches the web interface at most.
+const PROGRESS_EVERY: std::time::Duration = std::time::Duration::from_millis(100);
+
+/// Stops the write that runs, where it reports its progress.
+#[tauri::command]
+pub fn cancel_write(state: State<'_, AppState>) {
+    state.cancel.lock().unwrap().store(true, Ordering::Relaxed);
 }
 
 /// Returns the diff lines for a single file in a commit.

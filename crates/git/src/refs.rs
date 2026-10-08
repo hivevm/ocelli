@@ -66,7 +66,22 @@ pub fn load_repo_refs(repo_path: &Path) -> Result<RepoRefs> {
         tags: load_tags(&repo),
         submodules: load_submodules(&repo),
         parent: find_parent(&repo),
+        default_remote: default_remote(&repo, &remote_names),
     })
+}
+
+/// The remote of the checked-out branch's upstream, else `origin`, else the only remote.
+pub(crate) fn default_remote(repo: &Repository, names: &[String]) -> Option<String> {
+    repo.head()
+        .ok()
+        .filter(|head| head.is_branch())
+        .and_then(|head| head.name().map(str::to_string))
+        .and_then(|branch| repo.branch_upstream_remote(&branch).ok())
+        .and_then(|remote| remote.as_str().map(str::to_string))
+        // An upstream on `.` or on a URL names no remote a fetch could reach.
+        .filter(|remote| names.contains(remote))
+        .or_else(|| names.iter().find(|n| *n == "origin").cloned())
+        .or_else(|| (names.len() == 1).then(|| names[0].clone()))
 }
 
 /// The first seven characters of a SHA, matching the graph's short form.
@@ -74,7 +89,7 @@ fn short(sha: &str) -> String {
     sha[..sha.len().min(7)].to_string()
 }
 
-fn remote_names(repo: &Repository) -> Vec<String> {
+pub(crate) fn remote_names(repo: &Repository) -> Vec<String> {
     repo.remotes()
         .map(|names| names.iter().flatten().map(str::to_string).collect())
         .unwrap_or_default()

@@ -6,7 +6,7 @@
 
 #![cfg(unix)]
 
-use ocelli_core::port::{RepositoryWriter, Write};
+use ocelli_core::port::{RepositoryReader, RepositoryWriter, Write};
 use ocelli_git::GitWriter;
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -151,6 +151,22 @@ fn a_tag_on_a_commit_no_longer_there_or_with_a_bad_name_is_refused() {
 fn writing_a_repository_runs_none_of_its_programs() {
     let scratch = with_file("programs");
     let one = git(&scratch.0, &["rev-parse", "HEAD"]);
+    let remote = Scratch::new("programs-remote");
+    std::fs::remove_dir_all(&remote.0).unwrap();
+    git(
+        Path::new("/"),
+        &[
+            "clone",
+            "--quiet",
+            "--bare",
+            scratch.0.to_str().unwrap(),
+            remote.0.to_str().unwrap(),
+        ],
+    );
+    git(
+        &scratch.0,
+        &["remote", "add", "origin", remote.0.to_str().unwrap()],
+    );
     // Outside the repository, so that stashing the untracked files leaves them be.
     let tools = Scratch::new("programs-ran");
     let markers = programs::set_everywhere(&scratch.0, &tools.0);
@@ -222,6 +238,27 @@ fn writing_a_repository_runs_none_of_its_programs() {
         merged: true,
     };
     GitWriter.write(&scratch.0, &delete).unwrap();
+    let fetch = Write::Fetch {
+        remote: "origin".into(),
+    };
+    GitWriter.write(&scratch.0, &fetch).unwrap();
+    // A push is where git runs pre-push.
+    let back = Write::SwitchBranch {
+        name: "main".into(),
+        tip: made.clone(),
+    };
+    GitWriter.write(&scratch.0, &back).unwrap();
+    let push = Write::Push {
+        branch: "main".into(),
+        tip: made.clone(),
+    };
+    GitWriter.write(&scratch.0, &push).unwrap();
+    // The push set main's upstream, so a pull fetches it and finds nothing to move.
+    let pull = Write::Pull {
+        branch: "main".into(),
+        tip: made.clone(),
+    };
+    GitWriter.write(&scratch.0, &pull).unwrap();
     let ran = markers.ran();
     assert!(ran.is_empty(), "programs ran: {ran:?}");
 }
@@ -1334,4 +1371,308 @@ fn a_branch_whose_name_clashes_with_another_is_refused_with_nothing_changed() {
     let error = GitWriter.write(&scratch.0, &create).unwrap_err();
     assert!(error.to_string().contains("in the way"), "{error}");
     assert_eq!(all_of(&scratch.0), before);
+}
+
+/// A bare remote made with `git` from a repository with `f`, a clone of it with `origin` pointing
+/// there, and a commit pushed to the remote after the clone: (remote, clone, the commit).
+fn with_remote(name: &str) -> (Scratch, Scratch, String) {
+    let work = with_file(&format!("{name}-work"));
+    let remote = Scratch::new(&format!("{name}-remote"));
+    std::fs::remove_dir_all(&remote.0).unwrap();
+    git(
+        Path::new("/"),
+        &[
+            "clone",
+            "--quiet",
+            "--bare",
+            work.0.to_str().unwrap(),
+            remote.0.to_str().unwrap(),
+        ],
+    );
+    let clone = Scratch::new(&format!("{name}-clone"));
+    std::fs::remove_dir_all(&clone.0).unwrap();
+    git(
+        Path::new("/"),
+        &[
+            "clone",
+            "--quiet",
+            remote.0.to_str().unwrap(),
+            clone.0.to_str().unwrap(),
+        ],
+    );
+    write_file(&work.0, "f", "later\n");
+    git(&work.0, &["commit", "--quiet", "-am", "later"]);
+    git(
+        &work.0,
+        &["push", "--quiet", remote.0.to_str().unwrap(), "main"],
+    );
+    let later = git(&work.0, &["rev-parse", "HEAD"]);
+    (remote, clone, later)
+}
+
+#[test]
+// Verifies: ADR-0035, G-4
+fn a_fetch_moves_the_remote_branches_as_git_fetch_does() {
+    let (_remote, clone, later) = with_remote("fetch");
+    let before = all_of(&clone.0);
+    let mut told = Vec::new();
+    GitWriter
+        .write_reporting(
+            &clone.0,
+            &Write::Fetch {
+                remote: "origin".into(),
+            },
+            &mut |p| {
+                told.push(p.to_string());
+                true
+            },
+        )
+        .unwrap();
+    assert_eq!(git(&clone.0, &["rev-parse", "origin/main"]), later);
+    assert_eq!(all_of(&clone.0), before, "only the remote branches move");
+    let refs = ocelli_git::GitReader.load_refs(&clone.0).unwrap();
+    assert_eq!(
+        refs.default_remote.as_deref(),
+        Some("origin"),
+        "main's upstream's remote"
+    );
+    assert!(!told.is_empty(), "the fetch told how far it came");
+    assert!(
+        told.iter().all(|t| t.starts_with("Fetching origin")),
+        "{told:?}"
+    );
+}
+
+#[test]
+// Verifies: ADR-0035
+fn a_fetch_cancelled_or_of_no_remote_changes_nothing() {
+    let (_remote, clone, _) = with_remote("fetch-cancel");
+    let origin = git(&clone.0, &["rev-parse", "origin/main"]);
+    let fetch = |name: &str| Write::Fetch {
+        remote: name.into(),
+    };
+    let error = GitWriter
+        .write_reporting(&clone.0, &fetch("origin"), &mut |_| false)
+        .unwrap_err();
+    assert!(error.to_string().contains("cancelled"), "{error}");
+    let error = GitWriter.write(&clone.0, &fetch("nowhere")).unwrap_err();
+    assert!(error.to_string().contains("no remote named"), "{error}");
+    assert_eq!(git(&clone.0, &["rev-parse", "origin/main"]), origin);
+}
+
+fn pull_of(dir: &Path, branch: &str) -> Write {
+    Write::Pull {
+        branch: branch.into(),
+        tip: git(dir, &["rev-parse", branch]),
+    }
+}
+
+#[test]
+// Verifies: ADR-0035, G-4
+fn a_pull_fast_forwards_the_checked_out_branch_as_git_pull_ff_only_does() {
+    let (_remote, clone, later) = with_remote("pull");
+    write_file(&clone.0, "mine", "untracked\n");
+    GitWriter
+        .write(&clone.0, &pull_of(&clone.0, "main"))
+        .unwrap();
+    assert_eq!(git(&clone.0, &["rev-parse", "HEAD"]), later);
+    assert_eq!(head_of(&clone.0), "main");
+    assert_eq!(
+        std::fs::read_to_string(clone.0.join("f")).unwrap(),
+        "later\n"
+    );
+    assert_eq!(
+        status(&clone.0),
+        "?? mine",
+        "the untracked file is carried along"
+    );
+
+    // Up to date: nothing to do, nothing done.
+    let before = all_of(&clone.0);
+    GitWriter
+        .write(&clone.0, &pull_of(&clone.0, "main"))
+        .unwrap();
+    assert_eq!(all_of(&clone.0), before);
+}
+
+#[test]
+// Verifies: ADR-0035, G-4
+fn a_pull_is_refused_where_the_branch_diverged_has_no_upstream_or_is_not_checked_out() {
+    let (_remote, clone, later) = with_remote("pull-refused");
+    write_file(&clone.0, "f", "mine\n");
+    git(&clone.0, &["commit", "--quiet", "-am", "mine"]);
+    let before = all_of(&clone.0);
+    let error = GitWriter
+        .write(&clone.0, &pull_of(&clone.0, "main"))
+        .unwrap_err();
+    assert!(error.to_string().contains("have diverged"), "{error}");
+    assert_eq!(all_of(&clone.0), before);
+    assert_eq!(
+        git(&clone.0, &["rev-parse", "origin/main"]),
+        later,
+        "the fetch was done"
+    );
+
+    git(&clone.0, &["branch", "loose"]);
+    git(&clone.0, &["switch", "--quiet", "loose"]);
+    let error = GitWriter
+        .write(&clone.0, &pull_of(&clone.0, "loose"))
+        .unwrap_err();
+    assert!(error.to_string().contains("no upstream"), "{error}");
+    let error = GitWriter
+        .write(&clone.0, &pull_of(&clone.0, "main"))
+        .unwrap_err();
+    assert!(error.to_string().contains("not checked out"), "{error}");
+}
+
+fn push_of(dir: &Path, branch: &str) -> Write {
+    Write::Push {
+        branch: branch.into(),
+        tip: git(dir, &["rev-parse", branch]),
+    }
+}
+
+#[test]
+// Verifies: ADR-0035, G-4
+fn a_push_sends_the_branch_to_its_upstream_or_sets_one_as_git_push_does() {
+    let (remote, clone, _) = with_remote("push");
+    GitWriter
+        .write(&clone.0, &pull_of(&clone.0, "main"))
+        .unwrap();
+    write_file(&clone.0, "f", "pushed\n");
+    git(&clone.0, &["commit", "--quiet", "-am", "pushed"]);
+    let pushed = git(&clone.0, &["rev-parse", "HEAD"]);
+    GitWriter
+        .write(&clone.0, &push_of(&clone.0, "main"))
+        .unwrap();
+    assert_eq!(git(&remote.0, &["rev-parse", "main"]), pushed);
+    assert_eq!(git(&clone.0, &["rev-parse", "origin/main"]), pushed);
+
+    git(&clone.0, &["switch", "--quiet", "-c", "topic"]);
+    GitWriter
+        .write(&clone.0, &push_of(&clone.0, "topic"))
+        .unwrap();
+    assert_eq!(git(&remote.0, &["rev-parse", "topic"]), pushed);
+    assert_eq!(
+        git(&clone.0, &["rev-parse", "--abbrev-ref", "topic@{upstream}"]),
+        "origin/topic"
+    );
+}
+
+#[test]
+// Verifies: ADR-0035, G-4
+fn a_push_that_is_not_a_fast_forward_is_refused_with_nothing_changed() {
+    let (remote, clone, later) = with_remote("push-refused");
+    write_file(&clone.0, "f", "mine\n");
+    git(&clone.0, &["commit", "--quiet", "-am", "mine"]);
+    let before = all_of(&clone.0);
+    let error = GitWriter
+        .write(&clone.0, &push_of(&clone.0, "main"))
+        .unwrap_err();
+    assert!(error.to_string().contains("pull first"), "{error}");
+    assert_eq!(
+        git(&remote.0, &["rev-parse", "main"]),
+        later,
+        "the remote kept its branch"
+    );
+    assert_eq!(all_of(&clone.0), before);
+}
+
+#[test]
+// Verifies: ADR-0035, G-4
+fn a_commit_made_while_a_pull_fetches_is_neither_lost_nor_checked_out_over() {
+    let (_remote, clone, _) = with_remote("pull-race");
+    let pull = pull_of(&clone.0, "main");
+    let dir = clone.0.clone();
+    let mut committed = false;
+    let error = GitWriter
+        .write_reporting(&clone.0, &pull, &mut |_| {
+            if !committed {
+                committed = true;
+                write_file(&dir, "x", "made meanwhile\n");
+                git(&dir, &["add", "x"]);
+                git(&dir, &["commit", "--quiet", "-m", "meanwhile"]);
+            }
+            true
+        })
+        .unwrap_err();
+    assert!(
+        error.to_string().contains("no longer where it was shown"),
+        "{error}"
+    );
+    assert_eq!(git(&clone.0, &["log", "-1", "--format=%s"]), "meanwhile");
+    assert_eq!(
+        std::fs::read_to_string(clone.0.join("x")).unwrap(),
+        "made meanwhile\n"
+    );
+}
+
+#[test]
+// Verifies: ADR-0035
+fn a_pull_whose_branch_another_program_holds_locked_changes_nothing() {
+    let (_remote, clone, _) = with_remote("pull-locked");
+    let pull = pull_of(&clone.0, "main");
+    let lock = clone.0.join(".git/refs/heads/main.lock");
+    std::fs::write(&lock, "").unwrap();
+    let before = all_of(&clone.0);
+    let error = GitWriter.write(&clone.0, &pull).unwrap_err();
+    assert!(
+        error.to_string().contains("locked by another program"),
+        "{error}"
+    );
+    std::fs::remove_file(&lock).unwrap();
+    assert_eq!(all_of(&clone.0), before);
+}
+
+#[test]
+// Verifies: ADR-0035, G-4
+fn a_push_follows_push_default_as_git_push_does() {
+    let (remote, clone, _) = with_remote("push-default");
+    GitWriter
+        .write(&clone.0, &pull_of(&clone.0, "main"))
+        .unwrap();
+    git(&clone.0, &["switch", "--quiet", "-c", "feat"]);
+    write_file(&clone.0, "f", "feat\n");
+    git(&clone.0, &["commit", "--quiet", "-am", "feat"]);
+    let main_there = git(&remote.0, &["rev-parse", "main"]);
+
+    // `simple`, the default: an upstream named differently is refused.
+    git(
+        &clone.0,
+        &["branch", "--quiet", "--set-upstream-to", "origin/main"],
+    );
+    let error = GitWriter
+        .write(&clone.0, &push_of(&clone.0, "feat"))
+        .unwrap_err();
+    assert!(error.to_string().contains("named differently"), "{error}");
+    assert_eq!(git(&remote.0, &["rev-parse", "main"]), main_there);
+
+    // `upstream` pushes there, as git does.
+    git(&clone.0, &["config", "push.default", "upstream"]);
+    GitWriter
+        .write(&clone.0, &push_of(&clone.0, "feat"))
+        .unwrap();
+    assert_eq!(
+        git(&remote.0, &["rev-parse", "main"]),
+        git(&clone.0, &["rev-parse", "feat"])
+    );
+
+    for (mode, why) in [("nothing", "is nothing"), ("matching", "every branch")] {
+        git(&clone.0, &["config", "push.default", mode]);
+        let error = GitWriter
+            .write(&clone.0, &push_of(&clone.0, "feat"))
+            .unwrap_err();
+        assert!(error.to_string().contains(why), "{mode}: {error}");
+    }
+
+    // An upstream on a local branch is no remote to push to.
+    git(&clone.0, &["config", "--unset", "push.default"]);
+    git(
+        &clone.0,
+        &["branch", "--quiet", "--set-upstream-to", "main"],
+    );
+    let error = GitWriter
+        .write(&clone.0, &push_of(&clone.0, "feat"))
+        .unwrap_err();
+    assert!(error.to_string().contains("local branch"), "{error}");
 }

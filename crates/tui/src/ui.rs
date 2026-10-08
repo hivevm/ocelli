@@ -938,7 +938,8 @@ fn draw_status(frame: &mut Frame, app: &App, p: &Palette, area: Rect) {
     let [l, r] = Layout::horizontal([Constraint::Fill(1), Constraint::Length(width)]).areas(area);
     let bar = Style::new().bg(p.bg_chrome);
     frame.render_widget(
-        Paragraph::new(format!(" {}", app.status)).style(bar.fg(p.text_muted)),
+        Paragraph::new(format!(" {}", app.notice.as_ref().unwrap_or(&app.status)))
+            .style(bar.fg(p.text_muted)),
         l,
     );
     frame.render_widget(Paragraph::new(right).style(bar), r);

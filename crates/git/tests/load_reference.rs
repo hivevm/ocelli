@@ -96,6 +96,14 @@ fn a_fixed_repository_loads_as_the_reference_did() {
         .map(|branch| branch.as_object_mut().unwrap().remove("merged").unwrap())
         .collect();
     assert_eq!(merged, [true, false, true], "feature, hotfix, main");
+    // So did the remote a fetch reaches without one named (G-4): none, since the fixture's
+    // remote branch was written without a remote configured.
+    let default_remote = refs
+        .as_object_mut()
+        .unwrap()
+        .remove("defaultRemote")
+        .unwrap();
+    assert_eq!(default_remote, serde_json::Value::Null);
     assert_eq!(refs, expected("repo-refs.json"));
 
     let (head, merge) = {

@@ -294,6 +294,9 @@ pub struct RepoRefs {
     pub submodules: Vec<Submodule>,
     /// Absent when this repository is neither a submodule nor a linked worktree.
     pub parent: Option<ParentRepo>,
+    /// The remote a fetch without one named reaches: the remote of the checked-out branch's
+    /// upstream, else `origin`, else the only remote there is.
+    pub default_remote: Option<String>,
 }
 
 #[derive(Debug, Serialize, Clone, PartialEq)]

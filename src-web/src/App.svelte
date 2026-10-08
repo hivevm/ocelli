@@ -80,8 +80,65 @@
   let question = $state<
     { lost: string; action: string; answer: (confirmed: boolean) => void } | null
   >(null);
+  // What the status bar says over the load's own line until the developer acts again: why a
+  // transfer was refused, which the reload after it would otherwise hide.
+  let notice = $state<string | null>(null);
   // Whether the dialog that describes a new stash is open.
   let stashing = $state(false);
+  // Whether a transfer to or from a remote runs, and whether the toolbar's button can cancel it:
+  // libgit2 cannot stop a push once its objects are sent (ADR-0035).
+  let fetching = $state(false);
+  let cancellable = $state(false);
+  // The checked-out branch, which a pull moves, where it has an upstream.
+  const pullable = $derived(repoRefs?.locals.find(b => b.isHead && b.upstream !== null) ?? null);
+
+  /** Runs a transfer, the toolbar's buttons turning into one that cancels it. A transfer refused
+      may have moved remote branches by its fetch, so the repository is read again, the refusal
+      kept in view (ADR-0035). */
+  async function transfer(write: Write, doing: string): Promise<void> {
+    fetching = true;
+    cancellable = write.kind !== 'push';
+    status = doing;
+    const error = await performWrite(write);
+    fetching = false;
+    if (error) {
+      await reloadAfterWrite(null);
+      notice = 'Error: ' + error;
+    }
+  }
+
+  /** Fetches the remote a fetch reaches without one named; the reload after shows its branches. */
+  async function fetchRemote(): Promise<void> {
+    const remote = repoRefs?.defaultRemote;
+    if (!remote) {
+      status = 'No remote to fetch';
+      return;
+    }
+    await transfer({ kind: 'fetch', remote }, `Fetching ${remote}…`);
+  }
+
+  // The checked-out branch, which a push sends, where a remote takes it.
+  const pushable = $derived(
+    repoRefs?.locals.find(b => b.isHead && (b.upstream !== null || repoRefs?.defaultRemote)) ?? null,
+  );
+
+  /** Pushes the checked-out branch to its upstream, or sets one; never by force. */
+  async function pushBranch(): Promise<void> {
+    if (!pushable) return;
+    await transfer(
+      { kind: 'push', branch: pushable.name, tip: pushable.sha },
+      `Pushing ${pushable.name}…`,
+    );
+  }
+
+  /** Pulls the checked-out branch from its upstream, fast-forward only. */
+  async function pullBranch(): Promise<void> {
+    if (!pullable) return;
+    await transfer(
+      { kind: 'pull', branch: pullable.name, tip: pullable.sha },
+      `Pulling ${pullable.name}…`,
+    );
+  }
   const selectedTags = $derived(
     selectedNode ? (repoRefs?.tags ?? []).filter(t => t.sha === selectedNode?.sha) : [],
   );
@@ -250,6 +307,7 @@
         void updateLoadedRefs();
       }),
       listen<string>('set-status',     (e) => { status = e.payload; }),
+      listen<string>('write-progress', (e) => { if (fetching) status = e.payload; }),
       listen<string>('commit-files', (e) => {
         try {
           changedFiles = typeof e.payload === 'string' ? JSON.parse(e.payload) : e.payload;
@@ -274,6 +332,7 @@
 
   // ── Actions ────────────────────────────────────────────────────────────────
   async function browseRepo(): Promise<void> {
+    notice = null;
     status = 'Selecting repository…';
     await invoke('browse_repo').catch((e: unknown) => { status = 'Error: ' + e; });
   }
@@ -282,6 +341,7 @@
       once the load lays it out (ADR-0033). */
   async function refreshRepo(select: string | null = null): Promise<void> {
     if (!currentRepoPath) return;
+    notice = null;
     status = 'Refreshing…';
     await invoke('open_repo', { path: currentRepoPath, select }).catch((e: unknown) => {
       status = 'Error: ' + e;
@@ -298,6 +358,7 @@
   /// working tree, or the parent module (ADR-0027). It is the same load the
   /// folder picker triggers, so the graph, the refs and the label all follow.
   async function openRepoPath(path: string): Promise<void> {
+    notice = null;
     if (!path) return;
     status = 'Opening…';
     await invoke('open_repo', { path }).catch((e: unknown) => { status = 'Error: ' + e; });
@@ -307,6 +368,7 @@
       after it shows the result, the commit selected again. Resolves with why the host refused
       it, or null once written or kept. */
   async function performWrite(write: Write): Promise<string | null> {
+    notice = null;
     let done: Outcome;
     try {
       done = await confirmedWrite(
@@ -341,6 +403,7 @@
   /** Selects the commit in `row`: the host computes its lineage, which the window read after
       lights up, and its changed files follow. */
   async function onSelectRow(row: number): Promise<void> {
+    notice = null;
     let selected: Selected | null;
     try {
       selected = await selects.ask(() => invoke<Selected | null>('select_row', { row }), currentLoad);
@@ -429,6 +492,26 @@
             title="Put the uncommitted changes aside as a stash">
       Stash…
     </button>
+    {#if fetching}
+      <button class="tb-btn" disabled={!cancellable}
+              onclick={() => invoke('cancel_write').catch(report)}>
+        {cancellable ? 'Cancel' : 'Pushing…'}
+      </button>
+    {:else}
+      <button class="tb-btn" onclick={fetchRemote} disabled={!repoRefs?.defaultRemote}
+              title="Fetch {repoRefs?.defaultRemote ?? 'a remote'}">
+        Fetch
+      </button>
+      <button class="tb-btn" onclick={pullBranch} disabled={!pullable}
+              title={pullable ? `Pull ${pullable.name} from ${pullable.upstream}, fast-forward only`
+                : 'The checked-out branch has no upstream to pull from'}>
+        Pull
+      </button>
+      <button class="tb-btn" onclick={pushBranch} disabled={!pushable}
+              title={pushable ? `Push ${pushable.name}` : 'There is no branch or remote to push to'}>
+        Push
+      </button>
+    {/if}
 
     <div class="repo-breadcrumb">
       <svg viewBox="0 0 16 16" fill="#4caf7d" class="repo-icon">
@@ -518,7 +601,7 @@
 {/if}
 
 <StatusBar
-  {status}
+  status={notice ?? status}
   {theme}
   {showAvatars}
   onToggleTheme={toggleTheme}

@@ -19,7 +19,10 @@ export type Write =
   | { kind: 'switchBranch'; name: string; tip: string }
   | { kind: 'detach'; commit: string }
   | { kind: 'trackRemote'; remote: string; branch: string; tip: string }
-  | { kind: 'deleteBranch'; name: string; tip: string; merged: boolean };
+  | { kind: 'deleteBranch'; name: string; tip: string; merged: boolean }
+  | { kind: 'fetch'; remote: string }
+  | { kind: 'pull'; branch: string; tip: string }
+  | { kind: 'push'; branch: string; tip: string };
 
 /** A write of one kind. */
 export type WriteOf<K extends Write['kind']> = Extract<Write, { kind: K }>;
