@@ -26,12 +26,15 @@ than anywhere else, and none beats one that has stopped being true.
 
 Ocelli reads repositories on the local file system through git2, and writes to them through git2
 only what the developer asks for, a tag, a stash, the index, a commit, or a branch
-([ADR-0033](adr/0033-writes-what-git-writes.md)). It makes no network
-request: the one exception, Gravatar avatars in the desktop application, is off until the developer
-turns it on ([ADR-0023](adr/0023-no-egress-hardened-webview.md)). The web interface runs only inside
-the desktop host; the remote server of the specification does not exist yet. The measurement of the
-quality goals, which ships to nobody, is the one part that runs the git binary and fetches over the
-network: the corpus of public repositories, in the Measure workflow.
+([ADR-0033](adr/0033-writes-what-git-writes.md)). It reaches a remote only when
+the developer fetches, through libgit2's own transports with the credentials of the developer's own
+setup
+([ADR-0035](adr/0035-remotes-through-libgit2-transports.md)),
+and makes no other network request but Gravatar avatars in the desktop application, off until the
+developer turns them on ([ADR-0023](adr/0023-no-egress-hardened-webview.md)). The web interface
+runs only inside the desktop host; the remote server of the specification does not exist yet. The
+measurement of the quality goals, which ships to nobody, is the one part that runs the git binary
+and fetches over the network: the corpus of public repositories, in the Measure workflow.
 
 ## Building blocks
 
@@ -67,8 +70,12 @@ golden path and the test pattern an agent copies from are named here.
   and returns the commit a write made
   ([ADR-0033](adr/0033-writes-what-git-writes.md)); a commit or an
   annotated tag is refused where the configuration asks for a signature
-  ([ADR-0033](adr/0033-writes-what-git-writes.md)). Neither
-  starts a program a repository names, a hook included (Q-4).
+  ([ADR-0033](adr/0033-writes-what-git-writes.md)). A fetch reaches the remote
+  through libgit2's own transports with the SSH agent and the credential helper of the developer's
+  global configuration, over HTTPS only for a password, and with libgit2's server timeouts set
+  once for the process, the git adapter's one `unsafe` block
+  ([ADR-0035](adr/0035-remotes-through-libgit2-transports.md)).
+  Neither starts a program a repository names, a hook included (Q-4).
 - **Terminal application** (`crates/tui`, `ocelli-cli`) — draws the core's graph with box-drawing
   characters on ratatui; it loads and lays out the history chunk by chunk on a loader thread, keeps
   the core's `History` at its event loop, reads files and diffs through `GitReader` on a worker
@@ -100,8 +107,8 @@ golden path and the test pattern an agent copies from are named here.
   commit with its lineage, as JSON, and writes through `GitWriter` on the same pool
   ([ADR-0018](adr/0018-tauri-desktop-host.md),
   [ADR-0031](adr/0031-front-ends-read-row-windows.md)). Once a load ends it hands the memory the
-  load freed back to the system through glibc's `malloc_trim`, the workspace's one `unsafe` block
-  outside its tests.
+  load freed back to the system through glibc's `malloc_trim`, beside libgit2's timeouts the
+  workspace's one other `unsafe` block outside its tests.
 - **Web interface** (`src-web`) — Svelte and TypeScript: the canvas, which holds only the window of
   rows it draws, the sidebar, the commit detail with its tag and branch forms, its stash actions,
   its ref chips' switch and delete, and the working-directory node's stage toggles and commit form,

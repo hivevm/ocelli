@@ -108,6 +108,8 @@ pub enum Write {
         tip: String,
         merged: bool,
     },
+    /// Fetches `remote`, updating its remote branches (ADR-0035).
+    Fetch { remote: String },
 }
 
 impl Write {
@@ -125,7 +127,8 @@ impl Write {
             | Write::SwitchBranch { .. }
             | Write::Detach { .. }
             | Write::TrackRemote { .. }
-            | Write::DeleteBranch { merged: true, .. } => None,
+            | Write::DeleteBranch { merged: true, .. }
+            | Write::Fetch { .. } => None,
             Write::DeleteTag {
                 name,
                 annotated: true,
@@ -157,8 +160,20 @@ pub enum Confirmation {
 /// Writes to a repository, running no program the repository names (ADR-0033).
 pub trait RepositoryWriter {
     /// Performs `write`, or refuses it with nothing changed and says why. Returns the commit the
-    /// write made, which the load after it selects, where it made one.
-    fn write(&self, repo: &Path, write: &Write) -> Result<Option<String>>;
+    /// write made, which the load after it selects, where it made one. A write that takes long,
+    /// one that reaches a remote, tells `progress` how far it has come, and stops where `progress`
+    /// returns false.
+    fn write_reporting(
+        &self,
+        repo: &Path,
+        write: &Write,
+        progress: &mut dyn FnMut(&str) -> bool,
+    ) -> Result<Option<String>>;
+
+    /// Performs `write` with no one watching its progress.
+    fn write(&self, repo: &Path, write: &Write) -> Result<Option<String>> {
+        self.write_reporting(repo, write, &mut |_| true)
+    }
 }
 
 /// Hands `write` to `writer`, refusing a write that discards work before it reaches the
@@ -169,13 +184,14 @@ pub fn perform(
     repo: &Path,
     write: &Write,
     confirmation: Confirmation,
+    progress: &mut dyn FnMut(&str) -> bool,
 ) -> Result<Option<String>> {
     if let Some(lost) = write.discards()
         && confirmation != Confirmation::Given
     {
         bail!("discarding {lost} needs the developer's confirmation");
     }
-    writer.write(repo, write)
+    writer.write_reporting(repo, write, progress)
 }
 
 #[cfg(test)]
@@ -188,7 +204,12 @@ mod tests {
     struct Recorder(RefCell<Vec<Write>>);
 
     impl RepositoryWriter for Recorder {
-        fn write(&self, _: &Path, write: &Write) -> Result<Option<String>> {
+        fn write_reporting(
+            &self,
+            _: &Path,
+            write: &Write,
+            _: &mut dyn FnMut(&str) -> bool,
+        ) -> Result<Option<String>> {
             self.0.borrow_mut().push(write.clone());
             Ok(None)
         }
@@ -269,12 +290,29 @@ mod tests {
     fn a_write_that_discards_work_without_a_confirmation_never_reaches_the_repository() {
         let writer = Recorder::default();
         let repo = Path::new("/repo");
-        let error = perform(&writer, repo, &delete(true), Confirmation::Absent).unwrap_err();
+        let error = perform(
+            &writer,
+            repo,
+            &delete(true),
+            Confirmation::Absent,
+            &mut |_| true,
+        )
+        .unwrap_err();
         assert!(error.to_string().contains("confirmation"), "{error}");
         assert!(writer.0.borrow().is_empty());
 
-        perform(&writer, repo, &delete(true), Confirmation::Given).unwrap();
-        perform(&writer, repo, &create(), Confirmation::Absent).unwrap();
+        perform(
+            &writer,
+            repo,
+            &delete(true),
+            Confirmation::Given,
+            &mut |_| true,
+        )
+        .unwrap();
+        perform(&writer, repo, &create(), Confirmation::Absent, &mut |_| {
+            true
+        })
+        .unwrap();
         assert_eq!(*writer.0.borrow(), [delete(true), create()]);
     }
 }

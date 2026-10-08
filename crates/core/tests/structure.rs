@@ -333,3 +333,21 @@ fn the_write_scan_sees_a_write_past_the_confirmation() {
     let in_tests = "fn d() {}\n#[cfg(test)]\nmod tests { use super::RepositoryWriter; }\n";
     assert_eq!(writes_past_the_confirmation(in_tests), Vec::<&str>::new());
 }
+
+#[test]
+// Verifies: ADR-0035
+fn git2_reaches_remotes_through_its_own_https_and_ssh_transports_only() {
+    let manifest = read("../git/Cargo.toml");
+    let git2 = manifest
+        .lines()
+        .find(|l| l.trim_start().starts_with("git2 "))
+        .expect("the git adapter depends on git2");
+    assert!(git2.contains("default-features = false"), "{git2}");
+    for feature in ["\"https\"", "\"ssh\""] {
+        assert!(git2.contains(feature), "{feature} missing: {git2}");
+    }
+    assert!(
+        !git2.contains("vendored"),
+        "the transports link the system's libraries: {git2}"
+    );
+}

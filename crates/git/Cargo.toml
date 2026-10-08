@@ -9,7 +9,9 @@ rust-version.workspace = true
 ocelli-core = { workspace = true }
 anyhow = "1"
 chrono = "0.4"
-git2 = { version = "0.20", default-features = false }
+git2 = { version = "0.20", default-features = false, features = ["https", "ssh"] }
+# The parser git2's credential helper reads a remote's address with, checked against libgit2's.
+url = "2"
 
 [dev-dependencies]
 serde = "1"

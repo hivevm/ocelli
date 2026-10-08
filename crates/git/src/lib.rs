@@ -59,7 +59,12 @@ impl RepositoryReader for GitReader {
 pub struct GitWriter;
 
 impl RepositoryWriter for GitWriter {
-    fn write(&self, repo: &Path, write: &Write) -> Result<Option<String>> {
-        write::write(repo, write)
+    fn write_reporting(
+        &self,
+        repo: &Path,
+        write: &Write,
+        progress: &mut dyn FnMut(&str) -> bool,
+    ) -> Result<Option<String>> {
+        write::write(repo, write, progress)
     }
 }

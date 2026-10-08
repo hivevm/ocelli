@@ -27,6 +27,8 @@ pub fn run() {
             current_repo: Mutex::new(None),
             startup_repo: Mutex::new(startup_path(std::env::args()).map(resolved)),
             session: Default::default(),
+            cancel: Default::default(),
+            writing: Default::default(),
         })
         .invoke_handler(tauri::generate_handler![
             commands::startup_repo,
@@ -42,6 +44,7 @@ pub fn run() {
             commands::rows_of,
             commands::write_discards,
             commands::perform_write,
+            commands::cancel_write,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

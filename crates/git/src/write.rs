@@ -14,9 +14,14 @@ use std::path::Path;
 
 /// Performs `write` on the repository at `repo_path`, or refuses it with nothing changed; returns
 /// the commit it made, where it made one.
-pub fn write(repo_path: &Path, write: &Write) -> Result<Option<String>> {
+pub fn write(
+    repo_path: &Path,
+    write: &Write,
+    progress: &mut dyn FnMut(&str) -> bool,
+) -> Result<Option<String>> {
     let mut repo = Repository::discover(repo_path)?;
     let done = match write {
+        Write::Fetch { remote } => fetch(&repo, remote, progress),
         Write::Commit { message, head } => {
             return commit(&repo, message, head.as_deref()).map(Some);
         }
@@ -632,4 +637,221 @@ fn delete_branch(repo: &Repository, name: &str, tip: &str, merged: bool) -> Resu
     }
     branch.delete()?;
     Ok(())
+}
+
+/// Fetches `remote` through libgit2's own transports, as `git fetch <remote>` does, telling
+/// `progress` how far it has come and stopping where it says so (ADR-0035). No credential helper
+/// or command the repository's configuration names runs, and no server is trusted unseen: libgit2
+/// verifies a certificate against the system's trust store and an SSH host key against the
+/// developer's `known_hosts`, since no certificate check of Ocelli's own overrides it. A server
+/// that stalls is given up after [`SERVER_TIMEOUT_MS`].
+fn fetch(repo: &Repository, name: &str, progress: &mut dyn FnMut(&str) -> bool) -> Result<()> {
+    set_server_timeouts();
+    let mut remote = repo
+        .find_remote(name)
+        .with_context(|| format!("there is no remote named '{name}' any more"))?;
+    let url = remote.url().unwrap_or_default().to_string();
+    let cancelled = std::cell::Cell::new(false);
+    let progress = std::cell::RefCell::new(progress);
+    let go_on = |message: &str| {
+        let go_on = (progress.borrow_mut())(message);
+        cancelled.set(!go_on);
+        go_on
+    };
+    let mut tried = Tried::default();
+    let mut callbacks = git2::RemoteCallbacks::new();
+    callbacks.credentials(|url, user, allowed| {
+        if !go_on(&format!("Fetching {name}: authenticating")) {
+            return Err(git2::Error::from_str("cancelled"));
+        }
+        tried.credentials(url, user, allowed)
+    });
+    callbacks.sideband_progress(|_| go_on(&format!("Fetching {name}: the server is preparing")));
+    callbacks.transfer_progress(|stats| {
+        go_on(&format!(
+            "Fetching {name}: {} of {} objects",
+            stats.received_objects(),
+            stats.total_objects()
+        ))
+    });
+    let mut options = git2::FetchOptions::new();
+    options.remote_callbacks(callbacks);
+    let fetched = remote.fetch(&[] as &[&str], Some(&mut options), None);
+    drop(options);
+    match fetched {
+        Ok(()) => Ok(()),
+        Err(_) if cancelled.get() => bail!("the fetch of {name} was cancelled"),
+        Err(e) if e.code() == ErrorCode::Certificate && is_ssh(&url) => bail!(
+            "{name}'s host key is not in your known_hosts: connect to it once with ssh, and check \
+             its fingerprint, before fetching from Ocelli"
+        ),
+        Err(e) if e.code() == ErrorCode::Certificate => bail!(
+            "{name}'s server could not be verified against the system's certificates: {}",
+            e.message()
+        ),
+        Err(e) if e.code() == ErrorCode::Auth => {
+            bail!("{name} refused the credentials: {}", e.message())
+        }
+        Err(e) => Err(e.into()),
+    }
+}
+
+/// How long libgit2 waits for a server to connect, and then for each read, before it gives up.
+const SERVER_CONNECT_TIMEOUT_MS: i32 = 30_000;
+const SERVER_TIMEOUT_MS: i32 = 60_000;
+
+/// Sets libgit2's server timeouts, once for the process, before the first transfer: without them
+/// a server that stalls holds a fetch, and the developer's next write, for ever.
+#[allow(unsafe_code)]
+fn set_server_timeouts() {
+    static ONCE: std::sync::Once = std::sync::Once::new();
+    ONCE.call_once(|| {
+        // SAFETY: libgit2's global options are set here once, before any transfer reads them;
+        // the reads of a repository do not use them.
+        unsafe {
+            let _ =
+                git2::opts::set_server_connect_timeout_in_milliseconds(SERVER_CONNECT_TIMEOUT_MS);
+            let _ = git2::opts::set_server_timeout_in_milliseconds(SERVER_TIMEOUT_MS);
+        }
+    });
+}
+
+/// Whether `url` reaches its remote over SSH: `ssh://`, or the scp-like `host:path`.
+fn is_ssh(url: &str) -> bool {
+    url.starts_with("ssh://") || url.starts_with("git+ssh://") || !url.contains("://")
+}
+
+/// The ways to authenticate, each tried once: the SSH agent, then the credential helper of the
+/// developer's global and system configuration, never one the repository's own names (ADR-0035).
+#[derive(Default)]
+struct Tried {
+    username: bool,
+    agent: bool,
+    helper: bool,
+}
+
+impl Tried {
+    fn credentials(
+        &mut self,
+        url: &str,
+        user: Option<&str>,
+        allowed: git2::CredentialType,
+    ) -> std::result::Result<git2::Cred, git2::Error> {
+        use git2::CredentialType as Kind;
+        let refuse = |why: &str| {
+            Err(git2::Error::new(
+                ErrorCode::Auth,
+                git2::ErrorClass::Net,
+                why,
+            ))
+        };
+        // A line break in the address or the user name, both of which the repository's
+        // configuration chooses, would add lines of its own to what a credential helper reads,
+        // and could have it hand over the credential of another host (as CVE-2020-5260 did).
+        if [url, user.unwrap_or_default()]
+            .iter()
+            .any(|s| s.contains(['\n', '\r', '\0']))
+        {
+            return refuse(
+                "the remote's address holds a line break, which could pass a credential to another host",
+            );
+        }
+        if allowed.contains(Kind::USERNAME) && !self.username {
+            self.username = true;
+            return git2::Cred::username(&user.map(str::to_string).unwrap_or_else(local_user));
+        }
+        if allowed.contains(Kind::SSH_KEY) && !self.agent {
+            self.agent = true;
+            let user = user.map(str::to_string).unwrap_or_else(local_user);
+            return git2::Cred::ssh_key_from_agent(&user);
+        }
+        if allowed.contains(Kind::USER_PASS_PLAINTEXT) && !self.helper {
+            self.helper = true;
+            if let Err(why) = helper_may_answer_for(url) {
+                return refuse(why);
+            }
+            return git2::Cred::credential_helper(&developers_config()?, url, user);
+        }
+        refuse(
+            "neither the SSH agent nor a credential helper of your configuration gave credentials \
+             the server accepted",
+        )
+    }
+}
+
+/// The user name ssh would use where the address names none: the local one.
+fn local_user() -> String {
+    std::env::var("USER")
+        .or_else(|_| std::env::var("USERNAME"))
+        .unwrap_or_else(|_| "git".to_string())
+}
+
+/// The developer's own configuration, global and system, without the repository's: where a
+/// credential helper is looked up (ADR-0035).
+pub(crate) fn developers_config() -> std::result::Result<git2::Config, git2::Error> {
+    git2::Config::open_default()
+}
+
+/// Refuses an address a credential helper could answer for another host than the one libgit2
+/// sends its answer to. A password goes over https only. git2 tells the helper the host as the
+/// `url` crate reads it, and tells it none at all for an IP address, where a helper could match any
+/// credential it holds; libgit2 connects to the host after the last `@` of the address. The two
+/// must name one and the same domain, written plainly.
+fn helper_may_answer_for(address: &str) -> std::result::Result<(), &'static str> {
+    let scheme = "https://";
+    if !address
+        .get(..scheme.len())
+        .is_some_and(|s| s.eq_ignore_ascii_case(scheme))
+    {
+        return Err("credentials are sent over https only, and this remote is not");
+    }
+    let parsed = url::Url::parse(address).map_err(|_| "the remote's address cannot be read")?;
+    let Some(url::Host::Domain(host)) = parsed.host() else {
+        return Err("credentials go only to a remote named by its domain, not by an IP address");
+    };
+    let authority = address[scheme.len()..]
+        .split(['/', '?', '#'])
+        .next()
+        .unwrap_or_default();
+    let named = authority.rsplit('@').next().unwrap_or_default();
+    let named = match named.rsplit_once(':') {
+        Some((host, port)) if port.chars().all(|c| c.is_ascii_digit()) => host,
+        _ => named,
+    };
+    let unusual = authority.contains(['\\', ' ']) || named.contains('%');
+    if unusual || !named.eq_ignore_ascii_case(host) {
+        return Err("the remote's address names its host in a way that could be read two ways");
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::helper_may_answer_for as asks;
+
+    #[test]
+    // Verifies: ADR-0035
+    fn a_helper_answers_only_for_a_plainly_named_domain_over_https() {
+        for fine in [
+            "https://example.org/repo.git",
+            "https://user@Example.org:8443/repo.git",
+            "HTTPS://example.org/a@b/repo.git",
+            // Both parsers read the host after the last `@`, so the helper is asked about the
+            // very host the answer goes to.
+            "https://ex%61mple.org@evil.example/repo.git",
+        ] {
+            assert_eq!(asks(fine), Ok(()), "{fine}");
+        }
+        for (refused, why) in [
+            ("http://example.org/repo.git", "https only"),
+            ("https://192.0.2.1/repo.git", "IP address"),
+            ("https://[2001:db8::1]/repo.git", "IP address"),
+            ("https://%65xample.org/repo.git", "two ways"),
+            ("https://example.org\\@evil.example/repo.git", "two ways"),
+            ("https://bücher.example/repo.git", "two ways"),
+        ] {
+            let error = asks(refused).unwrap_err();
+            assert!(error.contains(why), "{refused}: {error}");
+        }
+    }
 }
