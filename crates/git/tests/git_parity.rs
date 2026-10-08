@@ -6,7 +6,9 @@
 //! refuses with nothing changed, the writer refuses with nothing changed. A case that departs
 //! from `git` on purpose is listed in `DEPARTURES` with the ADR that decides it, and a case where
 //! the writer is known to differ from `git` without an ADR is listed in `MISMATCHES`, asserted to
-//! still differ, so that a fix shows up as a failure that removes the entry.
+//! still differ, so that a fix shows up as a failure that removes the entry. The configuration a
+//! write reads is a state too: `CONFIGURATION` lists each key with the values the states set it
+//! to, and a value no state sets fails the comparison.
 //!
 //! The transfers are left out: they reach a remote, which no state here varies, and `write.rs`
 //! and `write_credentials.rs` test them. Resolving, continuing, and aborting a stopped operation
@@ -50,17 +52,33 @@ struct Base {
     two: String,
     main: String,
     other: String,
+    ahead: String,
 }
+
+/// The message of `other`'s commit, kept as written: trailing space, a comment line, a scissors
+/// line, and blank lines at its end, which each mode of `commit.cleanup` cleans up otherwise
+/// where a write takes the message over.
+const OTHER_MESSAGE: &str = "other work  \n\n# a comment line\n\n\
+                             # ------------------------ >8 ------------------------\nbelow\n\n";
+
+/// The message the commit write gives, which each mode of `commit.cleanup` cleans up otherwise.
+const COMMIT_MESSAGE: &str = "work  \n\n# a comment line\n\n\
+                              # ------------------------ >8 ------------------------\nbelow\n\n";
 
 /// The history every state starts from, in `dir/repo`:
 ///
 /// - `main`: `one` (a, b, k, `.gitignore` ignoring `*.log`), `two` (a), `three` (k, c), `four` (d)
-/// - `other` from `three`: a, n, and the ignored name `t.log`, forced in; `origin/feature` there
+/// - `other` from `three`: a, n, `p/f`, and the ignored name `t.log`, forced in, with a message
+///   kept as written; `origin/feature` there
+/// - `ahead` from `four`: e, so that a merge of it fast-forwards
 /// - `clash` from `one`: k, which conflicts with `main`
-/// - `done` at `two`, merged; the lightweight tag `old` at `one`; a stash changing a
+/// - `done` at `two`, merged; the lightweight tag `old` at `one`; a stash changing a, with n and
+///   `p/f` untracked in it
 ///
 /// So the switch, the merge, the cherry-pick, the rebase, and the reset to `other` touch a, n,
-/// and `t.log` and leave b alone; the revert of `two` and the stash touch a.
+/// `p/f`, and `t.log` and leave b alone; the revert of `two` touches a; applying the stash
+/// touches a, n, and `p/f`. A directory at n is one a file replaces, a file at p one a
+/// directory replaces.
 fn base(dir: &Path) -> Base {
     let d = &dir.join("repo");
     std::fs::create_dir_all(d).unwrap();
@@ -88,8 +106,18 @@ fn base(dir: &Path) -> Base {
     write_file(d, "a", "other\n");
     write_file(d, "n", "n\n");
     write_file(d, "t.log", "t\n");
-    git(d, &["add", "-f", "a", "n", "t.log"]);
-    git(d, &["commit", "--quiet", "-m", "other work"]);
+    write_file(d, "p/f", "p\n");
+    git(d, &["add", "-f", "a", "n", "t.log", "p/f"]);
+    git(
+        d,
+        &[
+            "commit",
+            "--quiet",
+            "--cleanup=verbatim",
+            "-m",
+            OTHER_MESSAGE,
+        ],
+    );
     let other = git(d, &["rev-parse", "HEAD"]);
     git(d, &["remote", "add", "origin", "../nowhere"]);
     git(d, &["update-ref", "refs/remotes/origin/feature", &other]);
@@ -103,13 +131,28 @@ fn base(dir: &Path) -> Base {
     git(d, &["add", "d"]);
     git(d, &["commit", "--quiet", "-m", "four"]);
     let main = git(d, &["rev-parse", "HEAD"]);
+    git(d, &["switch", "--quiet", "-c", "ahead"]);
+    write_file(d, "e", "e\n");
+    git(d, &["add", "e"]);
+    git(d, &["commit", "--quiet", "-m", "five"]);
+    let ahead = git(d, &["rev-parse", "HEAD"]);
+    git(d, &["switch", "--quiet", "main"]);
     write_file(d, "a", "stashed\n");
-    git(d, &["stash", "push", "--quiet", "-m", "base"]);
+    write_file(d, "n", "stashed\n");
+    write_file(d, "p/f", "stashed\n");
+    git(d, &["stash", "push", "--quiet", "-u", "-m", "base"]);
+    for (key, _) in CONFIGURATION {
+        assert!(
+            !git_output(d, &["config", "--local", "--get-all", key]).0,
+            "the base sets {key}, so no state leaves it unset"
+        );
+    }
     Base {
         one,
         two,
         main,
         other,
+        ahead,
     }
 }
 
@@ -118,6 +161,32 @@ fn resolve_k(d: &Path) {
     write_file(d, "k", "resolved\n");
     git(d, &["add", "k"]);
 }
+
+/// Stages a change to b, which no write touches, so that a commit has something to commit.
+fn stage_b(d: &Path) {
+    write_file(d, "b", "staged\n");
+    git(d, &["add", "b"]);
+}
+
+/// Sets `key` to `value` in the repository's configuration.
+fn set(d: &Path, key: &str, value: &str) {
+    git(d, &["config", key, value]);
+}
+
+/// The configuration keys a write of the table reads, each with the values some state sets it
+/// to; the base sets none, which stands for each key unset. A key listed here that no state sets
+/// fails the comparison. `push.default` is not among them: only a push reads it, and the
+/// transfers are compared in `write.rs` (`a_push_follows_push_default_as_git_push_does`).
+const CONFIGURATION: &[(&str, &[&str])] = &[
+    (
+        "commit.cleanup",
+        &["strip", "whitespace", "verbatim", "scissors"],
+    ),
+    ("merge.ff", &["false", "only"]),
+    ("merge.suppressDest", &["m*", "release"]),
+    ("commit.gpgSign", &["true"]),
+    ("tag.gpgSign", &["true"]),
+];
 
 /// How a state is made from the base.
 type MakeState = fn(&Path);
@@ -204,8 +273,61 @@ const STATES: &[(&str, MakeState)] = &[
     }),
     ("signing asked with a change staged", |d| {
         git(d, &["config", "commit.gpgSign", "true"]);
-        write_file(d, "b", "staged\n");
-        git(d, &["add", "b"]);
+        stage_b(d);
+    }),
+    // A target that puts a file where a directory holding files the index does not stands, or
+    // a directory where such a file stands: n is a file in `other` and in the stash, p a
+    // directory in both.
+    ("directory holding untracked files where a file goes", |d| {
+        write_file(d, "n/u", "untracked\n")
+    }),
+    ("directory holding ignored files where a file goes", |d| {
+        write_file(d, "n/x.log", "ignored\n")
+    }),
+    ("untracked file where a directory goes", |d| {
+        write_file(d, "p", "untracked\n")
+    }),
+    ("ignored file where a directory goes", |d| {
+        write_file(d, "p", "ignored\n");
+        write_file(d, ".git/info/exclude", "/p\n");
+    }),
+    // The configuration a write reads, each value of `CONFIGURATION`; a commit is compared where
+    // a change is staged, the operations where none is.
+    ("commit.cleanup strip", |d| {
+        set(d, "commit.cleanup", "strip")
+    }),
+    ("commit.cleanup strip with a change staged", |d| {
+        set(d, "commit.cleanup", "strip");
+        stage_b(d);
+    }),
+    ("commit.cleanup whitespace", |d| {
+        set(d, "commit.cleanup", "whitespace")
+    }),
+    ("commit.cleanup whitespace with a change staged", |d| {
+        set(d, "commit.cleanup", "whitespace");
+        stage_b(d);
+    }),
+    ("commit.cleanup verbatim", |d| {
+        set(d, "commit.cleanup", "verbatim")
+    }),
+    ("commit.cleanup verbatim with a change staged", |d| {
+        set(d, "commit.cleanup", "verbatim");
+        stage_b(d);
+    }),
+    ("commit.cleanup scissors", |d| {
+        set(d, "commit.cleanup", "scissors")
+    }),
+    ("commit.cleanup scissors with a change staged", |d| {
+        set(d, "commit.cleanup", "scissors");
+        stage_b(d);
+    }),
+    ("merge.ff false", |d| set(d, "merge.ff", "false")),
+    ("merge.ff only", |d| set(d, "merge.ff", "only")),
+    ("merge.suppressDest matching the branch", |d| {
+        set(d, "merge.suppressDest", "m*")
+    }),
+    ("merge.suppressDest not matching the branch", |d| {
+        set(d, "merge.suppressDest", "release")
     }),
 ];
 
@@ -343,10 +465,10 @@ const WRITES: &[(&str, MakeWrite, &[&str])] = &[
     (
         "commit",
         |s| Write::Commit {
-            message: "work".into(),
+            message: COMMIT_MESSAGE.into(),
             head: s.head.clone(),
         },
-        &["commit", "-m", "work"],
+        &["commit", "-m", COMMIT_MESSAGE],
     ),
     (
         "create branch",
@@ -419,6 +541,16 @@ const WRITES: &[(&str, MakeWrite, &[&str])] = &[
         &["merge", "--no-edit", "other"],
     ),
     (
+        "fast-forward merge",
+        |s| Write::Merge {
+            branch: "main".into(),
+            tip: s.base.main.clone(),
+            commit: s.base.ahead.clone(),
+            name: Some("ahead".into()),
+        },
+        &["merge", "--no-edit", "ahead"],
+    ),
+    (
         "rebase",
         |s| Write::Rebase {
             branch: "main".into(),
@@ -463,10 +595,17 @@ const WRITES: &[(&str, MakeWrite, &[&str])] = &[
 ];
 
 /// The operations of ADR-0033 that write a history from the checked-out branch.
-const OPERATIONS: &[&str] = &["merge", "rebase", "cherry-pick", "revert"];
+const OPERATIONS: &[&str] = &[
+    "merge",
+    "fast-forward merge",
+    "rebase",
+    "cherry-pick",
+    "revert",
+];
 /// The operations of ADR-0033, the resets included.
 const HISTORY: &[&str] = &[
     "merge",
+    "fast-forward merge",
     "rebase",
     "cherry-pick",
     "revert",
@@ -499,6 +638,10 @@ const TRACKED_CHANGES: &[&str] = &[
     "touched file deleted",
     "file left alone deleted",
     "signing asked with a change staged",
+    "commit.cleanup strip with a change staged",
+    "commit.cleanup whitespace with a change staged",
+    "commit.cleanup verbatim with a change staged",
+    "commit.cleanup scissors with a change staged",
 ];
 /// The states with a change to a tracked file or an operation stopped with its own.
 const STASHED: &[&str] = &[
@@ -510,6 +653,10 @@ const STASHED: &[&str] = &[
     "touched file deleted",
     "file left alone deleted",
     "signing asked with a change staged",
+    "commit.cleanup strip with a change staged",
+    "commit.cleanup whitespace with a change staged",
+    "commit.cleanup verbatim with a change staged",
+    "commit.cleanup scissors with a change staged",
 ];
 
 /// The states with a change a stash with the untracked files takes.
@@ -522,8 +669,26 @@ const STASHED_UNTRACKED: &[&str] = &[
     "touched file deleted",
     "file left alone deleted",
     "signing asked with a change staged",
+    "commit.cleanup strip with a change staged",
+    "commit.cleanup whitespace with a change staged",
+    "commit.cleanup verbatim with a change staged",
+    "commit.cleanup scissors with a change staged",
     "untracked file on a touched path",
     "untracked file on a path left alone",
+    "directory holding untracked files where a file goes",
+    "untracked file where a directory goes",
+];
+
+/// The states where `git stash apply` writes part of the stash, its untracked files or its
+/// changes, before it finds a file in its way and stops.
+const APPLIED_IN_PART: &[&str] = &[
+    "staged change on a touched path, the working directory as committed",
+    "unstaged change on a touched path",
+    "untracked file on a touched path",
+    "directory holding untracked files where a file goes",
+    "directory holding ignored files where a file goes",
+    "untracked file where a directory goes",
+    "ignored file where a directory goes",
 ];
 
 /// A group of cases: the states, the writes, and why they are listed.
@@ -579,9 +744,31 @@ const DEPARTURES: &[Cases] = &[
         &[
             "staged change on a path left alone",
             "signing asked with a change staged",
+            "commit.cleanup strip with a change staged",
+            "commit.cleanup whitespace with a change staged",
+            "commit.cleanup verbatim with a change staged",
+            "commit.cleanup scissors with a change staged",
             "touched file deleted",
         ],
         &["apply stash", "pop stash"],
+        "ADR-0033",
+    ),
+    // A write that would replace an ignored file, a directory holding one where a file goes or
+    // one where a directory goes, is refused, where `git` deletes it and goes on (ADR-0033).
+    (
+        &[
+            "directory holding ignored files where a file goes",
+            "ignored file where a directory goes",
+        ],
+        &[
+            "create and switch",
+            "switch",
+            "detach",
+            "track",
+            "merge",
+            "rebase",
+            "cherry-pick",
+        ],
         "ADR-0033",
     ),
     // A refusal changes nothing, where `git switch -c` writes the target's tree to the index and
@@ -591,6 +778,9 @@ const DEPARTURES: &[Cases] = &[
         &["create and switch", "track"],
         "ADR-0033",
     ),
+    // A refusal changes nothing, where `git stash apply` writes the stash's untracked files, or
+    // its changes, before it finds a file in its way, and stops there.
+    (APPLIED_IN_PART, &["apply stash", "pop stash"], "ADR-0033"),
 ];
 
 /// Where the writer differs from `git` and no ADR decides it: each group a finding for the
@@ -707,11 +897,12 @@ fn expected(state: &str, write: &str) -> Expected {
 
 /// What one state's cases came to: the cases that do not hold, and the groups of `DEPARTURES`
 /// with a case where `git` changed the repository, and whether a case differed in `UNCOMPARED`
-/// alone.
+/// alone, and the state's configuration, as `git config --local --list` prints it.
 struct Verdicts {
     failures: Vec<String>,
     departures_taken: Vec<usize>,
     uncompared_differ: bool,
+    config: String,
 }
 
 /// Runs every write in one state.
@@ -726,6 +917,7 @@ fn run_state(root: &Path, origin: &Path, base: &Base, index: usize) -> Verdicts 
         failures: Vec::new(),
         departures_taken: Vec::new(),
         uncompared_differ: false,
+        config: before.config.clone(),
     };
     for (case, (write, make_write, args)) in WRITES.iter().enumerate() {
         let by_git_dir = root.join(format!("state-{index}-{case}-git"));
@@ -806,6 +998,15 @@ fn each_write_does_what_git_does_in_every_state_or_an_adr_says_why_not() {
                 "{writes:?} in {states:?}: git refuses every case with nothing changed, so \
                  {adr} decides nothing here"
             ));
+        }
+    }
+    for (key, values) in CONFIGURATION {
+        for value in *values {
+            // `git config --list` prints a key's section and name in lower case.
+            let line = format!("{}={value}", key.to_lowercase());
+            if !verdicts.iter().any(|v| v.config.lines().any(|l| l == line)) {
+                failures.push(format!("no state sets {key} to {value}"));
+            }
         }
     }
     if !verdicts.iter().any(|v| v.uncompared_differ) {

@@ -57,14 +57,14 @@ Only a normalization renumbers them ([`AGENTS.md` §3](../AGENTS.md#3-adr-rules)
    branch and tag.
 2. **G-2** — When the commit graph is drawn, the system shall keep each branch in one lane over the
    whole length it is shown.
-3. **G-3** — When the commit graph is drawn, the system shall draw the main branch as a straight
-   line in the leftmost lane.
-4. **G-4** — The system shall let the developer stage changes, commit, create and switch branches,
-   and fetch, pull, and push.
+3. **G-3** — When the commit graph is drawn, the system shall draw the main line as one straight
+   line down the leftmost lane, and nothing else in that lane.
+4. **G-4** — The system shall let the developer stage changes, commit, create, switch, and delete
+   branches, and fetch, pull, and push.
 5. **G-5** — The system shall let the developer merge, rebase, cherry-pick, revert, and reset from
    the commit graph.
-6. **G-6** — When a merge, rebase, or cherry-pick stops on a conflict, the system shall let the
-   developer resolve it.
+6. **G-6** — When a merge, rebase, cherry-pick, or revert stops on a conflict, the system shall let
+   the developer resolve it, and continue or abort the operation.
 7. **G-7** — The system shall let the developer create, apply, and drop stashes, and create and
    delete tags.
 8. **G-8** — The system shall offer G-1 to G-7 and G-9 to G-17 in each front end: the desktop
@@ -82,8 +82,9 @@ Only a normalization renumbers them ([`AGENTS.md` §3](../AGENTS.md#3-adr-rules)
     branch, and tag as a ref chip on the commit it points at.
 12. **G-12** — When the developer selects a commit, the system shall show its SHA, message,
     author, date, parents, children, and changed files, and the diff of a changed file on request.
-13. **G-13** — While a repository loads, the system shall keep responding to input and report the
-    progress of the load.
+13. **G-13** — While a repository loads, or a fetch, pull, or push runs, the system shall keep
+    responding to input and report its progress, and let the developer stop a fetch, and a pull
+    while it fetches.
 14. **G-14** — When the commit graph is drawn, the system shall draw only the rows in view and the
     edges that cross them.
 15. **G-15** — When the same repository state is opened twice, the system shall assign the same
@@ -112,15 +113,22 @@ from the threats below.
   problem. Measured on Linux on a repository of 100 000 commits: showing the commit graph adds less
   than 150 MB to the memory of the desktop application, its WebView's processes included, over the
   application with no repository open.
-- **Q-4** — Security: opening a repository must not run code the repository brings. Measured on
-  a repository whose configuration names programs (such as `core.fsmonitor`) and whose hooks are
-  set: showing its commit graph starts none of them.
+- **Q-4** — Security: working with a repository must not run code the repository brings.
+  Measured on a repository whose configuration names programs (such as `core.fsmonitor`,
+  `core.sshCommand`, `credential.helper`) and whose hooks are set: showing its commit graph,
+  every write Ocelli makes to it, and fetching, pulling, and pushing it start none of them.
 - **Q-5** — Security: the remote server hands control of a machine to whoever reaches it.
   Measured against a running remote server: every request without valid authentication is
   refused, and the server accepts none from a web page of another origin.
 - **Q-6** — Safety: an operation that discards work cannot happen by accident. Measured for each
-  such operation (a hard reset, a force push, dropping a stash, deleting a branch that is not
-  merged): it runs only after the developer confirms it.
+  such operation (a hard reset, dropping a stash, applying a stash and dropping it, deleting a
+  tag, deleting a branch that is not merged, aborting an operation in progress, taking one side
+  of a conflicted file): it runs only after the developer confirms it.
+- **Q-7** — Security: a repository must not obtain the developer's credentials. Measured on a
+  repository whose remote address and configuration are written to obtain them, a line break in
+  the address's user name, an address of another host, a remote over plain HTTP, a credential
+  helper of its own: no credential of the developer's leaves for another host or unencrypted,
+  and the repository's own helper does not run.
 
 ## Non-Goals
 
@@ -143,7 +151,8 @@ rediscovered as a rejected alternative in an ADR.
 - The web interface works like VS Code's remote development: a remote server that is part of
   the environment runs next to the repository, and the browser talks to it.
 - Ocelli authenticates against remote repositories through the developer's existing Git setup,
-  the SSH agent and Git's credential helpers, and keeps no credentials of its own.
+  the SSH agent and the credential helpers of the developer's global and system configuration,
+  and keeps no credentials of its own.
 - One maintainer.
 
 ## Threats & Forbidden Actions
@@ -162,11 +171,11 @@ exist for an agent. One a test can decide is restated as a `Q-n`, so that it is 
   - anyone who can reach the remote server over the network, and any web page open in the
     developer's browser, untrusted: the boundary runs between the browser and the remote server;
   - other users of the machine the remote server runs on, untrusted.
-- The system shall never run a program a repository names while only showing it (Q-4).
+- The system shall never run a program a repository names (Q-4).
 - The system shall never act on a request to the remote server that is not authenticated (Q-5).
 - The system shall never discard work without the developer's confirmation (Q-6).
 - The system shall never store, log, or send a credential anywhere but to the remote repository
-  it belongs to.
+  it belongs to (Q-7).
 
 ## Assumptions
 

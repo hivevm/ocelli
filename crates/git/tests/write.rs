@@ -1615,6 +1615,14 @@ fn a_push_follows_push_default_as_git_push_does() {
         git(&clone.0, &["rev-parse", "feat"])
     );
 
+    // An upstream merge that names no branch on the remote, a tag here, is nothing to push to.
+    git(&clone.0, &["config", "branch.feat.merge", "refs/tags/v1"]);
+    refused(&clone.0, &push_of(&clone.0, "feat"), "no upstream branch");
+    git(
+        &clone.0,
+        &["config", "branch.feat.merge", "refs/heads/main"],
+    );
+
     for (mode, why) in [("nothing", "is nothing"), ("matching", "every branch")] {
         git(&clone.0, &["config", "push.default", mode]);
         refused(&clone.0, &push_of(&clone.0, "feat"), why);

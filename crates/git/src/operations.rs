@@ -3,7 +3,7 @@
 //! conflict file by file, then continuing or aborting the operation, whoever started it
 //! (ADR-0033). No hook and no program the repository names runs (ADR-0033).
 
-use crate::checkout::check_out;
+use crate::checkout::{check_out, files_written, nothing_untracked_in_the_way};
 use crate::guard::{
     NO_IDENTITY, branch_as_shown, nothing_in_progress, refname_of, refuse_where_signing_is_asked,
 };
@@ -108,6 +108,9 @@ pub(crate) fn merge(
         );
     }
     let me = committer(repo)?;
+    let head = repo.head()?.peel_to_commit()?;
+    let result = repo.merge_commits(&head, &theirs, None)?;
+    nothing_untracked_in_the_way(repo, &files_written(&head.tree()?, &result)?)?;
     repo.merge(&[&annotated], None, None).map_err(in_the_way)?;
     // libgit2 prepared its own subject; git's goes first, its list of conflicts kept.
     let prepared = repo.path().join("MERGE_MSG");
@@ -210,11 +213,21 @@ fn apply(
         );
     }
     let me = committer(repo)?;
+    let head = repo.head()?.peel_to_commit()?;
+    let before = head.id();
+    // What the result would put in the working directory, checked before libgit2 writes it.
+    let result = match operation {
+        Operation::Revert => repo.revert_commit(&picked, &head, 0, None)?,
+        _ => repo.cherrypick_commit(&picked, &head, 0, None)?,
+    };
+    nothing_untracked_in_the_way(repo, &files_written(&head.tree()?, &result)?)?;
     match operation {
         Operation::Revert => repo.revert(&picked, None).map_err(in_the_way)?,
         _ => repo.cherrypick(&picked, None).map_err(in_the_way)?,
     }
     if repo.index()?.has_conflicts() {
+        // Stopped, `git` keeps where it started in ORIG_HEAD.
+        set_orig_head(repo, Some(before))?;
         return Ok(None);
     }
     // A change already on the branch: refused, the state libgit2 wrote for it cleared again.
@@ -290,13 +303,22 @@ pub(crate) fn rebase(
     let me = committer(repo)?;
     let onto = repo.find_annotated_commit(commit_of(repo, onto)?.id())?;
     let ours = repo.reference_to_annotated_commit(branch.get())?;
+    // A refusal leaves ORIG_HEAD as it was, which libgit2 points at the branch as it starts.
+    let orig_head = repo
+        .find_reference("ORIG_HEAD")
+        .ok()
+        .and_then(|r| r.target());
     let mut rebase = repo
         .rebase(Some(&ours), Some(&onto), None, None)
-        .map_err(in_the_way)?;
+        .map_err(in_the_way)
+        .inspect_err(|_| {
+            let _ = set_orig_head(repo, orig_head);
+        })?;
     // A step that cannot be applied, an untracked file in its way, undoes the whole rebase:
     // nothing of the developer's is in it yet, and a rebase left at that step would skip it.
     run_rebase(repo, &mut rebase, &me).inspect_err(|_| {
         let _ = rebase.abort();
+        let _ = set_orig_head(repo, orig_head);
     })
 }
 
@@ -350,8 +372,27 @@ pub(crate) fn reset(
         ResetMode::Mixed => ResetType::Mixed,
         ResetMode::Hard => ResetType::Hard,
     };
+    let before = repo.head()?.peel_to_commit()?.id();
     repo.reset(target.as_object(), kind, None)?;
+    // `git reset` keeps where the branch was in ORIG_HEAD.
+    set_orig_head(repo, Some(before))?;
     Ok(Some(target.id().to_string()))
+}
+
+/// Points `ORIG_HEAD` at `commit`, or removes it where there is none, as `git` keeps where an
+/// operation started from.
+pub(crate) fn set_orig_head(repo: &Repository, commit: Option<Oid>) -> Result<()> {
+    match commit {
+        Some(oid) => {
+            repo.reference("ORIG_HEAD", oid, true, "")?;
+        }
+        None => {
+            if let Ok(mut orig) = repo.find_reference("ORIG_HEAD") {
+                orig.delete()?;
+            }
+        }
+    }
+    Ok(())
 }
 
 /// libgit2's message where a file is in an operation's way, which says only "no error", made to

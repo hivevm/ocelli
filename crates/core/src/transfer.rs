@@ -124,7 +124,7 @@ mod tests {
     }
 
     #[test]
-    // Verifies: ADR-0035
+    // Verifies: ADR-0035, G-13
     fn a_fetch_and_a_pull_can_be_stopped_a_push_and_a_local_write_cannot() {
         let fetch = Write::Fetch { remote: "o".into() };
         let pull = Write::Pull {

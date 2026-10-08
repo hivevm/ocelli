@@ -16,8 +16,8 @@ use ocelli_core::port::{RepositoryReader, RepositoryWriter, ResetMode, Take, Wri
 use ocelli_git::{GitReader, GitWriter};
 use std::path::Path;
 use support::{
-    Scratch, Snapshot, assert_twins_alike, assert_twins_alike_but, git, git_command, git_may_fail,
-    refused, refused_leaving, snapshot, stopped_partway, twin, write_file,
+    Scratch, Snapshot, assert_twins_alike, git, git_command, git_may_fail, refused, snapshot,
+    stopped_partway, twin, write_file,
 };
 
 /// A repository whose `main` and `side` both start from `f` = "base\n"; `main` then writes `f`
@@ -66,20 +66,6 @@ fn tree(dir: &Path) -> String {
 // Where Ocelli is known to differ from git without an ADR, by the files of an operation it
 // leaves otherwise; each is asserted to differ still, so that a fix shows up as a failure that
 // removes it.
-
-/// A reset leaves `ORIG_HEAD` as it was, where `git reset` points it at the commit it moved from.
-const RESET_KEEPS_ORIG_HEAD: &[&str] = &["ORIG_HEAD"];
-/// A revert stopped and aborted leaves no `ORIG_HEAD`, where `git revert` and its abort leave one.
-const REVERT_KEEPS_ORIG_HEAD: &[&str] = &["ORIG_HEAD"];
-/// An abort of a merge or a rebase `git` stopped leaves the `AUTO_MERGE` `git` wrote, which
-/// `git`'s abort removes.
-const ABORT_KEEPS_AUTO_MERGE: &[&str] = &["AUTO_MERGE"];
-/// An abort of a cherry-pick `git` stopped leaves the `AUTO_MERGE` `git` wrote, and no
-/// `ORIG_HEAD`, where `git cherry-pick --abort` removes the one and leaves the other.
-const PICK_ABORT_KEEPS_AUTO_MERGE_WITHOUT_ORIG_HEAD: &[&str] = &["AUTO_MERGE", "ORIG_HEAD"];
-/// A rebase refused for a file in the way of one of its steps leaves the `ORIG_HEAD` libgit2's
-/// rebase set, where a refusal changes nothing.
-const REFUSED_REBASE_SETS_ORIG_HEAD: &[&str] = &["ORIG_HEAD"];
 
 /// Expects the repository at `dir` back where `before` was once an operation stopped and was
 /// aborted, but for the files of the operation, which `git` leaves too: a twin compares them with
@@ -296,7 +282,7 @@ fn a_reset_moves_the_branch_as_git_reset_does_in_each_mode() {
         };
         GitWriter.write(&repo.0, &reset).unwrap();
         git(&other.0, &["reset", "--quiet", flag, "HEAD~1"]);
-        assert_twins_alike_but(&repo.0, &other.0, flag, RESET_KEEPS_ORIG_HEAD);
+        assert_twins_alike(&repo.0, &other.0, flag);
     }
 }
 
@@ -418,13 +404,9 @@ fn a_stopped_cherry_pick_continues_with_its_author_and_an_abort_goes_back() {
         };
         GitWriter.write(&repo.0, &abort).unwrap();
         gone_back(&repo.0, &before, &format!("{operation} --abort"));
-        let known = match operation {
-            "merge" => ABORT_KEEPS_AUTO_MERGE,
-            _ => PICK_ABORT_KEEPS_AUTO_MERGE_WITHOUT_ORIG_HEAD,
-        };
         assert!(!git_may_fail(&other.0, &[operation, "side"]));
         git(&other.0, &[operation, "--abort"]);
-        assert_twins_alike_but(&repo.0, &other.0, operation, known);
+        assert_twins_alike(&repo.0, &other.0, operation);
     }
 }
 
@@ -506,12 +488,7 @@ fn a_rebase_either_side_started_is_aborted_by_the_other_and_continued_where_it_s
     git(&other.0, &["checkout", "--ours", "f"]);
     git(&other.0, &["add", "f"]);
     git(&other.0, &["rebase", "--abort"]);
-    assert_twins_alike_but(
-        &repo.0,
-        &other.0,
-        "aborted by Ocelli",
-        ABORT_KEEPS_AUTO_MERGE,
-    );
+    assert_twins_alike(&repo.0, &other.0, "aborted by Ocelli");
 
     // Ocelli starts it: git aborts it.
     let repo = diverged("ocelli-rebase", "ours\n", "theirs\n");
@@ -563,7 +540,7 @@ fn a_stopped_revert_is_aborted_as_git_revert_abort_does() {
     gone_back(&repo.0, &before, "aborted");
     assert!(!git_may_fail(&other.0, &["revert", "--no-edit", &reverted]));
     git(&other.0, &["revert", "--abort"]);
-    assert_twins_alike_but(&repo.0, &other.0, "aborted", REVERT_KEEPS_ORIG_HEAD);
+    assert_twins_alike(&repo.0, &other.0, "aborted");
 }
 
 mod programs;
@@ -688,7 +665,7 @@ fn a_conflicted_link_is_resolved_as_git_resolves_it_and_nothing_outside_is_writt
     };
     GitWriter.write(d, &abort).unwrap();
     git(&other.0, &["merge", "--abort"]);
-    assert_twins_alike_but(d, &other.0, "aborted", ABORT_KEEPS_AUTO_MERGE);
+    assert_twins_alike(d, &other.0, "aborted");
     assert!(
         d.join("f")
             .symlink_metadata()
@@ -761,12 +738,7 @@ fn a_rebase_whose_step_meets_a_file_in_its_way_is_undone_whole() {
         tip: head(&repo.0),
         onto: git(&repo.0, &["rev-parse", "side"]),
     };
-    refused_leaving(
-        &repo.0,
-        &rebase,
-        "in the way",
-        REFUSED_REBASE_SETS_ORIG_HEAD,
-    );
+    refused(&repo.0, &rebase, "in the way");
 }
 
 #[test]
@@ -1095,7 +1067,7 @@ fn an_abort_puts_back_a_file_and_a_directory_the_operation_swapped_as_git_does()
         git_may_fail(&other.0, &["update-index", "--refresh"]);
         GitWriter.write(d, &abort(d, Operation::Merge)).unwrap();
         git(&other.0, &["merge", "--abort"]);
-        assert_twins_alike_but(d, &other.0, name, ABORT_KEEPS_AUTO_MERGE);
+        assert_twins_alike(d, &other.0, name);
     }
 }
 
@@ -1192,7 +1164,7 @@ fn an_abort_never_writes_through_a_link_the_operation_put_in_a_directorys_place(
         "outside\n"
     );
     git(&other.0, &["merge", "--abort"]);
-    assert_twins_alike_but(d, &other.0, "aborted", ABORT_KEEPS_AUTO_MERGE);
+    assert_twins_alike(d, &other.0, "aborted");
 }
 
 #[test]
@@ -1282,9 +1254,9 @@ fn an_abort_over_a_submodule_moved_or_replaced_ends_as_git_does_or_keeps_its_con
     git_may_fail(&other.0, &["update-index", "--refresh"]);
     GitWriter.write(d, &abort(d, Operation::Merge)).unwrap();
     git(&other.0, &["merge", "--abort"]);
-    assert_twins_alike_but(d, &other.0, "aborted", ABORT_KEEPS_AUTO_MERGE);
+    assert_twins_alike(d, &other.0, "aborted");
 
-    // Theirs puts a file in its place: an abort that cannot finish keeps the merge stopped.
+    // Theirs puts a file in its place: the abort puts the submodule back, as git's does.
     let (repo, _sub) = with_submodule("sub-file", &|d, _| {
         git(d, &["rm", "--quiet", "--cached", "m"]);
         std::fs::remove_dir_all(d.join("m")).unwrap();
@@ -1292,12 +1264,11 @@ fn an_abort_over_a_submodule_moved_or_replaced_ends_as_git_does_or_keeps_its_con
     });
     let d = &repo.0;
     assert!(!git_may_fail(d, &["merge", "side"]));
-    let index = git(d, &["ls-files", "--stage"]);
-    // Known to differ from a refusal without an ADR: the abort writes `f` back before it meets
-    // the file in `m`'s place, and then keeps the conflicts, where a refusal changes nothing.
-    stopped_partway(d, &abort(d, Operation::Merge), "conflicts kept");
-    assert_eq!(git(d, &["ls-files", "--stage"]), index);
-    assert!(GitReader.load_refs(d).unwrap().in_progress.is_some());
+    let other = twin(&repo, "sub-file-twin");
+    git_may_fail(&other.0, &["update-index", "--refresh"]);
+    GitWriter.write(d, &abort(d, Operation::Merge)).unwrap();
+    git(&other.0, &["merge", "--abort"]);
+    assert_twins_alike(d, &other.0, "aborted over a file in the submodule's place");
 }
 
 #[test]

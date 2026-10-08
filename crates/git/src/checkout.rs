@@ -38,7 +38,15 @@ pub(crate) fn check_out(repo: &Repository, target: &Commit) -> Result<()> {
     if changed.is_empty() {
         return Ok(());
     }
-    untracked_where_a_file_goes(repo, &goal, &changed)?;
+    let written: Vec<String> = changed
+        .iter()
+        .filter(|p| {
+            goal.get_path(Path::new(p.as_str()))
+                .is_ok_and(|e| e.kind() != Some(git2::ObjectType::Tree))
+        })
+        .cloned()
+        .collect();
+    nothing_untracked_in_the_way(repo, &written)?;
     let mut in_the_way = Vec::new();
     let mut checkout = CheckoutBuilder::new();
     // Only the paths the target changes: a file deleted in the working directory comes back
@@ -75,43 +83,63 @@ pub(crate) fn check_out(repo: &Repository, target: &Commit) -> Result<()> {
     Ok(())
 }
 
-/// Refuses where the target puts a file in the place of a directory that holds a file the index
-/// does not, untracked or ignored: libgit2 would fail halfway, the directory's tracked files gone
-/// already, where `git switch` refuses for an untracked file and deletes an ignored one. Ocelli
-/// keeps both.
-fn untracked_where_a_file_goes(
-    repo: &Repository,
-    goal: &git2::Tree,
-    changed: &[String],
-) -> Result<()> {
+/// Refuses where a write would put a file at one of `files`, the paths its result holds a file at
+/// and the checked-out commit does not hold so, and the working directory has a file the index
+/// does not track in the way: a directory holding one where a file goes, or one where a directory
+/// goes. libgit2 would stop halfway, or a cherry-pick commit without the file, where `git`
+/// refuses for an untracked file and deletes an ignored one; Ocelli keeps both (ADR-0033).
+pub(crate) fn nothing_untracked_in_the_way(repo: &Repository, files: &[String]) -> Result<()> {
     let Some(root) = repo.workdir() else {
         return Ok(());
     };
     let index = repo.index()?;
-    for path in changed {
-        let file_goes = goal
-            .get_path(Path::new(path))
-            .is_ok_and(|e| e.kind() != Some(git2::ObjectType::Tree));
+    let tracked = |p: &str| index.get_path(Path::new(p), 0).is_some();
+    for path in files {
         let dir = root.join(path);
-        if !file_goes || !dir.symlink_metadata().is_ok_and(|m| m.is_dir()) {
-            continue;
+        if dir.symlink_metadata().is_ok_and(|m| m.is_dir()) {
+            let mut found = Vec::new();
+            files_below(root, &dir, &mut found)?;
+            let mut kept: Vec<_> = found.into_iter().filter(|f| !tracked(f)).collect();
+            if !kept.is_empty() {
+                kept.sort();
+                bail!(
+                    "{path} is a directory holding files the commit does not track, which a \
+                     file would replace: move {} first",
+                    kept.join(", ")
+                );
+            }
         }
-        let mut found = Vec::new();
-        files_below(root, &dir, &mut found)?;
-        let mut kept: Vec<_> = found
-            .into_iter()
-            .filter(|f| index.get_path(Path::new(f), 0).is_none())
-            .collect();
-        if !kept.is_empty() {
-            kept.sort();
-            bail!(
-                "{path} is a directory holding files the commit does not track, which a file \
-                 would replace: move {} first",
-                kept.join(", ")
-            );
+        let parts: Vec<&str> = path.split('/').collect();
+        for i in 1..parts.len() {
+            let above = parts[..i].join("/");
+            let there = root.join(&above).symlink_metadata();
+            if there.is_ok_and(|m| !m.is_dir()) && !tracked(&above) {
+                bail!(
+                    "{above} is a file the commit does not track where {path} needs a directory: \
+                     move it first"
+                );
+            }
         }
     }
     Ok(())
+}
+
+/// The paths `index` holds a file at, at any stage, that `head` does not hold so: where a write
+/// whose result is `index` puts a file.
+pub(crate) fn files_written(head: &git2::Tree, index: &git2::Index) -> Result<Vec<String>> {
+    let mut files = Vec::new();
+    for entry in index.iter() {
+        let path = String::from_utf8_lossy(&entry.path).into_owned();
+        let same = head
+            .get_path(Path::new(&path))
+            .is_ok_and(|e| e.id() == entry.id && e.filemode() as u32 == entry.mode);
+        if !same {
+            files.push(path);
+        }
+    }
+    files.sort();
+    files.dedup();
+    Ok(files)
 }
 
 /// The files below `dir`, by their path from `root`, links among them, none followed.
