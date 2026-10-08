@@ -1,3 +1,5 @@
+import type { Write, WriteOf } from './writes.ts';
+
 export type CommitKind = 'commit' | 'stash' | 'working';
 
 export interface NodeJson {
@@ -73,6 +75,32 @@ export interface Selected {
   generation: number;
   node: NodeJson;
   relatives: Relative[];
+  /** The operations of G-5 the commit offers on the checked-out branch, as the core decides them
+      (ADR-0033, ADR-0036); null for a stash or the working directory, and until the load's refs
+      are read. */
+  operations: Offered | null;
+}
+
+/** The operations a commit offers, each with its write, or why there are none. */
+export type Offered = { operations: Write[] } | { reason: string };
+
+/** A transfer the refs make possible, with whether it can be stopped while it runs, or why there
+    is none, as the core decides (ADR-0035). */
+export type Transfer<K extends 'fetch' | 'pull' | 'push'> =
+  | { write: WriteOf<K>; canStop: boolean }
+  | { reason: string };
+
+/** The transfers the toolbar offers. */
+export interface Transfers {
+  fetch: Transfer<'fetch'>;
+  pull: Transfer<'pull'>;
+  push: Transfer<'push'>;
+}
+
+/** The `load-refs` payload: the refs, and the transfers the core decides from them (ADR-0036). */
+export interface LoadedRefs {
+  refs: RepoRefs;
+  transfers: Transfers;
 }
 
 /** Every row matching a search, newest first, and the nodes of the first ones. */

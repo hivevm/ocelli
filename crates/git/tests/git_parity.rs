@@ -1,14 +1,13 @@
 //! Each local write of the port against the `git` command it stands for, in every repository
-//! state that changes its outcome (docs/CONVENTIONS.md, the entry on writes that do what `git`
-//! does). A state is set up once, then copied twice: `git` runs on one copy and the writer on the
-//! other. Where `git` goes through, the writer leaves the same `HEAD`, refs, upstreams, stashes,
-//! index, operation in progress, and working directory, ignored files included; where `git`
-//! refuses with nothing changed, the writer refuses with nothing changed. A case that departs
-//! from `git` on purpose is listed in `DEPARTURES` with the ADR that decides it, and a case where
-//! the writer is known to differ from `git` without an ADR is listed in `MISMATCHES`, asserted to
-//! still differ, so that a fix shows up as a failure that removes the entry. The configuration a
-//! write reads is a state too: `CONFIGURATION` lists each key with the values the states set it
-//! to, and a value no state sets fails the comparison.
+//! state that changes its outcome (ADR-0033). A state is set up once, then copied twice: `git`
+//! runs on one copy and the writer on the other. Where `git` goes through, the writer leaves the
+//! same `HEAD`, refs, upstreams, stashes, index, operation in progress, and working directory,
+//! ignored files included; where `git` refuses with nothing changed, the writer refuses with
+//! nothing changed. A case that departs from `git` on purpose is listed in `DEPARTURES` with the
+//! ADR that decides it, and a case where the writer is known to differ from `git` without an ADR
+//! is listed in `MISMATCHES`, asserted to still differ, so that a fix shows up as a failure that
+//! removes the entry. The configuration a write reads is a state too: `CONFIGURATION` lists each
+//! key with the values the states set it to, and a value no state sets fails the comparison.
 //!
 //! The transfers are left out: they reach a remote, which no state here varies, and `write.rs`
 //! and `write_credentials.rs` test them. Resolving, continuing, and aborting a stopped operation
@@ -594,7 +593,7 @@ const WRITES: &[(&str, MakeWrite, &[&str])] = &[
     ),
 ];
 
-/// The operations of ADR-0033 that write a history from the checked-out branch.
+/// The history operations that write a history from the checked-out branch (ADR-0033).
 const OPERATIONS: &[&str] = &[
     "merge",
     "fast-forward merge",
@@ -602,7 +601,7 @@ const OPERATIONS: &[&str] = &[
     "cherry-pick",
     "revert",
 ];
-/// The operations of ADR-0033, the resets included.
+/// The history operations, the resets included (ADR-0033).
 const HISTORY: &[&str] = &[
     "merge",
     "fast-forward merge",

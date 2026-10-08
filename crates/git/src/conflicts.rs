@@ -1,5 +1,5 @@
 //! Resolving a stopped operation's conflicts file by file, and continuing or aborting the
-//! operation, whoever started it (ADR-0033). No program the repository names runs (ADR-0033).
+//! operation, whoever started it, running no program the repository names (ADR-0033).
 
 use crate::checkout::entry_as_in;
 use crate::git::WORKTREE;

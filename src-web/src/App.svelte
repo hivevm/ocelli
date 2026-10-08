@@ -15,11 +15,10 @@
   import type { RowRange } from './rowWindow.ts';
   import { Newest } from './hostAnswers.ts';
   import { actionLabel, confirmedWrite, type Outcome, type Write } from './writes.ts';
-  import { canStop, fetchOf, pullOf, pushOf } from './transfers.ts';
-  import { historyOperations } from './operations.ts';
   import StashDialog from './StashDialog.svelte';
   import type {
     NodeJson, FileChange, DiffLine, RepoRefs, Growth, RowWindow, Relative, Selected, Found,
+    LoadedRefs, Offered, Transfer, Transfers,
   } from './types.ts';
   import { applyTheme, storedTheme, type Theme } from './theme/palette.ts';
 
@@ -52,6 +51,8 @@
   let growth          = $state<Growth | null>(null);
   let view            = $state<RowWindow | null>(null);
   let repoRefs        = $state<RepoRefs | null>(null);
+  // The transfers the core decides from the refs, sent with them (ADR-0036).
+  let transfers       = $state<Transfers | null>(null);
   let status          = $state(READY_STATUS);
   let repoLabel       = $state('(no repository)');
   let currentRepoPath = $state<string | null>(null);
@@ -93,21 +94,22 @@
   // as the core decides (ADR-0035).
   let fetching = $state(false);
   let cancellable = $state(false);
-  // The fetch, pull, and push the refs make possible, or why there is none, as the core decides.
-  const fetchable = $derived(repoRefs ? fetchOf(repoRefs) : { reason: 'No repository is open' });
-  const pullable = $derived(repoRefs ? pullOf(repoRefs) : { reason: 'No repository is open' });
-  const pushable = $derived(repoRefs ? pushOf(repoRefs) : { reason: 'No repository is open' });
+  // The fetch, pull, and push the refs make possible, or why there is none, as the host sends them.
+  const closed = { reason: 'No repository is open' };
+  const fetchable = $derived<Transfer<'fetch'>>(transfers?.fetch ?? closed);
+  const pullable = $derived<Transfer<'pull'>>(transfers?.pull ?? closed);
+  const pushable = $derived<Transfer<'push'>>(transfers?.push ?? closed);
 
   /** Runs a transfer, the toolbar's buttons turning into one that cancels it. A transfer refused
       may have moved remote branches by its fetch, so the repository is read again, the refusal
       kept in view (ADR-0035). */
-  async function transfer(answer: { write: Write } | { reason: string }, doing: string): Promise<void> {
+  async function transfer(answer: { write: Write; canStop: boolean } | { reason: string }, doing: string): Promise<void> {
     if (!('write' in answer)) {
       status = answer.reason;
       return;
     }
     fetching = true;
-    cancellable = canStop(answer.write);
+    cancellable = answer.canStop;
     status = doing;
     const error = await performWrite(answer.write);
     fetching = false;
@@ -135,12 +137,13 @@
   const selectedChips = $derived(
     selectedNode ? commitChips(selectedNode.refs, repoRefs, selectedNode.sha) : [],
   );
-  // The operations of G-5 the selected commit offers on the checked-out branch (ADR-0033).
-  const selectedOperations = $derived.by(() => {
-    if (!repoRefs || selectedNode?.kind !== 'commit') return [];
-    const offered = historyOperations(repoRefs, selectedNode.sha);
-    return 'operations' in offered ? offered.operations : [];
-  });
+  // The operations of G-5 the selected commit offers on the checked-out branch, as the host's
+  // answer to selecting it says (ADR-0033, ADR-0036).
+  let offered = $state<Offered | null>(null);
+  // Whether the refs of the load on screen have arrived, after which every commit has its
+  // operations: an answer without them was computed before, and is asked for again.
+  let refsArrived = false;
+  const selectedOperations = $derived(offered && 'operations' in offered ? offered.operations : []);
 
   /** A command that failed: the status bar says so. */
   function report(e: unknown): void {
@@ -186,6 +189,8 @@
       refreshes.drop();
       selectedNode = null;
       relatives = new Map();
+      offered = null;
+      refsArrived = false;
       changedFiles = [];
       diffFile = null;
       diffLines = [];
@@ -194,16 +199,19 @@
     rereadWindow();
     void updateLoadedRefs();
     // The selection's parents and lineage may reach into the rows just added.
-    if (selectedNode) void refreshRelatives(selectedNode.sha);
+    if (selectedNode) void refreshSelection(selectedNode.sha);
     // The commit a write left selected, which the core names once this load has laid it out.
     if (next.select !== null) jumpToRow(next.select);
   }
 
-  async function refreshRelatives(sha: string): Promise<void> {
+  /** Asks for the selection again: its relatives as far as they have loaded, and its operations
+      once the load's refs are read. */
+  async function refreshSelection(sha: string): Promise<void> {
     try {
       const selected = await refreshes.ask(() => invoke<Selected | null>('selection'), currentLoad);
       if (selected && selected.node.sha === sha && selectedNode?.sha === sha) {
         relatives = relativesOf(selected);
+        offered = selected.operations;
       }
     } catch (e) {
       report(e);
@@ -245,6 +253,7 @@
     refreshes.drop();
     selectedNode = null;
     relatives = new Map();
+    offered = null;
     invoke('deselect').then(rereadWindow, report);
     changedFiles = [];
     diffFile = null;
@@ -286,13 +295,13 @@
       listen<Growth>('history-grew', (e) => onGrowth(e.payload)),
       // Refs come from the same repository read as the graph (ADR-0026), so the
       // sidebar never describes a different state than the commits on screen.
-      listen<string>('load-refs', (e) => {
-        try {
-          repoRefs = typeof e.payload === 'string' ? JSON.parse(e.payload) : e.payload;
-        } catch {
-          repoRefs = null;
-        }
+      listen<LoadedRefs>('load-refs', (e) => {
+        repoRefs = e.payload.refs;
+        transfers = e.payload.transfers;
+        refsArrived = true;
         void updateLoadedRefs();
+        // A commit selected before the refs were read gets its operations now.
+        if (selectedNode) void refreshSelection(selectedNode.sha);
       }),
       listen<string>('set-status',     (e) => { status = e.payload; }),
       listen<string>('write-progress', (e) => { if (fetching) status = e.payload; }),
@@ -416,6 +425,11 @@
     refreshes.drop();
     selectedNode = selected.node;
     relatives = relativesOf(selected);
+    offered = selected.operations;
+    // Answered before the refs were read, which have arrived since: ask again for the operations.
+    if (selected.operations === null && selected.node.kind === 'commit' && refsArrived) {
+      void refreshSelection(selected.node.sha);
+    }
     changedFiles = [];
     diffFile = null;
     diffLines = [];

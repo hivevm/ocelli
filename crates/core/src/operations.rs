@@ -1,11 +1,36 @@
 //! The operations of G-5 a commit offers on the checked-out branch, decided once for both front
 //! ends (ADR-0033): which of merging it in, rebasing onto it, cherry-picking it, reverting it,
-//! and resetting to it make sense, each with the write it hands the writer.
+//! and resetting to it make sense, each with the write it hands the writer. The desktop host sends
+//! the answer to the web interface as `Offered`, which it restates none of (ADR-0036).
 
 use crate::model::RepoRefs;
 use crate::port::{ResetMode, Write};
+use serde::Serialize;
+
+/// The operations a commit offers, or why there are none: `{ operations }` or `{ reason }` in
+/// JSON.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(untagged)]
+pub enum Offered {
+    Operations { operations: Vec<Write> },
+    Refused { reason: String },
+}
+
+impl From<Result<Vec<Write>, String>> for Offered {
+    fn from(answer: Result<Vec<Write>, String>) -> Self {
+        match answer {
+            Ok(operations) => Offered::Operations { operations },
+            Err(reason) => Offered::Refused { reason },
+        }
+    }
+}
 
 impl RepoRefs {
+    /// The history operations of `sha` as a front end out of process receives them.
+    pub fn offered(&self, sha: &str) -> Offered {
+        self.history_operations(sha).into()
+    }
+
     /// The operations the commit `sha` offers on the checked-out branch, in the order a front end
     /// lists them, or why there are none. The checked-out commit offers only a revert and a
     /// reset: merging it, rebasing onto it, or picking it changes nothing. A merge is named after
@@ -112,6 +137,26 @@ mod tests {
         assert_eq!(
             detached.history_operations("t"),
             Err("No branch is checked out".into())
+        );
+    }
+
+    #[test]
+    // Verifies: ADR-0036, ADR-0033
+    fn the_operations_offered_serialize_as_their_writes_or_a_reason() {
+        let refs = RepoRefs {
+            locals: vec![local("main", "h", true)],
+            ..RepoRefs::default()
+        };
+        assert_eq!(
+            serde_json::to_value(refs.offered("h")).unwrap(),
+            serde_json::json!({ "operations": [
+                { "kind": "revert", "branch": "main", "tip": "h", "commit": "h" },
+                { "kind": "reset", "branch": "main", "tip": "h", "commit": "h", "mode": "mixed" },
+            ] })
+        );
+        assert_eq!(
+            serde_json::to_value(RepoRefs::default().offered("h")).unwrap(),
+            serde_json::json!({ "reason": "No branch is checked out" })
         );
     }
 }

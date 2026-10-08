@@ -7,9 +7,10 @@
 use ocelli_core::graph::LaidChunk;
 use ocelli_core::history::Lineage;
 use ocelli_core::load::LoadSession;
-use ocelli_core::model::{Edge, NodeJson};
+use ocelli_core::model::{CommitKind, Edge, NodeJson, RepoRefs};
+use ocelli_core::operations::Offered;
 use serde::Serialize;
-use std::sync::RwLock;
+use std::sync::{Arc, RwLock};
 
 /// The rows of one window, as the web interface draws them. With a commit selected, `lit_nodes`
 /// and `lit_edges` say which of the window's nodes and edges belong to its lineage (G-17); the
@@ -54,13 +55,16 @@ pub struct Relative {
     pub row: Option<usize>,
 }
 
-/// The selected commit with its parents and children.
+/// The selected commit with its parents and children, and the history operations it offers on
+/// the checked-out branch as the core decides them from the load's refs (ADR-0036): none for a
+/// stash or the working directory, and none until the load has read its refs.
 #[derive(Debug, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct Selected {
     pub generation: u64,
     pub node: NodeJson,
     pub relatives: Vec<Relative>,
+    pub operations: Option<Offered>,
 }
 
 /// The rows matching a search, newest first, and the nodes of the first `limit` of them, which
@@ -88,6 +92,8 @@ struct Current {
     /// The last search: its query, the rows it searched, and its matches among them, so asking
     /// again as the history grows searches only the rows added.
     searched: Option<(String, usize, Vec<usize>)>,
+    /// The refs of the generation the session holds, once its load has read them.
+    refs: Option<Arc<RepoRefs>>,
 }
 
 impl Current {
@@ -133,6 +139,7 @@ impl Session {
             c.session = LoadSession::new();
             c.selected = None;
             c.searched = None;
+            c.refs = None;
             if let Some((_, sha)) = c.select_again.take_if(|(g, _)| *g == generation) {
                 c.session.select_again(sha);
             }
@@ -149,6 +156,19 @@ impl Session {
             select,
             ..c.growth()
         })
+    }
+
+    /// Keeps the refs `generation` read, which the operations of a selection are decided from.
+    /// False when a newer load has begun, which tells the load to stop.
+    pub fn keep_refs(&self, generation: u64, refs: Arc<RepoRefs>) -> bool {
+        let mut c = self.current.write().unwrap();
+        if generation != c.begun {
+            return false;
+        }
+        if c.generation == generation {
+            c.refs = Some(refs);
+        }
+        true
     }
 
     /// Whether `generation` is the newest load begun.
@@ -281,10 +301,15 @@ fn selected(c: &Current, row: usize) -> Selected {
             row: history.row_of(sha),
         })
         .collect();
+    let operations = match node.kind {
+        CommitKind::Commit => c.refs.as_ref().map(|refs| refs.offered(&node.sha)),
+        CommitKind::Stash | CommitKind::Working => None,
+    };
     Selected {
         generation: c.generation,
         node,
         relatives,
+        operations,
     }
 }
 
@@ -475,6 +500,60 @@ pub(crate) mod tests {
             session.search("c8", 9).rows,
             [1],
             "another query searches afresh"
+        );
+    }
+
+    #[test]
+    // Verifies: ADR-0036, ADR-0033
+    fn a_selected_commit_offers_the_operations_of_its_loads_refs_a_stash_none() {
+        use ocelli_core::model::LocalBranch;
+        let refs = Arc::new(RepoRefs {
+            locals: vec![LocalBranch {
+                name: "main".into(),
+                sha: "c9".into(),
+                short_sha: "c9".into(),
+                is_head: true,
+                upstream: None,
+                ahead: 0,
+                behind: 0,
+                merged: true,
+            }],
+            ..RepoRefs::default()
+        });
+        let session = Session::default();
+        let mut layout = Layout::new();
+        let g = session.begin(None);
+        let mut first = three(9);
+        let mut stash = commit("s", 10, &["c9"]);
+        stash.kind = CommitKind::Stash;
+        stash.stash = Some(0);
+        first.insert(0, stash);
+        session.append(g, layout.lay_out(first)).unwrap();
+        let row = |sha: &str| session.rows_of(&[sha.into()])[0].unwrap();
+        assert_eq!(
+            session.select(row("c8")).unwrap().operations,
+            None,
+            "the refs are not read yet"
+        );
+        assert!(session.keep_refs(g, Arc::clone(&refs)));
+        assert_eq!(
+            session.selection().unwrap().operations,
+            Some(refs.offered("c8"))
+        );
+        assert_eq!(session.select(row("s")).unwrap().operations, None);
+
+        let newer = session.begin(None);
+        assert!(
+            !session.keep_refs(g, Arc::clone(&refs)),
+            "the older load stops"
+        );
+        session
+            .append(newer, Layout::new().lay_out(three(9)))
+            .unwrap();
+        assert_eq!(
+            session.select(1).unwrap().operations,
+            None,
+            "the refs went with the history"
         );
     }
 
