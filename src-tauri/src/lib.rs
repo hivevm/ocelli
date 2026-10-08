@@ -1,5 +1,4 @@
 mod commands;
-mod session;
 
 use commands::AppState;
 use std::sync::Mutex;
@@ -24,11 +23,8 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .manage(AppState {
-            current_repo: Mutex::new(None),
             startup_repo: Mutex::new(startup_path(std::env::args()).map(resolved)),
-            session: Default::default(),
-            cancel: Default::default(),
-            writing: Default::default(),
+            host: Default::default(),
         })
         .invoke_handler(tauri::generate_handler![
             commands::startup_repo,

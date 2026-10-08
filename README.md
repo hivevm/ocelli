@@ -89,7 +89,9 @@ Install the dependencies from the lockfile first, and again after a dependency c
 - **Lint:** `cargo fmt --all --check`, `cargo clippy --workspace --all-targets --locked -- -D
   warnings`, and `bun run --cwd src-web lint`
 - **Run:** the desktop application with `bun run tauri dev`; the terminal application with
-  `cargo run -p ocelli-cli -- [--ascii] [PATH]`
+  `cargo run -p ocelli-cli -- [--ascii] [PATH]`; the remote server with
+  `cargo run -p ocelli-server -- --root <folder> [--port <port>]`, which embeds the web
+  interface's build, so `bun run --cwd src-web build` runs before it is built
 
 ## Usage
 
@@ -120,6 +122,20 @@ names, a results panel lists them for click-to-jump, and `Enter`/`Shift+Enter` c
 hits. Avatars in the detail panel are loaded from Gravatar only after the toggle in the status bar
 is switched on — a fresh installation makes no network requests
 ([ADR-0023](docs/adr/0023-no-egress-hardened-webview.md)).
+
+### In a browser
+
+`ocelli-server --root <folder>` runs on the machine that holds the repositories and serves the
+same web interface to a browser, as VS Code's remote development does. It listens on that
+machine's loopback addresses only, on the port `--port` names or a free one, and prints once a
+URL that carries a secret token; opening it logs the browser in with a session cookie, and a
+request without it, or from another web page, is refused
+([ADR-0038](docs/adr/0038-remote-server-localhost-tls-session-cookie.md)).
+From another machine, forward the port through SSH (`ssh -L 8000:localhost:8000 host`, the server
+started with `--port 8000`) and open the URL there. The browser opens the repository the server
+root is and nothing outside the root
+([ADR-0039](docs/adr/0039-git-adapter-confined-to-the-server-root.md)); the
+server only reads, and every restart prints a new URL.
 
 ### In the terminal
 
@@ -183,14 +199,16 @@ docs/CONVENTIONS.md   # how this project writes what no check decides, kept curr
 docs/ARCHITECTURE.md  # the system as it currently stands
 docs/adr/             # Architecture Decision Records (+ template)
 docs/plan/            # open work: feature specs and their tickets, deleted as they land
+crates/commands/      # the commands both hosts of the web interface answer (ADR-0037)
 crates/core/          # the core: commit graph, layout, and the repository port (ADR-0009)
 crates/git/           # the repository port implemented with git2 (ADR-0019)
 crates/tui/           # the terminal application, ocelli-cli (ADR-0028)
+crates/server/        # the remote server, ocelli-server: the web interface in a browser (ADR-0037)
 crates/measure/       # ocelli-measure: edge crossings on real repositories (Q-1); with
                       # scripts/measure-memory.sh (Q-3) and scripts/measure-mutants.sh (the git
                       # adapter's guards) run weekly by .github/workflows/measure.yml
 src-tauri/            # the desktop host (ADR-0018)
-src-web/              # the web interface the desktop host shows (ADR-0022)
+src-web/              # the web interface the desktop host and the remote server show (ADR-0022)
 flatpak/              # the Flatpak manifest of the release pipeline (ADR-0025)
 scripts/check-all.sh  # runs the checks, sensors, and self-tests, as the hooks and CI do
 scripts/check-*.sh    # checks: each fails on what breaks a rule

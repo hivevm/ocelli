@@ -127,8 +127,8 @@ measure() {
       return 1
     fi
     if (($#)); then
-      # The status line the desktop host writes after a load, loaded_status in
-      # src-tauri/src/commands.rs, whose tests hold this shape.
+      # The status line the desktop host writes after a load, from the load in
+      # crates/commands/src/lib.rs, whose tests hold this shape.
       loaded="$(grep -m 1 -oE '^[0-9]+ commits' "$work/app.log" | grep -oE '^[0-9]+')"
       [[ -z "$loaded" ]] && continue
     fi

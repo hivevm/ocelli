@@ -1,6 +1,5 @@
 <script lang="ts">
-  import { invoke } from '@tauri-apps/api/core';
-  import { listen } from '@tauri-apps/api/event';
+  import { invoke, listen } from './host.ts';
   import { onMount } from 'svelte';
   import GraphCanvas, { EMPTY_GRAPH_WIDTH, REFS_WIDTH, graphAreaWidth } from './GraphCanvas.svelte';
   import DiffViewer from './DiffViewer.svelte';
@@ -289,7 +288,7 @@
     }
   }
 
-  // ── Tauri event listeners ──────────────────────────────────────────────────
+  // ── Host event listeners ───────────────────────────────────────────────────
   onMount(() => {
     const unlisten = Promise.all([
       listen<Growth>('history-grew', (e) => onGrowth(e.payload)),

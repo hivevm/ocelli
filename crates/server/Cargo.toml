@@ -1,0 +1,30 @@
+[package]
+name = "ocelli-server"
+description = "The remote server: the web interface in a browser, next to the repositories (ADR-0037)"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+
+[[bin]]
+name = "ocelli-server"
+path = "src/main.rs"
+
+# No part of Tauri or WebKit: the server runs on a machine without a display (ADR-0037).
+[dependencies]
+ocelli-commands = { workspace = true }
+ocelli-core = { workspace = true }
+axum = { version = "0.8.9", default-features = false, features = ["http1", "tokio", "ws"] }
+base64 = "0.22.1"
+getrandom = "0.3.4"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = "0.10.9"
+tokio = { version = "1", features = ["macros", "net", "rt-multi-thread", "sync"] }
+
+[dev-dependencies]
+futures-util = { version = "0.3.34", default-features = false, features = ["sink"] }
+tokio = { version = "1", features = ["io-util", "time"] }
+tokio-tungstenite = "0.29.0"
+
+[lints]
+workspace = true
