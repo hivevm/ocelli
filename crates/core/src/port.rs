@@ -269,9 +269,8 @@ pub enum Confirmation {
 /// Writes to a repository, running no program the repository names (ADR-0033).
 pub trait RepositoryWriter {
     /// Performs `write`, or refuses it with nothing changed and says why. Returns the commit the
-    /// write made, which the load after it selects, where it made one. A write that takes long,
-    /// one that reaches a remote, tells `progress` how far it has come, and stops where `progress`
-    /// returns false.
+    /// write made, which the load after it selects, where it made one. A transfer tells
+    /// `progress` how far it has come, and stops where `progress` returns false.
     fn write_reporting(
         &self,
         repo: &Path,

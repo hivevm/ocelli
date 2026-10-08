@@ -168,7 +168,7 @@ export interface RepoRefs {
   submodules: Submodule[];
   /** Null when this repository is neither a submodule nor a linked worktree. */
   parent: ParentRepo | null;
-  /** The remote a fetch reaches without one named, null where there is none to choose. */
+  /** The default remote, null where there is none to choose. */
   defaultRemote: string | null;
   /** The operation stopped in the repository, whoever started it, null where none is. */
   inProgress: InProgress | null;
@@ -212,9 +212,14 @@ export interface FileChange {
   status: FileStatus;
   additions: number;
   deletions: number;
-  /** For the working-directory node's files only: how much of the change is staged. */
-  staged?: 'no' | 'yes' | 'partly';
-  /** For the working-directory node's files only: the content shown, by blob id, which staging
-      and unstaging expect to find. */
-  shown?: { workdir: string | null; index: string | null };
+  /** For the working-directory node's files only, each of which carries one: how the file
+      stands in the index. */
+  staging?: Staging;
+}
+
+/** How a file of the working-directory node stands in the index: how much of its change is
+    staged, and the content shown, by blob id, which staging and unstaging expect to find. */
+export interface Staging {
+  staged: 'no' | 'yes' | 'partly';
+  shown: { workdir: string | null; index: string | null };
 }

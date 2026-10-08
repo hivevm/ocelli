@@ -270,7 +270,7 @@ pub async fn perform_write(
     if state.writing.swap(true, Ordering::AcqRel) {
         return Err("A write is still running".into());
     }
-    // A write that takes long reports how far it has come as `write-progress` events, at most
+    // A transfer reports how far it has come as `write-progress` events, at most
     // every tenth of a second, and stops once `cancel_write` sets the flag this write was handed
     // (ADR-0035).
     let cancel = Arc::new(AtomicBool::new(false));

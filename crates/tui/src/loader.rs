@@ -27,7 +27,7 @@ pub enum Msg {
         path: String,
         lines: Result<Vec<DiffLine>, String>,
     },
-    /// How far a write that takes long has come.
+    /// How far a transfer has come.
     WriteProgress(String),
     /// A write done, with the commit it made where it made one, or refused with nothing changed.
     Written(Result<Option<String>, String>),

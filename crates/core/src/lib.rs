@@ -3,8 +3,10 @@
 //! [`graph`] is pure functions over values (ADR-0010). [`history`] keeps the laid-out graph and
 //! answers the front ends' reads of it: windows of rows, search, and lineage (ADR-0031).
 
+pub mod actions;
 pub mod graph;
 pub mod history;
 pub mod load;
 pub mod model;
 pub mod port;
+pub mod transfer;

@@ -4,12 +4,17 @@
 //! one whose expected state the repository does not hold is refused with nothing changed. Writing
 //! runs none of the programs the repository names (Q-4).
 
+#![allow(
+    clippy::disallowed_methods,
+    reason = "a test sets a repository up by hand, the way a developer would"
+)]
 #![cfg(unix)]
 
+mod git_command;
+use git_command::git_command;
 use ocelli_core::port::{RepositoryReader, RepositoryWriter, Write};
 use ocelli_git::GitWriter;
 use std::path::{Path, PathBuf};
-use std::process::Command;
 
 mod programs;
 
@@ -31,9 +36,7 @@ impl Drop for Scratch {
 }
 
 fn git(dir: &Path, args: &[&str]) -> String {
-    let out = Command::new("git")
-        .arg("-C")
-        .arg(dir)
+    let out = git_command(dir)
         .args(["-c", "user.name=F", "-c", "user.email=f@example.invalid"])
         .args(args)
         .output()
@@ -619,9 +622,7 @@ fn a_stash_with_anything_in_its_way_is_refused_with_nothing_changed() {
 
 /// Whether `git` takes `name` as a tag on `commit`; the tag it made is deleted again.
 fn git_takes(dir: &Path, name: &str, commit: &str) -> bool {
-    let made = Command::new("git")
-        .arg("-C")
-        .arg(dir)
+    let made = git_command(dir)
         .args(["tag", "--", name, commit])
         .output()
         .unwrap()
@@ -635,9 +636,7 @@ fn git_takes(dir: &Path, name: &str, commit: &str) -> bool {
 
 /// The message of the annotated tag `name`, as `git` reads it back.
 fn tag_message(dir: &Path, name: &str) -> String {
-    let out = Command::new("git")
-        .arg("-C")
-        .arg(dir)
+    let out = git_command(dir)
         .args(["cat-file", "tag", &format!("refs/tags/{name}")])
         .output()
         .unwrap();
@@ -889,7 +888,7 @@ fn the_index_is_committed_by_the_configured_identity_on_the_head_shown() {
         git(&scratch.0, &["log", "-1", "--format=%an %s"]),
         "Ada Change f"
     );
-    let expected = Command::new("git")
+    let expected = git_command(std::env::temp_dir())
         .args(["stripspace"])
         .stdin(std::process::Stdio::piped())
         .stdout(std::process::Stdio::piped())
@@ -1053,9 +1052,7 @@ fn an_annotated_tag_is_refused_where_annotated_tags_are_always_signed() {
 
 /// HEAD as `git` reads it: the branch it is on, or the commit it is detached at.
 fn head_of(dir: &Path) -> String {
-    let out = Command::new("git")
-        .arg("-C")
-        .arg(dir)
+    let out = git_command(dir)
         .args(["symbolic-ref", "--quiet", "--short", "HEAD"])
         .output()
         .unwrap();

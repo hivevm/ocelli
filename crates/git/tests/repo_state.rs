@@ -1,3 +1,7 @@
+#![allow(
+    clippy::disallowed_methods,
+    reason = "a test sets a repository up by hand, the way a developer would"
+)]
 // Verifies: ADR-0027
 //! Fixture tests for the repository-state read behind the sidebar (ADR-0026,
 //! ADR-0027): submodules, working trees, and the way back to the parent.

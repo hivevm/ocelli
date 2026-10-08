@@ -1,0 +1,168 @@
+{
+  "canStop": {
+    "abort": false,
+    "applyStash": false,
+    "cherryPick": false,
+    "commit": false,
+    "continue": false,
+    "createBranch": false,
+    "createStash": false,
+    "createTag": false,
+    "deleteBranch": false,
+    "deleteTag": false,
+    "detach": false,
+    "dropStash": false,
+    "fetch": true,
+    "merge": false,
+    "pull": true,
+    "push": false,
+    "rebase": false,
+    "reset": false,
+    "resolve": false,
+    "revert": false,
+    "stageFile": false,
+    "switchBranch": false,
+    "trackRemote": false,
+    "unstageFile": false
+  },
+  "cases": [
+    {
+      "fetch": {
+        "write": {
+          "kind": "fetch",
+          "remote": "origin"
+        }
+      },
+      "pull": {
+        "write": {
+          "branch": "main",
+          "kind": "pull",
+          "tip": "s"
+        }
+      },
+      "push": {
+        "write": {
+          "branch": "main",
+          "kind": "push",
+          "tip": "s"
+        }
+      },
+      "refs": {
+        "defaultRemote": "origin",
+        "inProgress": null,
+        "locals": [
+          {
+            "ahead": 0,
+            "behind": 0,
+            "isHead": true,
+            "merged": true,
+            "name": "main",
+            "sha": "s",
+            "shortSha": "s",
+            "upstream": "origin/main"
+          }
+        ],
+        "parent": null,
+        "remotes": [],
+        "submodules": [],
+        "tags": [],
+        "worktrees": []
+      }
+    },
+    {
+      "fetch": {
+        "write": {
+          "kind": "fetch",
+          "remote": "origin"
+        }
+      },
+      "pull": {
+        "reason": "main has no upstream to pull from"
+      },
+      "push": {
+        "write": {
+          "branch": "main",
+          "kind": "push",
+          "tip": "s"
+        }
+      },
+      "refs": {
+        "defaultRemote": "origin",
+        "inProgress": null,
+        "locals": [
+          {
+            "ahead": 0,
+            "behind": 0,
+            "isHead": true,
+            "merged": true,
+            "name": "main",
+            "sha": "s",
+            "shortSha": "s",
+            "upstream": null
+          }
+        ],
+        "parent": null,
+        "remotes": [],
+        "submodules": [],
+        "tags": [],
+        "worktrees": []
+      }
+    },
+    {
+      "fetch": {
+        "reason": "No remote to fetch"
+      },
+      "pull": {
+        "reason": "main has no upstream to pull from"
+      },
+      "push": {
+        "reason": "There is no remote to push main to"
+      },
+      "refs": {
+        "defaultRemote": null,
+        "inProgress": null,
+        "locals": [
+          {
+            "ahead": 0,
+            "behind": 0,
+            "isHead": true,
+            "merged": true,
+            "name": "main",
+            "sha": "s",
+            "shortSha": "s",
+            "upstream": null
+          }
+        ],
+        "parent": null,
+        "remotes": [],
+        "submodules": [],
+        "tags": [],
+        "worktrees": []
+      }
+    },
+    {
+      "fetch": {
+        "write": {
+          "kind": "fetch",
+          "remote": "origin"
+        }
+      },
+      "pull": {
+        "reason": "No branch is checked out to pull"
+      },
+      "push": {
+        "reason": "No branch is checked out to push"
+      },
+      "refs": {
+        "defaultRemote": "origin",
+        "inProgress": null,
+        "locals": [],
+        "parent": null,
+        "remotes": [],
+        "submodules": [],
+        "tags": [],
+        "worktrees": []
+      }
+    }
+  ]
+}

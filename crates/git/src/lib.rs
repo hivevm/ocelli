@@ -2,9 +2,13 @@
 //! git2 runs no hooks, no `core.fsmonitor`, and no external diff or filter driver, so reading or
 //! writing a repository starts no program the repository names (Q-4).
 
+mod checkout;
 pub mod git;
-mod history;
+mod guard;
+mod message;
+mod operations;
 pub mod refs;
+mod remote;
 mod write;
 
 use anyhow::Result;

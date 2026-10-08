@@ -4,8 +4,14 @@
 //! on, on repositories made with git: each compared with git doing the same on a twin of the
 //! repository, and each refusal leaving the repository as it was.
 
+#![allow(
+    clippy::disallowed_methods,
+    reason = "a test sets a repository up by hand, the way a developer would"
+)]
 #![cfg(unix)]
 
+mod git_command;
+use git_command::git_command;
 use ocelli_core::model::Operation;
 use ocelli_core::port::{RepositoryReader, RepositoryWriter, ResetMode, Take, Write};
 use ocelli_git::{GitReader, GitWriter};
@@ -31,9 +37,7 @@ impl Drop for Scratch {
 }
 
 fn git(dir: &Path, args: &[&str]) -> String {
-    let out = Command::new("git")
-        .arg("-C")
-        .arg(dir)
+    let out = git_command(dir)
         .args([
             "-c",
             "user.name=Ada",
@@ -55,9 +59,7 @@ fn git(dir: &Path, args: &[&str]) -> String {
 
 /// Runs git and says whether it succeeded, for the commands that stop on a conflict.
 fn git_may_fail(dir: &Path, args: &[&str]) -> bool {
-    Command::new("git")
-        .arg("-C")
-        .arg(dir)
+    git_command(dir)
         .args([
             "-c",
             "user.name=Ada",
@@ -1398,4 +1400,141 @@ fn a_directory_made_in_a_conflicted_files_place_is_neither_aborted_nor_resolved_
         std::fs::read_to_string(d.join("f/mine")).unwrap(),
         "the developer's\n"
     );
+}
+
+#[test]
+// Verifies: ADR-0033
+fn a_message_is_cleaned_up_as_git_cleans_it_up_for_the_way_it_is_made() {
+    let message = "fix it\n\n#123 was the issue\n  trailing   \n";
+    // Picked without a conflict, in every mode, and continued after one, where git strips.
+    for (mode, conflict) in [
+        ("", false),
+        ("strip", false),
+        ("whitespace", false),
+        ("verbatim", false),
+        ("", true),
+        ("verbatim", true),
+        ("whitespace", true),
+    ] {
+        let repo = diverged("cleanup", "ours\n", "base\n");
+        let d = &repo.0;
+        if !mode.is_empty() {
+            git(d, &["config", "commit.cleanup", mode]);
+        }
+        git(d, &["switch", "--quiet", "side"]);
+        write_file(d, if conflict { "f" } else { "t" }, "picked\n");
+        git(d, &["add", "--all"]);
+        git(
+            d,
+            &["commit", "--quiet", "--cleanup=verbatim", "-m", message],
+        );
+        git(d, &["switch", "--quiet", "main"]);
+        let other = twin(&repo, "cleanup-twin");
+        let pick = Write::CherryPick {
+            branch: "main".into(),
+            tip: head(d),
+            commit: git(d, &["rev-parse", "side"]),
+        };
+        GitWriter.write(d, &pick).unwrap();
+        let picked = git_may_fail(&other.0, &["cherry-pick", "side"]);
+        assert_eq!(picked, !conflict);
+        if conflict {
+            for dir in [d, &other.0] {
+                write_file(dir, "f", "resolved\n");
+                git(dir, &["add", "f"]);
+            }
+            let go_on = Write::Continue {
+                operation: Operation::CherryPick,
+                head: head(d),
+            };
+            GitWriter.write(d, &go_on).unwrap();
+            git(&other.0, &["cherry-pick", "--continue"]);
+        }
+        let body = |dir: &Path| {
+            let out = git_command(dir)
+                .args(["log", "-1", "--format=%B"])
+                .output()
+                .unwrap();
+            String::from_utf8(out.stdout).unwrap()
+        };
+        assert_eq!(body(d), body(&other.0), "{mode:?} conflict {conflict}");
+    }
+    // A merge continued, on the same stop for Ocelli and git: comment lines stripped by default,
+    // cut at the scissors line under scissors.
+    for mode in ["", "strip", "scissors"] {
+        let repo = diverged("cleanup-merge", "ours\n", "theirs\n");
+        let d = &repo.0;
+        if !mode.is_empty() {
+            git(d, &["config", "commit.cleanup", mode]);
+        }
+        GitWriter.write(d, &merge(d, "side", Some("side"))).unwrap();
+        let other = twin(&repo, "cleanup-merge-twin");
+        for dir in [d, &other.0] {
+            write_file(dir, "f", "resolved\n");
+            git(dir, &["add", "f"]);
+        }
+        let go_on = Write::Continue {
+            operation: Operation::Merge,
+            head: head(d),
+        };
+        GitWriter.write(d, &go_on).unwrap();
+        git(&other.0, &["merge", "--continue"]);
+        assert_eq!(raw_body(d), raw_body(&other.0), "{mode:?}");
+    }
+    // A merge without a conflict, in every mode.
+    for mode in ["", "strip", "whitespace", "verbatim", "scissors"] {
+        let repo = diverged("cleanup-clean-merge", "ours\n", "base\n");
+        let d = &repo.0;
+        if !mode.is_empty() {
+            git(d, &["config", "commit.cleanup", mode]);
+        }
+        let other = twin(&repo, "cleanup-clean-merge-twin");
+        GitWriter.write(d, &merge(d, "side", Some("side"))).unwrap();
+        git(&other.0, &["merge", "--no-edit", "side"]);
+        assert_eq!(raw_body(d), raw_body(&other.0), "{mode:?}");
+    }
+}
+
+/// The last commit's message as `git` stores it, its last line break included.
+fn raw_body(dir: &Path) -> String {
+    let out = git_command(dir)
+        .args(["cat-file", "commit", "HEAD"])
+        .output()
+        .unwrap();
+    let object = String::from_utf8(out.stdout).unwrap();
+    object.split_once("\n\n").map_or("", |(_, m)| m).to_string()
+}
+
+#[test]
+// Verifies: ADR-0033
+fn what_only_git_finishes_is_named_alike_by_every_refusal() {
+    let repo = diverged("am-in-progress", "ours\n", "theirs\n");
+    let d = &repo.0;
+    // `git am` stopped: the state git leaves for it.
+    std::fs::create_dir(d.join(".git/rebase-apply")).unwrap();
+    write_file(d, ".git/rebase-apply/applying", "");
+    let refusals = [
+        Write::Commit {
+            message: "m".into(),
+            head: Some(head(d)),
+        },
+        Write::Detach {
+            commit: git(d, &["rev-parse", "side"]),
+        },
+        merge(d, "side", Some("side")),
+        Write::Reset {
+            branch: "main".into(),
+            tip: head(d),
+            commit: git(d, &["rev-parse", "HEAD~1"]),
+            mode: ResetMode::Soft,
+        },
+    ];
+    for write in &refusals {
+        let refused = GitWriter.write(d, write).unwrap_err().to_string();
+        assert_eq!(
+            refused, "a git am is in progress: finish it with git first",
+            "{write:?}"
+        );
+    }
+    assert_eq!(GitReader.load_refs(d).unwrap().in_progress, None);
 }

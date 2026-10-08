@@ -5,8 +5,13 @@
 //! Each program would leave a marker file. Loading the commit graph, the refs, the changed files,
 //! and the diffs, of a commit and of the dirty working tree, leaves none.
 
+#![allow(
+    clippy::disallowed_methods,
+    reason = "a test sets a repository up by hand, the way a developer would"
+)]
 #![cfg(unix)]
 
+mod git_command;
 use ocelli_core::graph::build_graph;
 use ocelli_core::model::WORKDIR_SHA;
 use ocelli_core::port::RepositoryReader;

@@ -60,12 +60,14 @@ export function stashRequest(message: string, untracked: boolean): WriteOf<'crea
 }
 
 /** What the stage toggle of a working-directory file asks for: a staged file is unstaged, one
-    staged in part or not at all is staged whole, each expecting the content shown. */
-export function stageToggle(file: FileChange): Write {
-  const { path, shown } = file;
-  return file.staged === 'yes'
-    ? { kind: 'unstageFile', path, shown: shown?.index ?? null }
-    : { kind: 'stageFile', path, shown: shown?.workdir ?? null };
+    staged in part or not at all is staged whole, each expecting the content shown; nothing for a
+    file that does not stage, a commit's. */
+export function stageToggle(file: FileChange): Write | null {
+  const { path, staging } = file;
+  if (!staging) return null;
+  return staging.staged === 'yes'
+    ? { kind: 'unstageFile', path, shown: staging.shown.index }
+    : { kind: 'stageFile', path, shown: staging.shown.workdir };
 }
 
 /** The branch the form describes at `commit`, or null while it has no name. */

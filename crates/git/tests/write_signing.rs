@@ -4,12 +4,17 @@
 //! where the repository's does. libgit2 reads the global configuration from its search path,
 //! which holds for the whole process: this test runs in a binary of its own.
 
+#![allow(
+    clippy::disallowed_methods,
+    reason = "a test sets a repository up by hand, the way a developer would"
+)]
 #![cfg(unix)]
 
+mod git_command;
+use git_command::git_command;
 use git2::ConfigLevel;
 use ocelli_core::port::{RepositoryWriter, Write};
 use ocelli_git::GitWriter;
-use std::process::Command;
 
 #[test]
 #[allow(unsafe_code)]
@@ -31,9 +36,7 @@ fn a_commit_and_an_annotated_tag_are_refused_where_the_global_configuration_sign
         unsafe { git2::opts::set_search_path(level, &global) }.unwrap();
     }
     let git = |args: &[&str]| {
-        let out = Command::new("git")
-            .arg("-C")
-            .arg(&repo)
+        let out = git_command(&repo)
             .args(["-c", "user.name=F", "-c", "user.email=f@example.invalid"])
             .args(["-c", "commit.gpgSign=false"])
             .args(args)

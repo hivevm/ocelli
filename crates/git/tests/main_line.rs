@@ -4,11 +4,17 @@
 //! `main`, else `master`, else the checked-out commit; and a load lays the tip's first-parent chain
 //! out in lane 0 alone.
 
+#![allow(
+    clippy::disallowed_methods,
+    reason = "a test sets a repository up by hand, the way a developer would"
+)]
+
+mod git_command;
+use git_command::git_command;
 use ocelli_core::load::{self, Event, LoadSession};
 use ocelli_core::port::RepositoryReader;
 use ocelli_git::GitReader;
 use std::path::{Path, PathBuf};
-use std::process::Command;
 
 struct Scratch(PathBuf);
 
@@ -30,9 +36,7 @@ impl Drop for Scratch {
 /// Runs git in `dir` with a fixed identity, the commit dates counted up by `GIT_COMMITTER_DATE`
 /// as given, and returns its standard output.
 fn git(dir: &Path, args: &[&str]) -> String {
-    let out = Command::new("git")
-        .arg("-C")
-        .arg(dir)
+    let out = git_command(dir)
         .args(["-c", "user.name=F", "-c", "user.email=f@example.invalid"])
         .args(args)
         .output()
@@ -48,9 +52,7 @@ fn git(dir: &Path, args: &[&str]) -> String {
 /// An empty commit on the checked-out branch at `time`, its SHA.
 fn commit(dir: &Path, message: &str, time: u64) -> String {
     let date = format!("{time} +0000");
-    let out = Command::new("git")
-        .arg("-C")
-        .arg(dir)
+    let out = git_command(dir)
         .args(["-c", "user.name=F", "-c", "user.email=f@example.invalid"])
         .args(["commit", "--quiet", "--allow-empty", "-m", message])
         .env("GIT_AUTHOR_DATE", &date)
@@ -140,9 +142,7 @@ fn a_load_lays_the_main_line_out_in_the_leftmost_lane_alone() {
     let f1 = commit(dir, "f1", 1_700_000_010);
     git(dir, &["switch", "--quiet", "main"]);
     main.push(commit(dir, "m1", 1_700_000_020));
-    let merged = Command::new("git")
-        .arg("-C")
-        .arg(dir)
+    let merged = git_command(dir)
         .args(["-c", "user.name=F", "-c", "user.email=f@example.invalid"])
         .args(["merge", "--quiet", "--no-ff", "-m", "merge", &f1])
         .env("GIT_COMMITTER_DATE", "1700000030 +0000")

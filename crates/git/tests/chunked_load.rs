@@ -4,6 +4,13 @@
 //! in commit-date order, a child dated before its parent after it, together the whole history, and
 //! a load stops when it is told to. The chunks lay out into one commit graph.
 
+#![allow(
+    clippy::disallowed_methods,
+    reason = "a test sets a repository up by hand, the way a developer would"
+)]
+
+mod git_command;
+use git_command::git_command;
 use ocelli_core::graph::build_graph;
 use ocelli_core::history::History;
 use ocelli_core::model::{CHUNK_COMMITS, CommitData, CommitKind};
@@ -12,7 +19,7 @@ use ocelli_git::GitReader;
 use std::collections::{HashMap, HashSet};
 use std::io::Write;
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
+use std::process::Stdio;
 
 struct Scratch(PathBuf);
 
@@ -32,9 +39,7 @@ impl Drop for Scratch {
 }
 
 fn git(dir: &Path, args: &[&str]) -> String {
-    let out = Command::new("git")
-        .arg("-C")
-        .arg(dir)
+    let out = git_command(dir)
         .args(["-c", "user.name=F", "-c", "user.email=f@example.invalid"])
         .args(args)
         .output()
@@ -88,9 +93,7 @@ fn repository(dir: &Path, commits: usize) {
         }
         main = mark;
     }
-    let mut child = Command::new("git")
-        .arg("-C")
-        .arg(dir)
+    let mut child = git_command(dir)
         .args(["fast-import", "--quiet"])
         .stdin(Stdio::piped())
         .spawn()
@@ -243,9 +246,7 @@ fn a_child_dated_before_its_parent_arrives_after_it_and_every_commit_once() {
     // A branch whose commit sits on the newest commit but carries a date older than any other.
     let head = git(&dir, &["rev-parse", "main"]);
     let head = head.trim();
-    let late = Command::new("git")
-        .arg("-C")
-        .arg(&dir)
+    let late = git_command(&dir)
         .args([
             "commit-tree",
             &format!("{head}^{{tree}}"),
