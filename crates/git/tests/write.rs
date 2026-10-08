@@ -10,290 +10,16 @@
 )]
 #![cfg(unix)]
 
-mod git_command;
-use git_command::git_command;
+mod support;
 use ocelli_core::port::{RepositoryReader, RepositoryWriter, Write};
 use ocelli_git::GitWriter;
 use std::collections::BTreeSet;
-use std::path::{Path, PathBuf};
+use std::path::Path;
+use support::{
+    Scratch, git, git_command, head_of, refused, refused_reporting, snapshot, write_file,
+};
 
 mod programs;
-
-struct Scratch(PathBuf);
-
-impl Scratch {
-    fn new(name: &str) -> Self {
-        let dir = std::env::temp_dir().join(format!("ocelli-write-{name}-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&dir);
-        std::fs::create_dir_all(&dir).unwrap();
-        Scratch(dir)
-    }
-}
-
-impl Drop for Scratch {
-    fn drop(&mut self) {
-        let _ = std::fs::remove_dir_all(&self.0);
-    }
-}
-
-fn git(dir: &Path, args: &[&str]) -> String {
-    raw(dir, args).trim().to_string()
-}
-
-/// What `git` prints, untrimmed, for output whose leading space or NUL separators are read.
-fn raw(dir: &Path, args: &[&str]) -> String {
-    let out = git_command(dir)
-        .args(["-c", "user.name=F", "-c", "user.email=f@example.invalid"])
-        .args(args)
-        .output()
-        .unwrap();
-    assert!(
-        out.status.success(),
-        "git {args:?}: {}",
-        String::from_utf8_lossy(&out.stderr)
-    );
-    String::from_utf8(out.stdout).unwrap()
-}
-
-/// The files `git` keeps in its directory while an operation is in progress, and `ORIG_HEAD`,
-/// which the operations set.
-const IN_PROGRESS: &[&str] = &[
-    "MERGE_HEAD",
-    "MERGE_MSG",
-    "MERGE_MODE",
-    "MERGE_AUTOSTASH",
-    "AUTO_MERGE",
-    "CHERRY_PICK_HEAD",
-    "REVERT_HEAD",
-    "ORIG_HEAD",
-    "BISECT_LOG",
-    "rebase-merge",
-    "rebase-apply",
-    "sequencer",
-];
-
-/// The repository as `git` reads it, everything a write can change: a refused write leaves each
-/// part as it was (`docs/CONVENTIONS.md`, a refusal changes nothing).
-#[derive(Debug, PartialEq)]
-struct Snapshot {
-    head: String,
-    /// Every ref, the tags, the remote branches, and the stash included.
-    refs: String,
-    /// The stash's entries, those below its newest included, which no ref names.
-    stash: String,
-    index: String,
-    /// Each path the status names, ignored and untracked files included, with its content.
-    status: Vec<(String, Option<String>)>,
-    /// The repository's own configuration, where a branch's upstream is kept.
-    config: String,
-    /// Every directory of the working directory, an empty one included, which the status omits.
-    dirs: Vec<String>,
-    in_progress: Vec<(String, String)>,
-}
-
-fn snapshot(dir: &Path) -> Snapshot {
-    let status = raw(
-        dir,
-        &[
-            "status",
-            "--porcelain",
-            "-z",
-            "--ignored",
-            "--untracked-files=all",
-        ],
-    );
-    let mut fields = status.split('\0').filter(|f| !f.is_empty());
-    let mut entries = Vec::new();
-    while let Some(entry) = fields.next() {
-        let path = &entry[3..];
-        // A rename or a copy names its source in the field after.
-        let entry = match entry.as_bytes()[0] {
-            b'R' | b'C' => format!("{entry} from {}", fields.next().unwrap()),
-            _ => entry.to_string(),
-        };
-        entries.push((entry, content_of(&dir.join(path))));
-    }
-    let git_dir = PathBuf::from(git(dir, &["rev-parse", "--absolute-git-dir"]));
-    let mut in_progress = Vec::new();
-    for name in IN_PROGRESS {
-        files_below(&git_dir, Path::new(name), &mut in_progress);
-    }
-    Snapshot {
-        head: head_of(dir),
-        refs: git(dir, &["for-each-ref", "--format=%(refname) %(objectname)"]),
-        stash: git(dir, &["stash", "list", "--format=%gd %H %gs"]),
-        index: git(dir, &["ls-files", "--stage"]),
-        status: entries,
-        config: git(dir, &["config", "--local", "--list"]),
-        dirs: dirs_below(dir, Path::new("")),
-        in_progress,
-    }
-}
-
-/// The content of the file at `path`, by blob id, a link's target, or `None` for a directory or
-/// nothing.
-fn content_of(path: &Path) -> Option<String> {
-    let meta = path.symlink_metadata().ok()?;
-    if meta.is_symlink() {
-        return Some(format!(
-            "-> {}",
-            std::fs::read_link(path).unwrap().display()
-        ));
-    }
-    meta.is_file().then(|| {
-        git2::Oid::hash_file(git2::ObjectType::Blob, path)
-            .unwrap()
-            .to_string()
-    })
-}
-
-/// Every file at or below `path` in `root`, with its content.
-/// The directories below `path` of the working directory `root`, `.git` left out.
-fn dirs_below(root: &Path, path: &Path) -> Vec<String> {
-    let mut found = Vec::new();
-    let mut names: Vec<_> = std::fs::read_dir(root.join(path))
-        .unwrap()
-        .map(|e| e.unwrap().path())
-        .filter(|p| p.symlink_metadata().is_ok_and(|m| m.is_dir()))
-        .filter(|p| p.file_name().is_some_and(|n| n != ".git"))
-        .collect();
-    names.sort();
-    for dir in names {
-        let name = dir.strip_prefix(root).unwrap().to_path_buf();
-        found.push(name.display().to_string());
-        found.extend(dirs_below(root, &name));
-    }
-    found
-}
-
-fn files_below(root: &Path, path: &Path, found: &mut Vec<(String, String)>) {
-    let full = root.join(path);
-    if full.is_dir() {
-        let mut names: Vec<_> = std::fs::read_dir(&full)
-            .unwrap()
-            .map(|e| e.unwrap().file_name())
-            .collect();
-        names.sort();
-        for name in names {
-            files_below(root, &path.join(name), found);
-        }
-    } else if let Ok(content) = std::fs::read(&full) {
-        let content = String::from_utf8_lossy(&content).into_owned();
-        found.push((path.display().to_string(), content));
-    }
-}
-
-/// Writes `write` and expects it refused with `why` among its words, and the repository's
-/// [`Snapshot`] as it was before. Every refusal test of the writer goes through here, so that
-/// none compares less than the whole snapshot.
-fn refused(dir: &Path, write: &Write, why: &str) {
-    refused_reporting(dir, write, why, true, |_| {});
-}
-
-/// [`refused`], with the write's progress answered with `go_on`, and `meanwhile` run on the
-/// repository at the first report, as another program would change it while the write waits:
-/// the snapshot expected after is the one taken once `meanwhile` ran.
-fn refused_reporting(
-    dir: &Path,
-    write: &Write,
-    why: &str,
-    go_on: bool,
-    meanwhile: impl FnOnce(&Path),
-) {
-    let mut before = snapshot(dir);
-    let mut meanwhile = Some(meanwhile);
-    let mut reports = 0;
-    let error = GitWriter
-        .write_reporting(dir, write, &mut |_| {
-            reports += 1;
-            if let Some(change) = meanwhile.take() {
-                change(dir);
-                before = snapshot(dir);
-            }
-            go_on
-        })
-        .unwrap_err();
-    assert!(error.to_string().contains(why), "{write:?}: {error}");
-    assert!(
-        go_on || reports > 0,
-        "{write:?}: the write was asked to stop, so it reported"
-    );
-    assert_eq!(snapshot(dir), before, "{write:?}");
-}
-
-/// The lines of the Rust source `text` that take a refusal of a write outside
-/// [`refused_reporting`], by number, so that no test of the writer compares less than the
-/// snapshot.
-fn refusals_outside_the_helper(text: &str) -> Vec<usize> {
-    let mut inside = false;
-    let mut found = Vec::new();
-    for (i, line) in text.lines().enumerate() {
-        if line.starts_with("fn refused_reporting(") {
-            inside = true;
-        } else if inside && line == "}" {
-            inside = false;
-        } else if !inside {
-            let takes_an_error = [
-                concat!(".unwrap", "_err()"),
-                concat!(".expect", "_err("),
-                concat!(".is", "_err()"),
-                concat!(".err", "()"),
-                concat!("let ", "Err("),
-            ]
-            .iter()
-            .any(|p| line.contains(p));
-            // A refusal of a write on this line, the one before, or the one after.
-            let writes = |l: &str| l.contains(".write(") || l.contains("write_reporting(");
-            let near = |j: Option<usize>| j.and_then(|j| text.lines().nth(j)).is_some_and(writes);
-            let of_a_write = writes(line) || near(i.checked_sub(1)) || near(Some(i + 1));
-            let unconditional = line.contains(concat!(".unwrap", "_err()"))
-                || line.contains(concat!(".expect", "_err("));
-            if takes_an_error && (unconditional || of_a_write) {
-                found.push(i + 1);
-            }
-        }
-    }
-    found
-}
-
-#[test]
-fn every_refusal_test_of_the_writer_compares_the_snapshot() {
-    let text = include_str!("write.rs");
-    assert!(
-        text.contains("fn refused_reporting("),
-        "the helper is where the check looks for it"
-    );
-    let found = refusals_outside_the_helper(text);
-    assert!(
-        found.is_empty(),
-        "crates/git/tests/write.rs takes a refusal outside refused() on lines {found:?}"
-    );
-}
-
-#[test]
-fn the_check_names_each_line_that_takes_a_refusal_outside_the_helper() {
-    let unwrap = concat!(".unwrap", "_err()");
-    let expect = concat!(".expect", "_err(\"refused\")");
-    let text = format!(
-        "fn refused_reporting(d: &Path) {{\n    let e = w(){unwrap};\n    if x {{\n    }}\n}}\n\
-         fn a() {{\n    let e = GitWriter.write(d, &w){unwrap};\n}}\n\
-         let f = w(){expect};\n"
-    );
-    assert_eq!(refusals_outside_the_helper(&text), vec![7, 9]);
-    assert_eq!(
-        refusals_outside_the_helper("fn a() {\n    refused(d, &w, \"why\");\n}\n"),
-        Vec::<usize>::new()
-    );
-    let is_err = concat!(".is", "_err()");
-    let let_err = concat!("let ", "Err(e)");
-    let text = format!(
-        "assert!(GitWriter.write(d, &w){is_err});\n\
-         {let_err} = GitWriter\n    .write(d, &w) else {{ return }};\n\
-         let r = GitWriter.write_reporting(d, &w, &mut go);\nif {let_err} = r {{}}\n\
-         assert!(std::fs::read(p){is_err});\n"
-    );
-    assert_eq!(refusals_outside_the_helper(&text), vec![1, 2, 5]);
-}
 
 #[test]
 // Verifies: ADR-0033
@@ -902,12 +628,6 @@ fn a_stash_refused_over(name: &str, set_up: impl Fn(&Path), then: impl Fn(&Path)
     }
 }
 
-fn write_file(dir: &Path, path: &str, content: &str) {
-    let path = dir.join(path);
-    std::fs::create_dir_all(path.parent().unwrap()).unwrap();
-    std::fs::write(path, content).unwrap();
-}
-
 #[test]
 // Verifies: ADR-0033, G-7
 fn a_stash_with_anything_in_its_way_is_refused_with_nothing_changed() {
@@ -1377,18 +1097,6 @@ fn an_annotated_tag_is_refused_where_annotated_tags_are_always_signed() {
         &tag("v1", &one, Some("release")),
         "tag.forceSignAnnotated",
     );
-}
-
-/// HEAD as `git` reads it: the branch it is on, or the commit it is detached at.
-fn head_of(dir: &Path) -> String {
-    let out = git_command(dir)
-        .args(["symbolic-ref", "--quiet", "--short", "HEAD"])
-        .output()
-        .unwrap();
-    match out.status.success() {
-        true => String::from_utf8(out.stdout).unwrap().trim().to_string(),
-        false => format!("detached at {}", git(dir, &["rev-parse", "HEAD"])),
-    }
 }
 
 /// A repository with `f` committed on main, and a branch `side` one commit on, changing `f` and
@@ -1999,5 +1707,50 @@ fn a_stash_during_a_stopped_operation_is_refused_with_the_operation_kept() {
             untracked: false,
         },
         "a merge is in progress",
+    );
+}
+
+#[test]
+// Verifies: ADR-0033, Q-6
+fn a_stash_libgit2_would_make_by_writing_past_it_is_refused() {
+    let stash = |untracked| Write::CreateStash {
+        message: None,
+        untracked,
+    };
+    // A link where the index has a file, to a file outside the repository.
+    let outside = Scratch::new("stash-outside");
+    std::fs::write(outside.0.join("secret"), "SECRET\n").unwrap();
+    let scratch = with_file("stash-link");
+    let d = &scratch.0;
+    std::fs::remove_file(d.join("f")).unwrap();
+    std::os::unix::fs::symlink(outside.0.join("secret"), d.join("f")).unwrap();
+    refused(d, &stash(false), "f is a link where the index has a file");
+    assert_eq!(
+        std::fs::read_to_string(outside.0.join("secret")).unwrap(),
+        "SECRET\n"
+    );
+
+    // An entry marked skip-worktree, whose content a stash would overwrite.
+    let scratch = with_file("stash-skip");
+    let d = &scratch.0;
+    git(d, &["update-index", "--skip-worktree", "f"]);
+    std::fs::write(d.join("f"), "the developer's\n").unwrap();
+    std::fs::write(d.join("g"), "g\n").unwrap();
+    git(d, &["add", "g"]);
+    refused(d, &stash(false), "f is marked skip-worktree");
+
+    // An ignored file in a directory only untracked files make, which -u would delete.
+    let scratch = with_file("stash-ignored");
+    let d = &scratch.0;
+    std::fs::write(d.join(".gitignore"), "*.log\n").unwrap();
+    git(d, &["add", ".gitignore"]);
+    git(d, &["commit", "--quiet", "-m", "ignore logs"]);
+    std::fs::create_dir(d.join("ud")).unwrap();
+    std::fs::write(d.join("ud/u"), "untracked\n").unwrap();
+    std::fs::write(d.join("ud/l.log"), "kept\n").unwrap();
+    refused(d, &stash(true), "ud/l.log is ignored in ud");
+    assert_eq!(
+        std::fs::read_to_string(d.join("ud/l.log")).unwrap(),
+        "kept\n"
     );
 }

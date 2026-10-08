@@ -9,45 +9,12 @@
     reason = "a test sets a repository up by hand, the way a developer would"
 )]
 
-mod git_command;
-use git_command::git_command;
+mod support;
 use ocelli_core::load::{self, Event, LoadSession};
 use ocelli_core::port::RepositoryReader;
 use ocelli_git::GitReader;
-use std::path::{Path, PathBuf};
-
-struct Scratch(PathBuf);
-
-impl Scratch {
-    fn new(name: &str) -> Self {
-        let dir = std::env::temp_dir().join(format!("ocelli-main-{name}-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&dir);
-        std::fs::create_dir_all(&dir).unwrap();
-        Scratch(dir)
-    }
-}
-
-impl Drop for Scratch {
-    fn drop(&mut self) {
-        let _ = std::fs::remove_dir_all(&self.0);
-    }
-}
-
-/// Runs git in `dir` with a fixed identity, the commit dates counted up by `GIT_COMMITTER_DATE`
-/// as given, and returns its standard output.
-fn git(dir: &Path, args: &[&str]) -> String {
-    let out = git_command(dir)
-        .args(["-c", "user.name=F", "-c", "user.email=f@example.invalid"])
-        .args(args)
-        .output()
-        .unwrap();
-    assert!(
-        out.status.success(),
-        "git {args:?}: {}",
-        String::from_utf8_lossy(&out.stderr)
-    );
-    String::from_utf8(out.stdout).unwrap().trim().to_string()
-}
+use std::path::Path;
+use support::{Scratch, git, git_command};
 
 /// An empty commit on the checked-out branch at `time`, its SHA.
 fn commit(dir: &Path, message: &str, time: u64) -> String {

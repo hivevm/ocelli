@@ -315,11 +315,11 @@ fn the_transfer_fixture_is_what_the_core_answers() {
     }
 }
 
-/// The core's history actions for a commit on another branch, one on none, and the checked-out
-/// one, and its refusal where no branch is checked out: the fixture `actions.json` the web
-/// interface's `actions.test.ts` holds its helper to.
+/// The core's history operations for a commit on another branch, one on none, and the checked-out
+/// one, and its refusal where no branch is checked out: the fixture `operations.json` the web
+/// interface's `operations.test.ts` holds its helper to.
 #[test]
-fn the_actions_fixture_is_what_the_core_answers() {
+fn the_operations_fixture_is_what_the_core_answers() {
     use ocelli_core::model::{LocalBranch, RepoRefs};
     let local = |name: &str, sha: &str, is_head: bool| LocalBranch {
         name: name.into(),
@@ -335,8 +335,8 @@ fn the_actions_fixture_is_what_the_core_answers() {
         locals: vec![local("topic", "t", false), local("main", "h", true)],
         ..RepoRefs::default()
     };
-    let answer = |refs: &RepoRefs, sha: &str| match refs.history_actions(sha) {
-        Ok(actions) => serde_json::json!({ "actions": actions }),
+    let answer = |refs: &RepoRefs, sha: &str| match refs.history_operations(sha) {
+        Ok(operations) => serde_json::json!({ "operations": operations }),
         Err(reason) => serde_json::json!({ "reason": reason }),
     };
     let detached = RepoRefs::default();
@@ -346,7 +346,7 @@ fn the_actions_fixture_is_what_the_core_answers() {
             serde_json::json!({ "refs": refs, "sha": sha, "answer": answer(refs, sha) })
         })
         .collect();
-    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/actions.json");
+    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/operations.json");
     let written = serde_json::to_string_pretty(&cases).expect("the fixture serializes") + "\n";
     let on_disk = fs::read_to_string(&path).unwrap_or_default();
     if on_disk != written {

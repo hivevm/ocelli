@@ -58,7 +58,7 @@ golden path and the test pattern an agent copies from are named here.
   keeps the graph laid out so far and answers the front ends' reads of it: a window of rows with the
   edges crossing it, search, and lineage ([ADR-0031](adr/0031-front-ends-read-row-windows.md)).
   `transfer.rs` decides the fetch, pull, and push of the checked-out branch the refs make possible,
-  or why there is none, and which transfer can be stopped, and `actions.rs` which operations of
+  or why there is none, and which transfer can be stopped, and `operations.rs` which operations of
   G-5 a commit offers on the checked-out branch, for both front ends to draw.
   `load.rs` runs a load session through the port, and a `LoadSession` is what a front end keeps of
   it, its `History` and its status line, for both front ends and the measurement alike.
@@ -69,16 +69,17 @@ golden path and the test pattern an agent copies from are named here.
   and diffs ([ADR-0019](adr/0019-git2-repository-reader.md),
   [ADR-0016](adr/0016-history-loads-in-chunks.md),
   [ADR-0024](adr/0024-synthetic-nodes-in-the-first-chunk.md)); the walk runs in commit-date order
-  and turns libgit2's object cache off for the whole process. `operations.rs` holds the operations
-  of G-5 and G-6 from a clean tree, stopping on a conflict in git's own state and resolving one
-  file by file ([ADR-0033](adr/0033-writes-what-git-writes.md),
-  [ADR-0033](adr/0033-writes-what-git-writes.md)); the refs carry the
-  operation in progress with its conflicts, read from git's state whoever started it, which
-  `refs.rs` takes from `operations.rs`. `GitWriter` implements the writer port in `write.rs`,
-  which dispatches each write and holds the tag, stash, index, commit, and branch writes, each
-  checked against the state it names before anything changes by the checks of `guard.rs`, the
-  index and the working directory written through `checkout.rs` and a message cleaned up by
-  `message.rs` as `git` cleans it up, and returns the commit a write made
+  and turns libgit2's object cache off for the whole process. `operations.rs` holds the history
+  operations of G-5 from a clean tree, stopping on a conflict in git's own state
+  ([ADR-0033](adr/0033-writes-what-git-writes.md)), and
+  `conflicts.rs` resolves such a conflict file by file and continues or aborts the operation
+  ([ADR-0033](adr/0033-writes-what-git-writes.md)); the refs carry the
+  operation in progress with its conflicts, read in `refs.rs` from git's state whoever started
+  it. `GitWriter` implements the writer port in `write.rs`, which dispatches each write and holds
+  the tag, index, commit, and branch writes, the stash's in `stash.rs`, each checked against the
+  state it names before anything changes by the checks of `guard.rs`, the index and the working
+  directory written through `checkout.rs` and a message cleaned up by `message.rs` as `git`
+  cleans it up, and returns the commit a write made
   ([ADR-0033](adr/0033-writes-what-git-writes.md)); a commit or an annotated tag
   is refused where the configuration asks for a signature
   ([ADR-0033](adr/0033-writes-what-git-writes.md)). A fetch, a pull, which then
@@ -137,7 +138,7 @@ golden path and the test pattern an agent copies from are named here.
   files, the dialogs that describe a stash and confirm a write that discards work, the toolbar's
   Fetch, Pull, and Push, which give way to a Cancel while a fetch or a pull runs, and themes;
   `writes.ts` holds the writes it hands the host, one at a time; `transfers.ts` and
-  `actions.ts` restate the core's answers to which transfer the toolbar offers and which history
+  `operations.ts` restate the core's answers to which transfer the toolbar offers and which history
   operations a commit offers, and `refChips.ts` decides which ref each chip switches to or deletes
   ([ADR-0022](adr/0022-svelte-web-interface.md), [ADR-0017](adr/0017-virtual-rendering.md),
   [ADR-0020](adr/0020-diff-overlay-and-file-list.md),
@@ -149,11 +150,14 @@ in `crates/git/src/lib.rs`. **The test pattern** is a reference test: a fixed or
 input and the output the reference implementation produced, compared exactly
 (`crates/core/tests/layout_reference.rs`, `crates/git/tests/load_reference.rs`), beside the
 structural tests of the shape in `crates/core/tests/structure.rs`. A write is tested on a
-repository `git` made, and what it did is read back with `git` (`crates/git/tests/write.rs`); a
-refused write goes through `refused` there, which compares one snapshot of the repository before
-and after. Each local write also runs beside the `git` command it stands for, on two copies of a
-repository in every state that changes its outcome (`crates/git/tests/git_parity.rs`), each
-departure listed with the ADR that decides it; every test starts `git` through
+repository `git` made, and what it did is read back with `git` (`crates/git/tests/write.rs`,
+`crates/git/tests/history.rs`); a refused write goes through `refused`, which compares one
+snapshot of the repository before and after. Each local write also runs beside the `git` command
+it stands for, on two copies of a repository in every state that changes its outcome
+(`crates/git/tests/git_parity.rs`), each departure listed with the ADR that decides it, and the
+two copies' snapshots compared with the commits each side made alone read by content. The scratch
+directory, the test's `git`, the snapshot, and `refused` are written once, in
+`crates/git/tests/support/mod.rs`; every test starts `git` through
 `crates/git/tests/git_command/mod.rs`. Where the web interface restates a core value, the core's
 `tests/write_fixture.rs` writes it to `crates/core/tests/fixtures/` and the web interface's test
 reads it.

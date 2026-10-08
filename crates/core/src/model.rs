@@ -302,6 +302,13 @@ pub struct RepoRefs {
     pub in_progress: Option<InProgress>,
 }
 
+impl RepoRefs {
+    /// The checked-out branch, where one is.
+    pub fn head(&self) -> Option<&LocalBranch> {
+        self.locals.iter().find(|b| b.is_head)
+    }
+}
+
 /// A merge, rebase, cherry-pick, or revert stopped in the repository, as `git status` reads it.
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]

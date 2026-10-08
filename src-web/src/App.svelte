@@ -16,7 +16,7 @@
   import { Newest } from './hostAnswers.ts';
   import { actionLabel, confirmedWrite, type Outcome, type Write } from './writes.ts';
   import { canStop, fetchOf, pullOf, pushOf } from './transfers.ts';
-  import { historyActions } from './actions.ts';
+  import { historyOperations } from './operations.ts';
   import StashDialog from './StashDialog.svelte';
   import type {
     NodeJson, FileChange, DiffLine, RepoRefs, Growth, RowWindow, Relative, Selected, Found,
@@ -136,10 +136,10 @@
     selectedNode ? commitChips(selectedNode.refs, repoRefs, selectedNode.sha) : [],
   );
   // The operations of G-5 the selected commit offers on the checked-out branch (ADR-0033).
-  const selectedActions = $derived.by(() => {
+  const selectedOperations = $derived.by(() => {
     if (!repoRefs || selectedNode?.kind !== 'commit') return [];
-    const offered = historyActions(repoRefs, selectedNode.sha);
-    return 'actions' in offered ? offered.actions : [];
+    const offered = historyOperations(repoRefs, selectedNode.sha);
+    return 'operations' in offered ? offered.operations : [];
   });
 
   /** A command that failed: the status bar says so. */
@@ -590,7 +590,7 @@
       {onSelectFile}
       onJumpToRow={jumpToRow}
       chips={selectedChips}
-      actions={selectedActions}
+      operations={selectedOperations}
       onWrite={performWrite}
     />
   </div><!-- end #top-pane -->

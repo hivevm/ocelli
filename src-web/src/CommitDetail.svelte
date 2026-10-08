@@ -21,13 +21,13 @@
     /** The ref chips of `node`, each with what it offers. */
     chips: Chip[];
     /** The operations of G-5 the commit offers on the checked-out branch, as the core decides. */
-    actions: Write[];
+    operations: Write[];
     /** Performs a write on `node` (G-7), asking first where it discards work (ADR-0034);
         resolves with why it was refused, or null. */
     onWrite: (write: Write) => Promise<string | null>;
   }
   let {
-    node, relatives, showAvatars, changedFiles, diffFile, onSelectFile, onJumpToRow, chips, actions,
+    node, relatives, showAvatars, changedFiles, diffFile, onSelectFile, onJumpToRow, chips, operations,
     onWrite,
   }: Props = $props();
 
@@ -41,7 +41,7 @@
 
   /** The offered operation of `kind`, where the commit offers it. */
   function offered<K extends Write['kind']>(kind: K): WriteOf<K> | undefined {
-    return actions.find((a): a is WriteOf<K> => a.kind === kind);
+    return operations.find((a): a is WriteOf<K> => a.kind === kind);
   }
 
   /** The place of `node` in the stash, when it is a stash node. */
@@ -261,9 +261,9 @@
                 Switch here
               </button>
             </div>
-            {#if actions.length > 0}
+            {#if operations.length > 0}
               <div class="tag-actions commit-actions">
-                {#each actions.filter(a => a.kind !== 'reset') as action (action.kind)}
+                {#each operations.filter(a => a.kind !== 'reset') as action (action.kind)}
                   {#if action.kind === 'merge'}
                     <button class="tag-btn" disabled={writing} onclick={() => run(action)}
                             title="Merge this commit into {action.branch}">Merge into {action.branch}</button>

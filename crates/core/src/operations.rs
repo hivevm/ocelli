@@ -11,21 +11,17 @@ impl RepoRefs {
     /// reset: merging it, rebasing onto it, or picking it changes nothing. A merge is named after
     /// a local branch at the commit other than the checked-out one, where there is one. A reset
     /// is mixed, as `git reset` is by default; a front end sets the mode the developer chose.
-    pub fn history_actions(&self, sha: &str) -> Result<Vec<Write>, String> {
-        let head = self
-            .locals
-            .iter()
-            .find(|b| b.is_head)
-            .ok_or("No branch is checked out")?;
+    pub fn history_operations(&self, sha: &str) -> Result<Vec<Write>, String> {
+        let head = self.head().ok_or("No branch is checked out")?;
         let (branch, tip, commit) = (head.name.clone(), head.sha.clone(), sha.to_string());
-        let mut actions = Vec::new();
+        let mut operations = Vec::new();
         if head.sha != sha {
             let name = self
                 .locals
                 .iter()
                 .find(|b| b.sha == sha && !b.is_head)
                 .map(|b| b.name.clone());
-            actions.extend([
+            operations.extend([
                 Write::Merge {
                     branch: branch.clone(),
                     tip: tip.clone(),
@@ -44,7 +40,7 @@ impl RepoRefs {
                 },
             ]);
         }
-        actions.extend([
+        operations.extend([
             Write::Revert {
                 branch: branch.clone(),
                 tip: tip.clone(),
@@ -57,7 +53,7 @@ impl RepoRefs {
                 mode: ResetMode::Mixed,
             },
         ]);
-        Ok(actions)
+        Ok(operations)
     }
 }
 
@@ -79,8 +75,8 @@ mod tests {
         }
     }
 
-    fn kinds(actions: &[Write]) -> Vec<&'static str> {
-        actions
+    fn kinds(operations: &[Write]) -> Vec<&'static str> {
+        operations
             .iter()
             .map(|w| match w {
                 Write::Merge { .. } => "merge",
@@ -100,21 +96,21 @@ mod tests {
             locals: vec![local("main", "h", true), local("topic", "t", false)],
             ..RepoRefs::default()
         };
-        let other = refs.history_actions("t").unwrap();
+        let other = refs.history_operations("t").unwrap();
         assert_eq!(
             kinds(&other),
             ["merge", "rebase", "cherry-pick", "revert", "reset"]
         );
         assert!(matches!(&other[0], Write::Merge { name: Some(n), .. } if n == "topic"));
-        let unnamed = refs.history_actions("x").unwrap();
+        let unnamed = refs.history_operations("x").unwrap();
         assert!(matches!(&unnamed[0], Write::Merge { name: None, .. }));
         assert_eq!(
-            kinds(&refs.history_actions("h").unwrap()),
+            kinds(&refs.history_operations("h").unwrap()),
             ["revert", "reset"]
         );
         let detached = RepoRefs::default();
         assert_eq!(
-            detached.history_actions("t"),
+            detached.history_operations("t"),
             Err("No branch is checked out".into())
         );
     }

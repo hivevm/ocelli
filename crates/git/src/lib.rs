@@ -3,12 +3,15 @@
 //! writing a repository starts no program the repository names (Q-4).
 
 mod checkout;
+mod conflicts;
 pub mod git;
 mod guard;
 mod message;
 mod operations;
 pub mod refs;
 mod remote;
+mod stash;
+mod wildmatch;
 mod write;
 
 use anyhow::Result;

@@ -1,52 +1,11 @@
 //! End-to-end tests of `ocelli-measure crossings` on repositories built with git.
 
-#[path = "../../git/tests/git_command/mod.rs"]
-mod git_command;
-use git_command::git_command;
+#[path = "../../git/tests/support/mod.rs"]
+mod support;
 use std::io::Write;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::process::{Command, Output, Stdio};
-
-/// A scratch directory removed when the test ends.
-struct Scratch(PathBuf);
-
-impl Scratch {
-    fn new(name: &str) -> Self {
-        let dir =
-            std::env::temp_dir().join(format!("ocelli-measure-{name}-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&dir);
-        std::fs::create_dir_all(&dir).unwrap();
-        Scratch(dir)
-    }
-}
-
-impl Drop for Scratch {
-    fn drop(&mut self) {
-        let _ = std::fs::remove_dir_all(&self.0);
-    }
-}
-
-/// Runs git in `dir` with a fixed identity and time, and returns its standard output.
-fn git(dir: &Path, args: &[&str]) -> String {
-    let out = git_command(dir)
-        .args([
-            "-c",
-            "user.name=Fixture",
-            "-c",
-            "user.email=fixture@example.invalid",
-        ])
-        .args(args)
-        .env("GIT_AUTHOR_DATE", "2026-01-01T00:00:00Z")
-        .env("GIT_COMMITTER_DATE", "2026-01-01T00:00:00Z")
-        .output()
-        .unwrap();
-    assert!(
-        out.status.success(),
-        "git {args:?}: {}",
-        String::from_utf8_lossy(&out.stderr)
-    );
-    String::from_utf8(out.stdout).unwrap()
-}
+use support::{Scratch, git, git_command};
 
 /// Feeds a fast-import stream into the bare repository at `dir`.
 fn fast_import(dir: &Path, stream: &str) {

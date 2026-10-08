@@ -1,7 +1,7 @@
 [
   {
     "answer": {
-      "actions": [
+      "operations": [
         {
           "branch": "main",
           "commit": "t",
@@ -71,7 +71,7 @@
   },
   {
     "answer": {
-      "actions": [
+      "operations": [
         {
           "branch": "main",
           "commit": "x",
@@ -141,7 +141,7 @@
   },
   {
     "answer": {
-      "actions": [
+      "operations": [
         {
           "branch": "main",
           "commit": "h",
