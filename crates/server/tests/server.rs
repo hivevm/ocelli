@@ -6,17 +6,17 @@
     reason = "a test sets a repository up by hand, the way a developer would"
 )]
 
-#[path = "../../git/tests/git_command/mod.rs"]
-mod git_command;
+#[path = "../../git/tests/support/mod.rs"]
+mod support;
 
 use futures_util::{SinkExt, StreamExt};
-use git_command::git_command;
-use ocelli_commands::{Host, Report};
+use ocelli_commands::{Answered, COMMANDS, Host, Report};
 use ocelli_server::{Limits, Options, Running, start};
 use serde::Serialize;
 use serde_json::{Value, json};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
+use support::{Scratch, git, git_command};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
 use tokio::sync::mpsc;
@@ -26,46 +26,27 @@ use tokio_tungstenite::{MaybeTlsStream, WebSocketStream, tungstenite::Message};
 
 /// A scratch tree, named for the test and the process and removed when the test ends: `root/`, a
 /// repository with three commits, and `outside/`, a repository beside it.
-struct Tree(PathBuf);
+struct Tree(
+    PathBuf,
+    #[allow(
+        dead_code,
+        reason = "held so that the tree is removed when the test ends"
+    )]
+    Scratch,
+);
 
 impl Tree {
     fn new(name: &str) -> Tree {
-        let dir = std::env::temp_dir().join(format!("ocelli-server-{name}-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&dir);
+        let scratch = Scratch::new(name);
         for repo in ["root", "outside"] {
-            three_commits(&dir.join(repo));
+            three_commits(&scratch.0.join(repo));
         }
-        Tree(dir)
+        Tree(scratch.0.clone(), scratch)
     }
 
     fn root(&self) -> PathBuf {
         self.0.join("root")
     }
-}
-
-impl Drop for Tree {
-    fn drop(&mut self) {
-        let _ = std::fs::remove_dir_all(&self.0);
-    }
-}
-
-fn git(dir: &Path, args: &[&str]) -> String {
-    let out = git_command(dir)
-        .args([
-            "-c",
-            "user.name=Ada",
-            "-c",
-            "user.email=ada@example.invalid",
-        ])
-        .args(args)
-        .output()
-        .unwrap();
-    assert!(
-        out.status.success(),
-        "git {args:?}: {}",
-        String::from_utf8_lossy(&out.stderr)
-    );
-    String::from_utf8(out.stdout).unwrap().trim().to_string()
 }
 
 /// A repository with three commits at `repo`.
@@ -227,15 +208,20 @@ impl Tab {
     }
 
     async fn message(&mut self) -> Value {
-        let message = tokio::time::timeout(Duration::from_secs(20), self.socket.next())
-            .await
-            .expect("the server answers")
-            .unwrap()
-            .unwrap();
-        let Message::Text(text) = message else {
-            panic!("not a text message: {message:?}")
-        };
-        serde_json::from_str(&text).unwrap()
+        loop {
+            let message = tokio::time::timeout(Duration::from_secs(20), self.socket.next())
+                .await
+                .expect("the server answers")
+                .unwrap()
+                .unwrap();
+            match message {
+                Message::Text(text) => return serde_json::from_str(&text).unwrap(),
+                // A ping the server sends while a command runs is answered by the client, as a
+                // browser answers it, and is no message of the command's.
+                Message::Ping(_) | Message::Pong(_) => continue,
+                other => panic!("not a text message: {other:?}"),
+            }
+        }
     }
 
     /// Sends a command as `invoke` would and returns its answer, keeping the events that
@@ -465,7 +451,7 @@ async fn a_path_outside_the_server_root_is_refused() {
     for path in paths {
         assert_eq!(
             tab.invoke("open_repo", json!({ "path": path })).await,
-            Err(format!("{path} is no repository below the server root"))
+            Err(ocelli_server::root::refused(&path))
         );
     }
     assert!(
@@ -562,19 +548,23 @@ fn the_server_links_no_part_of_tauri_or_webkit() {
 
 /// A server root inside a repository that encloses it, beside a repository outside it: the
 /// tree the ways out of the server root are tried on.
-struct Enclosed(PathBuf);
+struct Enclosed(
+    PathBuf,
+    #[allow(
+        dead_code,
+        reason = "held so that the tree is removed when the test ends"
+    )]
+    Scratch,
+);
 
 impl Enclosed {
     fn new(name: &str) -> Enclosed {
-        let dir = std::env::temp_dir().join(format!(
-            "ocelli-server-enclosed-{name}-{}",
-            std::process::id()
-        ));
-        let _ = std::fs::remove_dir_all(&dir);
+        let scratch = Scratch::new(&format!("enclosed-{name}"));
+        let dir = scratch.0.clone();
         three_commits(&dir.join("encl"));
         three_commits(&dir.join("outside"));
         std::fs::create_dir_all(dir.join("encl/root")).unwrap();
-        Enclosed(dir)
+        Enclosed(dir, scratch)
     }
 
     fn root(&self) -> PathBuf {
@@ -586,16 +576,13 @@ impl Enclosed {
     }
 }
 
-impl Drop for Enclosed {
-    fn drop(&mut self) {
-        let _ = std::fs::remove_dir_all(&self.0);
-    }
-}
-
 fn refused(path: &str) -> Result<Value, String> {
-    Err(format!("{path} is no repository below the server root"))
+    Err(ocelli_server::root::refused(path))
 }
 
+/// One case of each kind of way out at the WebSocket: a `.git` file, an object store, a search
+/// upwards, the root itself inside a repository, and `core.worktree`. Each way out of its kind
+/// is a case of the confinement's own tests, `crates/git/tests/confine_checks.rs`.
 #[tokio::test]
 // Verifies: ADR-0039
 async fn a_repository_below_the_root_that_reaches_outside_it_is_refused() {
@@ -616,23 +603,8 @@ async fn a_repository_below_the_root_that_reaches_outside_it_is_refused() {
         format!("{}\n", outside_git.join("objects").display()),
     )
     .unwrap();
-    // (c') borrowed through a store inside that borrows from outside.
-    three_commits(&root.join("store"));
-    std::fs::write(
-        root.join("store/.git/objects/info/alternates"),
-        format!("{}\n", outside_git.join("objects").display()),
-    )
-    .unwrap();
-    three_commits(&root.join("c2"));
-    std::fs::write(
-        root.join("c2/.git/objects/info/alternates"),
-        "../../../store/.git/objects\n",
-    )
-    .unwrap();
     // (d) an empty `.git` folder, from which a search upwards finds the enclosing repository.
     std::fs::create_dir_all(root.join("d/.git")).unwrap();
-    // A plain folder, inside the enclosing repository's working directory.
-    std::fs::create_dir_all(root.join("plain")).unwrap();
     // (e) a working directory outside, named by `core.worktree`.
     three_commits(&root.join("e"));
     git(
@@ -646,16 +618,7 @@ async fn a_repository_below_the_root_that_reaches_outside_it_is_refused() {
     let mut tab = Tab::open(&running).await;
     // The server root itself lies inside the enclosing repository and is none.
     assert_eq!(tab.invoke("startup_repo", json!({})).await, Ok(Value::Null));
-    // (b) a `.git` link to a git directory outside.
-    #[cfg(unix)]
-    {
-        std::fs::create_dir_all(root.join("b")).unwrap();
-        std::os::unix::fs::symlink(&outside_git, root.join("b/.git")).unwrap();
-    }
-    let ways_out = ["a", "c", "c2", "d", "plain", "e", "."]
-        .into_iter()
-        .chain(cfg!(unix).then_some("b"));
-    for path in ways_out {
+    for path in ["a", "c", "d", "e", "."] {
         assert_eq!(
             tab.invoke("open_repo", json!({ "path": path })).await,
             refused(path),
@@ -844,39 +807,26 @@ async fn a_tab_that_does_not_read_its_answers_is_closed() {
 #[tokio::test]
 // Verifies: ADR-0039
 async fn a_link_inside_the_git_directory_or_an_alternates_line_read_otherwise_is_refused() {
+    // One case of each kind; the rest are cases of the confinement's own tests.
     let tree = Enclosed::new("inner-ways-out");
     let root = tree.root();
-    let outside_git = tree.outside().join(".git");
     git(&tree.outside(), &["gc", "--quiet"]);
-    git(&tree.outside(), &["pack-refs", "--all"]);
-    let outside_objects = outside_git.join("objects");
+    let outside_objects = tree.outside().join(".git/objects");
     // The object packs, a link out.
     three_commits(&root.join("pack"));
     let pack = root.join("pack/.git/objects/pack");
     std::fs::remove_dir_all(&pack).unwrap();
     std::os::unix::fs::symlink(outside_objects.join("pack"), &pack).unwrap();
-    // The packed refs, a link out.
-    three_commits(&root.join("refs"));
-    let packed = root.join("refs/.git/packed-refs");
-    let _ = std::fs::remove_file(&packed);
-    std::os::unix::fs::symlink(outside_git.join("packed-refs"), &packed).unwrap();
     // A relative alternates line without the dot, which libgit2 reads against the process's
     // working directory, beside a decoy below the root where the line would lead from the store.
     three_commits(&root.join("relative"));
     let objects = root.join("relative/.git/objects");
     std::fs::create_dir_all(objects.join("outside/.git/objects")).unwrap();
     std::fs::write(objects.join("info/alternates"), "outside/.git/objects\n").unwrap();
-    // A line that libgit2 ends at `\r`, its second half outside, beside a decoy where the whole
-    // line would lead.
-    three_commits(&root.join("cr"));
-    let objects = root.join("cr/.git/objects");
-    let line = format!("zz\r{}", outside_objects.display());
-    std::fs::create_dir_all(objects.join(&line)).unwrap();
-    std::fs::write(objects.join("info/alternates"), format!("{line}\n")).unwrap();
 
     let running = start_on(root.clone(), Limits::default()).await;
     let mut tab = Tab::open(&running).await;
-    for path in ["pack", "refs", "relative", "cr"] {
+    for path in ["pack", "relative"] {
         assert_eq!(
             tab.invoke("open_repo", json!({ "path": path })).await,
             refused(path),
@@ -945,6 +895,15 @@ async fn what_git_says_about_a_failed_read_reaches_the_browser_only_as_reading_f
     let tree = Tree::new("git-says");
     let running = server(&tree).await;
     let mut tab = Tab::open(&running).await;
+    // Before a repository is open, the browser reads why nothing was read.
+    for cmd in ["get_file_diff", "select_commit"] {
+        assert_eq!(
+            tab.invoke(cmd, json!({ "sha": "c", "filePath": "f" }))
+                .await,
+            Err(ocelli_commands::HostError::NoRepository.to_string()),
+            "{cmd}"
+        );
+    }
     tab.invoke("open_repo", json!({ "path": "." }))
         .await
         .unwrap();
@@ -1592,52 +1551,82 @@ fn desktop_commands(lib: &str) -> std::collections::BTreeSet<String> {
         .collect()
 }
 
-/// The commands that are writes, which the server refuses until the second feature spec brings
-/// them (ADR-0037): they are excepted from what it must answer as the desktop does.
-const WRITES: &[&str] = &["perform_write", "cancel_write"];
+/// The commands the remote server's dispatch, `answer` in `socket.rs`, has an arm for: each
+/// string literal a line of it starts with before `=>`.
+fn server_commands(socket: &str) -> std::collections::BTreeSet<String> {
+    let body = socket
+        .split_once("async fn answer(")
+        .and_then(|(_, rest)| rest.split_once("\n}\n"))
+        .map(|(body, _)| body)
+        .expect("the server dispatches its commands in `answer`");
+    body.lines()
+        .filter_map(|line| {
+            let (name, rest) = line.trim_start().strip_prefix('"')?.split_once('"')?;
+            rest.trim_start()
+                .starts_with("=>")
+                .then(|| name.to_string())
+        })
+        .collect()
+}
 
-/// A command of the desktop host the server cannot offer, and the server's counterpart of it
-/// (ADR-0037): the native folder dialog, and the listing of folders below the server root
-/// (ADR-0039).
-const COUNTERPARTS: &[(&str, &str)] = &[("browse_repo", "list_folders")];
+/// The commands of the shared list `by` keeps, by name.
+fn listed(
+    list: &[(&str, Answered)],
+    by: impl Fn(Answered) -> bool,
+) -> std::collections::BTreeSet<String> {
+    list.iter()
+        .filter(|(_, how)| by(*how))
+        .map(|(name, _)| name.to_string())
+        .collect()
+}
 
-/// What the parity of the two hosts lacks: each read-only command the web interface sends and the
-/// desktop host answers that the server does not answer, and each event the web interface
-/// listens for that the shared commands, which both hosts carry, never report (G-8, ADR-0037).
-///
-/// The check decides existence only: that the server has an answer of its own for a command, not
-/// what the answer is. That each answer is the desktop host's for the same repository is decided
-/// by `each_read_the_browser_asks_is_answered_as_the_desktop_host_answers_it`.
-fn unanswered(
-    sent: &std::collections::BTreeSet<String>,
+/// Where the hosts and the shared list of their commands part: each command the list gives a
+/// host that the host does not answer, and each a host answers that the list does not give it,
+/// named (ADR-0037). A write the server refuses is one it answers, with its refusal.
+fn uncovered(
+    list: &[(&str, Answered)],
     desktop: &std::collections::BTreeSet<String>,
     server: &std::collections::BTreeSet<String>,
+) -> Vec<String> {
+    let hosts = [
+        ("desktop host", desktop, listed(list, Answered::by_desktop)),
+        ("server", server, listed(list, Answered::by_server)),
+    ];
+    let mut parted = Vec::new();
+    for (host, answers, given) in hosts {
+        for missing in given.difference(answers) {
+            parted.push(format!(
+                "the command {missing}, which the {host} does not answer"
+            ));
+        }
+        for extra in answers.difference(&given) {
+            parted.push(format!(
+                "the command {extra}, which the {host} answers and the list does not give it"
+            ));
+        }
+    }
+    parted
+}
+
+/// What the web interface asks for that the hosts do not carry: each command it sends that the
+/// shared list does not name, and each event it listens for that the shared commands, which both
+/// hosts carry, never report (G-8, ADR-0037).
+///
+/// The check decides existence only: that each host answers the commands the list gives it is
+/// decided by `uncovered`, and that each answer is the desktop host's for the same repository by
+/// `each_read_the_browser_asks_is_answered_as_the_desktop_host_answers_it`.
+fn unanswered(
+    list: &[(&str, Answered)],
+    sent: &std::collections::BTreeSet<String>,
     listened: &std::collections::BTreeSet<String>,
     reported: &std::collections::BTreeSet<String>,
 ) -> Vec<String> {
+    let named = listed(list, |_| true);
     let commands = sent
-        .iter()
-        .filter(|c| desktop.contains(*c) && !WRITES.contains(&c.as_str()))
-        .flat_map(|c| {
-            match COUNTERPARTS.iter().find(|(desktop, _)| desktop == c) {
-                // The server answers the counterpart, and never the desktop's name otherwise.
-                Some((_, counterpart)) => [
-                    (!server.contains(*counterpart))
-                        .then(|| format!("the command {counterpart} in place of {c}")),
-                    server
-                        .contains(c)
-                        .then(|| format!("the command {c}, which only the desktop host answers")),
-                ],
-                None => [
-                    (!server.contains(c)).then(|| format!("the command {c}")),
-                    None,
-                ],
-            }
-        })
-        .flatten();
+        .difference(&named)
+        .map(|c| format!("the command {c}, which the list does not name"));
     let events = listened
-        .iter()
-        .filter(|e| !reported.contains(*e))
+        .difference(reported)
         .map(|e| format!("the event {e}"));
     commands.chain(events).collect()
 }
@@ -1662,62 +1651,85 @@ fn set(names: &[&str]) -> std::collections::BTreeSet<String> {
     names.iter().map(|n| n.to_string()).collect()
 }
 
+/// A list of four commands, one of each way the hosts answer.
+const FOUR: &[(&str, Answered)] = &[
+    ("read_window", Answered::ByBoth),
+    ("perform_write", Answered::WriteRefusedByServer),
+    (
+        "browse_repo",
+        Answered::ByDesktop {
+            counterpart: "list_folders",
+        },
+    ),
+    (
+        "list_folders",
+        Answered::ByServer {
+            in_place_of: "browse_repo",
+        },
+    ),
+];
+
 #[test]
-// Verifies: G-8, ADR-0037
-fn the_existence_check_names_each_read_the_server_has_no_answer_for_and_passes_where_all_exist() {
-    let sent = set(&["read_window", "search_history", "perform_write", "web_only"]);
-    let desktop = set(&[
-        "read_window",
-        "search_history",
-        "perform_write",
-        "desktop_only",
-    ]);
-    let listened = set(&["history-grew", "set-status"]);
-    let reported = set(&["history-grew", "set-status", "write-progress"]);
-    // One missing: named; a write the server does not answer is excepted, and so is what the
-    // desktop host does not answer either.
+// Verifies: ADR-0037
+fn a_command_one_host_answers_and_the_other_or_the_list_does_not_is_named() {
+    let desktop = set(&["read_window", "perform_write", "browse_repo"]);
+    let server = set(&["read_window", "perform_write", "list_folders"]);
+    // Both cover the list: nothing.
+    assert!(uncovered(FOUR, &desktop, &server).is_empty());
+    // A command added to one host and not the other, nor the list.
+    let mut more = desktop.clone();
+    more.insert("fresh".into());
     assert_eq!(
-        unanswered(
-            &sent,
-            &desktop,
-            &set(&["read_window"]),
-            &listened,
-            &reported
-        ),
-        ["the command search_history"]
+        uncovered(FOUR, &more, &server),
+        ["the command fresh, which the desktop host answers and the list does not give it"]
     );
-    // All present: nothing.
-    let all = set(&["read_window", "search_history"]);
-    assert!(unanswered(&sent, &desktop, &all, &listened, &reported).is_empty());
-    // A command with a counterpart: the counterpart is required, the desktop's name refused.
-    let sent = set(&["read_window", "browse_repo"]);
-    let desktop = set(&["read_window", "browse_repo"]);
-    let both = set(&["read_window", "list_folders"]);
-    assert!(unanswered(&sent, &desktop, &both, &listened, &reported).is_empty());
+    let mut more = server.clone();
+    more.insert("fresh".into());
     assert_eq!(
-        unanswered(
-            &sent,
+        uncovered(FOUR, &desktop, &more),
+        ["the command fresh, which the server answers and the list does not give it"]
+    );
+    // A command listed for both and dropped by one, a refused write included.
+    assert_eq!(
+        uncovered(FOUR, &desktop, &set(&["read_window", "list_folders"])),
+        ["the command perform_write, which the server does not answer"]
+    );
+    assert_eq!(
+        uncovered(FOUR, &set(&["perform_write", "browse_repo"]), &server),
+        ["the command read_window, which the desktop host does not answer"]
+    );
+    // A host answering the other's command of a pair, or not its own.
+    assert_eq!(
+        uncovered(
+            FOUR,
             &desktop,
-            &set(&["read_window", "browse_repo"]),
-            &listened,
-            &reported
+            &set(&["read_window", "perform_write", "browse_repo"])
         ),
         [
-            "the command list_folders in place of browse_repo",
-            "the command browse_repo, which only the desktop host answers"
+            "the command list_folders, which the server does not answer",
+            "the command browse_repo, which the server answers and the list does not give it",
         ]
     );
-    let sent = set(&["read_window", "search_history", "perform_write", "web_only"]);
-    let desktop = set(&[
-        "read_window",
-        "search_history",
-        "perform_write",
-        "desktop_only",
-    ]);
+}
+
+#[test]
+// Verifies: G-8, ADR-0037
+fn the_existence_check_names_each_command_and_event_of_the_web_interface_no_host_carries() {
+    let listened = set(&["history-grew", "set-status"]);
+    let reported = set(&["history-grew", "set-status", "write-progress"]);
+    // All listed: nothing.
+    let sent = set(&["read_window", "browse_repo", "list_folders"]);
+    assert!(unanswered(FOUR, &sent, &listened, &reported).is_empty());
+    // A command the list does not name: named.
+    let sent = set(&["read_window", "web_only"]);
+    assert_eq!(
+        unanswered(FOUR, &sent, &listened, &reported),
+        ["the command web_only, which the list does not name"]
+    );
     // An event none of the shared commands reports: named.
     let listened = set(&["history-grew", "folder-chosen"]);
     assert_eq!(
-        unanswered(&sent, &desktop, &all, &listened, &reported),
+        unanswered(FOUR, &set(&["read_window"]), &listened, &reported),
         ["the event folder-chosen"]
     );
 }
@@ -1741,11 +1753,26 @@ fn the_calls_are_read_off_the_source_as_the_web_interface_writes_them() {
     assert_eq!(called_with(source, "listen"), set(&["history-grew"]));
     let lib = "tauri::generate_handler![\n commands::a,\n commands::b_c,\n ])";
     assert_eq!(desktop_commands(lib), set(&["a", "b_c"]));
+    let socket = r#"
+fn other() { match x { "not_this" => 1 } }
+async fn answer(tab: &Tab, cmd: &str) -> Result<Value, String> {
+    match cmd {
+        "a" => {
+            let x = "not_a_command";
+            value(x)
+        }
+        "b_c" => Err(WRITES_REFUSED.into()),
+        _ => Err(format!("Unknown command: {cmd}")),
+    }
+}
+fn after() { match y { "nor_this" => 2 } }
+"#;
+    assert_eq!(server_commands(socket), set(&["a", "b_c"]));
 }
 
 #[tokio::test]
 // Verifies: G-8, ADR-0037
-async fn the_server_has_an_answer_for_every_read_the_web_interface_sends_the_desktop_host() {
+async fn both_hosts_answer_the_shared_list_of_commands_and_the_web_interface_sends_no_other() {
     let repo = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
     let web = sources(&repo.join("src-web/src"), |p| {
         let name = p.to_string_lossy();
@@ -1755,45 +1782,50 @@ async fn the_server_has_an_answer_for_every_read_the_web_interface_sends_the_des
     let listened = called_with(&web, "listen");
     let desktop =
         desktop_commands(&std::fs::read_to_string(repo.join("src-tauri/src/lib.rs")).unwrap());
+    let dispatched = server_commands(
+        &std::fs::read_to_string(repo.join("crates/server/src/socket.rs")).unwrap(),
+    );
     let shared = sources(&repo.join("crates/commands/src"), |p| {
         p.extension().is_some_and(|e| e == "rs")
     });
     let reported = called_with(&shared, "report");
-    // The scan sees what it reads: the commands and events the web interface's App uses.
+    // The scans see what they read: the commands and events the web interface's App uses.
     assert!(
         sent.contains("read_window") && sent.contains("open_repo"),
         "{sent:?}"
     );
     assert!(listened.contains("history-grew"), "{listened:?}");
     assert!(desktop.contains("read_window"), "{desktop:?}");
+    assert!(dispatched.contains("read_window"), "{dispatched:?}");
 
+    let parted = uncovered(COMMANDS, &desktop, &dispatched);
+    assert!(parted.is_empty(), "the hosts and the list part: {parted:?}");
+    let missing = unanswered(COMMANDS, &sent, &listened, &reported);
+    assert!(
+        missing.is_empty(),
+        "the hosts do not carry what the web interface asks for: {missing:?}"
+    );
+
+    // The running server answers what its dispatch names, a write with its refusal, and only
+    // that: the desktop's command it answers in place of is unknown to it.
     let tree = Tree::new("parity");
     let running = server(&tree).await;
     let mut tab = Tab::open(&running).await;
-    let mut answered = std::collections::BTreeSet::new();
-    let counterparts = COUNTERPARTS.iter().map(|(_, c)| c.to_string());
-    let probed: std::collections::BTreeSet<String> = sent
-        .iter()
-        .chain(&desktop)
-        .cloned()
-        .chain(counterparts)
-        .collect();
-    for command in &probed {
+    for (command, how) in COMMANDS {
         let answer = tab.invoke(command, json!({})).await;
-        if answer != Err(format!("Unknown command: {command}")) {
-            answered.insert(command.clone());
+        let unknown = Err(format!("Unknown command: {command}"));
+        match how {
+            Answered::WriteRefusedByServer => assert_eq!(
+                answer,
+                Err(ocelli_server::socket::WRITES_REFUSED.to_string()),
+                "{command}"
+            ),
+            Answered::ByDesktop { .. } => assert_eq!(answer, unknown, "{command}"),
+            Answered::ByBoth | Answered::ByServer { .. } => {
+                assert_ne!(answer, unknown, "{command}")
+            }
         }
     }
-    // The probe tells a command the server lacks.
-    assert_eq!(
-        tab.invoke("no_such_command", json!({})).await,
-        Err("Unknown command: no_such_command".to_string())
-    );
-    let missing = unanswered(&sent, &desktop, &answered, &listened, &reported);
-    assert!(
-        missing.is_empty(),
-        "the server does not answer as the desktop host does: {missing:?}"
-    );
 }
 
 /// The shared commands as the desktop host holds them for its window, with the events they
@@ -1975,7 +2007,8 @@ async fn each_read_the_browser_asks_is_answered_as_the_desktop_host_answers_it()
                     .host
                     .get_file_diff(sha.to_string(), path.to_string())
                     .await
-                    .map(Value::String),
+                    .map(Value::String)
+                    .map_err(String::from),
                 "{sha} {path}"
             );
         }

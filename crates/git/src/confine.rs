@@ -30,6 +30,22 @@ pub fn confine_to(root: &Path) {
     ROOTS.write().unwrap().push(root.to_path_buf());
 }
 
+/// Whether `path` lies at or below `root`, both resolved first, links included: the one place a
+/// path is compared with the root (docs/CONVENTIONS.md). On Windows libgit2 spells a path with
+/// forward slashes and without the `\\?\` prefix `canonicalize` adds, so a path compared as it
+/// stands lies below no resolved root there. A path or root that does not resolve, missing or
+/// unreadable, lies below nothing.
+#[expect(
+    clippy::disallowed_methods,
+    reason = "the one comparison, both sides resolved the same way first"
+)]
+pub fn below(path: &Path, root: &Path) -> bool {
+    let (Ok(path), Ok(root)) = (path.canonicalize(), root.canonicalize()) else {
+        return false;
+    };
+    path.starts_with(root)
+}
+
 pub(crate) fn confined() -> bool {
     !ROOTS.read().unwrap().is_empty()
 }
@@ -41,10 +57,9 @@ pub(crate) fn root_of(path: &Path) -> Result<Option<PathBuf>, ()> {
     if roots.is_empty() {
         return Ok(None);
     }
-    let path = path.canonicalize().map_err(|_| ())?;
     roots
         .iter()
-        .find(|root| path.starts_with(root))
+        .find(|root| below(path, root))
         .cloned()
         .map(Some)
         .ok_or(())
@@ -108,7 +123,6 @@ fn check(path: &Path, root: &Path, walk: Option<usize>) -> Result<(), Refused> {
         std::iter::empty::<&OsStr>(),
     )
     .map_err(|_| Refused::Outside)?;
-    let below = |p: &Path| p.canonicalize().is_ok_and(|p| p.starts_with(root));
     let workdir = repo.workdir().ok_or(Refused::Outside)?;
     // The folder named is the working directory's own, so no folder inside a repository opens
     // the repository around it.
@@ -116,20 +130,15 @@ fn check(path: &Path, root: &Path, walk: Option<usize>) -> Result<(), Refused> {
     if named.is_none() || named != workdir.canonicalize().ok() {
         return Err(Refused::Outside);
     }
-    if !(below(repo.path()) && below(repo.commondir()) && below(workdir)) {
+    if !(below(repo.path(), root) && below(repo.commondir(), root) && below(workdir, root)) {
         return Err(Refused::Outside);
     }
     if let Some(cap) = walk {
         let mut budget = cap;
         no_link_below(repo.commondir(), &mut budget)?;
         // A linked worktree's git directory lies inside the common directory, walked already.
-        let common = repo
-            .commondir()
-            .canonicalize()
-            .map_err(|_| Refused::Outside)?;
-        let own = repo.path().canonicalize().map_err(|_| Refused::Outside)?;
-        if !own.starts_with(&common) {
-            no_link_below(&own, &mut budget)?;
+        if !below(repo.path(), repo.commondir()) {
+            no_link_below(repo.path(), &mut budget)?;
         }
     }
     if !stores_below(&repo.commondir().join("objects"), root) {
@@ -193,7 +202,7 @@ fn stores_below(objects: &Path, root: &Path) -> bool {
         let Ok(store) = store.canonicalize() else {
             return false;
         };
-        if !store.starts_with(root) {
+        if !below(&store, root) {
             return false;
         }
         if !seen.insert(store.clone()) {
@@ -218,6 +227,103 @@ fn stores_below(objects: &Path, root: &Path) -> bool {
         next.extend(stores.into_iter().map(|s| (s, depth + 1)));
     }
     true
+}
+
+#[cfg(test)]
+#[allow(
+    clippy::disallowed_methods,
+    reason = "a test sets its folders up by hand, the way a developer would"
+)]
+mod below_tests {
+    use super::below;
+    use std::path::PathBuf;
+
+    /// A scratch folder holding `root` and `outside` beside it, named for the test and the
+    /// process, and removed when the test ends; unresolved, as `temp_dir` spells it.
+    struct Scratch(PathBuf);
+
+    impl Scratch {
+        fn new(name: &str) -> Self {
+            let dir =
+                std::env::temp_dir().join(format!("ocelli-confine-{name}-{}", std::process::id()));
+            let _ = std::fs::remove_dir_all(&dir);
+            std::fs::create_dir_all(dir.join("root/inside")).unwrap();
+            std::fs::create_dir_all(dir.join("outside")).unwrap();
+            Scratch(dir)
+        }
+
+        fn root(&self) -> PathBuf {
+            self.0.join("root")
+        }
+    }
+
+    impl Drop for Scratch {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
+    }
+
+    #[test]
+    // Verifies: ADR-0039
+    fn the_root_itself_lies_below_it_however_either_is_spelled() {
+        let scratch = Scratch::new("itself");
+        let root = scratch.root();
+        let resolved = root.canonicalize().unwrap();
+        assert!(below(&root, &root));
+        assert!(below(&root, &resolved));
+        assert!(below(&resolved, &root));
+    }
+
+    #[test]
+    // Verifies: ADR-0039
+    fn a_path_with_forward_slashes_is_resolved_before_it_is_compared() {
+        let scratch = Scratch::new("slashes");
+        // As libgit2 spells a path on Windows: forward slashes, no `\\?\` prefix.
+        let spelled = scratch
+            .root()
+            .join("inside")
+            .to_string_lossy()
+            .replace('\\', "/");
+        let root = scratch.root().canonicalize().unwrap();
+        assert!(below(std::path::Path::new(&spelled), &root));
+        let outside = scratch
+            .0
+            .join("outside")
+            .to_string_lossy()
+            .replace('\\', "/");
+        assert!(!below(std::path::Path::new(&outside), &root));
+    }
+
+    #[test]
+    // Verifies: ADR-0039
+    fn a_path_with_dot_dot_is_resolved_before_it_is_compared() {
+        let scratch = Scratch::new("dotdot");
+        let root = scratch.root();
+        assert!(below(&root.join("inside/.."), &root));
+        assert!(!below(&root.join("inside/../../outside"), &root));
+        assert!(!below(&root.join(".."), &root));
+    }
+
+    #[test]
+    // Verifies: ADR-0039
+    fn a_missing_path_lies_below_nothing() {
+        let scratch = Scratch::new("missing");
+        let root = scratch.root();
+        assert!(!below(&root.join("missing"), &root));
+        assert!(!below(&root, &scratch.0.join("missing")));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    // Verifies: ADR-0039
+    fn a_link_out_of_the_root_lies_outside_it() {
+        let scratch = Scratch::new("link");
+        let root = scratch.root();
+        std::os::unix::fs::symlink(scratch.0.join("outside"), root.join("out")).unwrap();
+        std::os::unix::fs::symlink(root.join("inside"), root.join("in")).unwrap();
+        assert!(!below(&root.join("out"), &root));
+        assert!(below(&root.join("in"), &root));
+    }
 }
 
 // An absolute path is spelled for unix here.

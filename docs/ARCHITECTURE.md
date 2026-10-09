@@ -41,8 +41,8 @@ loopback addresses of the machine holding the repositories and answers only a br
 logged in with the connection token it printed
 ([ADR-0038](adr/0038-remote-server-localhost-tls-session-cookie.md)),
 and only about the repositories below its server root
-([ADR-0039](adr/0039-git-adapter-confined-to-the-server-root.md)); it only
-reads so far. The
+([ADR-0039](adr/0039-git-adapter-confined-to-the-server-root.md));
+it only reads so far. The
 measurement of the quality goals, which ships to nobody, is the one part that runs the git binary
 and fetches over the network: the corpus of public repositories, in the Measure workflow.
 
@@ -140,8 +140,10 @@ golden path and the test pattern an agent copies from are named here.
   million commits with thirty branch lines side by side and some dates running backwards: the wait
   for the first window of rows, for the slowest chunk taken in while the rest loads, and for the
   slowest window across the loaded history; `scripts/generate-history.sh` writes the generated
-  histories of Q-2 and Q-3. All
-  three run weekly and on demand in `.github/workflows/measure.yml`, not in the checks
+  histories of Q-2 and Q-3. `scripts/measure-mutants.sh` changes the git adapter's guards in
+  `guard.rs`, `remote.rs`, and `confine.rs` one mutant at a time and lists each one the suites of
+  the git adapter and the remote server let through. All four run weekly and on demand in
+  `.github/workflows/measure.yml`, not in the checks
   ([ADR-0008](adr/0008-toolchain-rust-and-typescript.md)); the checks run only their self-tests.
 - **Host commands** (`crates/commands`, `ocelli-commands`) — the commands and events of a host of
   the web interface, once for the desktop host and the remote server, free of any transport
@@ -152,7 +154,11 @@ golden path and the test pattern an agent copies from are named here.
   and writes through `GitWriter` on the same pool, one write at a time, telling the web interface
   a transfer's progress as `write-progress` events at most every tenth of a second and stopping it
   on `cancel_write` ([ADR-0031](adr/0031-front-ends-read-row-windows.md)). Its events go to a
-  `Report`, the window or the socket. Once a load ends it hands the memory the load freed back to
+  `Report`, the window or the socket. A command fails with a `HostError`: no repository open, a
+  refusal with its reason, or what git said, the kind from which the remote server decides what
+  the browser reads. `COMMANDS` lists the commands once, each with how the two hosts answer it,
+  which the remote server's tests hold the desktop host's handlers, the server's dispatch, and
+  what the web interface sends to. Once a load ends it hands the memory the load freed back to
   the system through glibc's `malloc_trim`, one of the workspace's two `unsafe` blocks outside
   its tests, libgit2's timeouts the other.
 - **Desktop host** (`src-tauri`, `ocelli`) — the Tauri shell: its commands hand their arguments
@@ -184,18 +190,18 @@ golden path and the test pattern an agent copies from are named here.
   the web interface's `repoSwitch.ts` shows as a row without its switch and says why, and
   whatever git says about a failed read reaches the browser only as "Reading the repository
   failed"
-  ([ADR-0039](adr/0039-git-adapter-confined-to-the-server-root.md)). It refuses
-  every write with a reason the web interface shows, and answers in place of the desktop's
-  folder dialog `list_folders`, the folders below a folder of the root, those holding a `.git`
-  marked, no link out of the root followed, a bounded number read. With `--listen` it binds that
-  address alone and speaks TLS alone through rustls with ring (`tls.rs`): the developer's
-  certificate and key, or a self-signed one rcgen makes on the first start and keeps with its key
-  in the user's configuration directory, readable by the account alone, reused and refused
-  rather than replaced where it does not name the address, or the host name for an unspecified
-  one, where half of it is kept, or where its key is readable by others; its fingerprint is
-  printed, a `Host`
-  is admitted only where the certificate names it, the origin is `https`, and the session cookie
-  `Secure` with the `__Host-` prefix. HTTP and the WebSocket run on axum and hyper over Tokio.
+  ([ADR-0039](adr/0039-git-adapter-confined-to-the-server-root.md)).
+  It refuses every write with a reason the web interface shows, and answers in place of the
+  desktop's folder dialog `list_folders`, the folders below a folder of the root, those
+  holding a `.git` marked, no link out of the root followed, a bounded number read. With
+  `--listen` it binds that address alone and speaks TLS alone through rustls with ring
+  (`tls.rs`): the developer's certificate and key, or a self-signed one rcgen makes on the
+  first start and keeps with its key in the user's configuration directory, readable by the
+  account alone, reused and refused rather than replaced where it does not name the address, or
+  the host name for an unspecified one, where half of it is kept, or where its key is readable
+  by others; its fingerprint is printed, a `Host` is admitted only where the certificate names
+  it, the origin is `https`, and the session cookie `Secure` with the `__Host-` prefix. HTTP
+  and the WebSocket run on axum and hyper over Tokio.
 - **Web interface** (`src-web`) — Svelte and TypeScript: the canvas, which holds only the window of
   rows it draws, the sidebar, the commit detail with its tag and branch forms, its stash actions,
   its ref chips' switch and delete, its merge, rebase, cherry-pick, revert, and reset onto the
@@ -228,7 +234,10 @@ it stands for, on two copies of a repository in every state that changes its out
 two copies' snapshots compared with the commits each side made alone read by content. The scratch
 directory, the test's `git`, the snapshot, and `refused` are written once, in
 `crates/git/tests/support/mod.rs`; every test starts `git` through
-`crates/git/tests/git_command/mod.rs`. Where the web interface spells the JSON of a core value,
+`crates/git/tests/git_command/mod.rs`. A way out of the server root is tested in
+`crates/git/tests/confine_checks.rs`, each case built so that the clause of `confine.rs` it is
+about decides it; the remote server's tests keep one case of each kind at the WebSocket. Where
+the web interface spells the JSON of a core value,
 the core's `tests/write_fixture.rs` writes an example to `crates/core/tests/fixtures/` and the web
 interface's test reads it against its types.
 

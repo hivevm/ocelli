@@ -447,9 +447,11 @@ fn find_parent(repo: &Repository) -> Option<ParentRepo> {
         // it is none (ADR-0039).
         Some(root) => {
             let root = root.as_path();
+            // The folders above, links resolved, walked up to the root.
+            let above = above.canonicalize().ok()?;
             let found = above
                 .ancestors()
-                .take_while(|dir| dir.starts_with(root))
+                .take_while(|dir| crate::confine::below(dir, root))
                 .find_map(|dir| {
                     Repository::open_ext(
                         dir,

@@ -1,7 +1,8 @@
 # The git adapter writes the working directory through libgit2's checkout and hands libgit2 a path
-# as written, never as a pattern (ADR-0033, docs/CONVENTIONS.md). A method listed here is used
-# only under `#[expect(clippy::disallowed_methods, reason = "…")]`, the reason saying why it is
-# safe where it stands.
+# as written, never as a pattern (ADR-0033, docs/CONVENTIONS.md); it compares a path with a root
+# only once both are resolved the same way (ADR-0039). A method listed here is used only under
+# `#[expect(clippy::disallowed_methods, reason = "…")]`, the reason saying why it is safe where it
+# stands.
 disallowed-methods = [
     { path = "std::fs::write", reason = "follows a link and drops a file's mode: write the working directory through libgit2's checkout" },
     { path = "std::fs::remove_file", reason = "the working directory changes through libgit2's checkout" },
@@ -23,4 +24,5 @@ disallowed-methods = [
     { path = "git2::Index::add_all", reason = "reads each path as a pattern" },
     { path = "git2::Index::update_all", reason = "reads each path as a pattern" },
     { path = "git2::Index::remove_all", reason = "reads each path as a pattern" },
+    { path = "std::path::Path::starts_with", reason = "compares a path as it stands: decide it with confine::below, which resolves both sides first" },
 ]

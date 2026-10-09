@@ -23,9 +23,105 @@ pub trait Report {
     fn report<S: Serialize + Clone>(&self, event: &str, payload: S);
 }
 
+/// How the two hosts answer a command of the web interface (ADR-0037).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Answered {
+    /// Both hosts, from the shared `Host`, with the same answer.
+    ByBoth,
+    /// Both hosts carry it, the remote server refusing it as a write until its second feature
+    /// spec brings writes.
+    WriteRefusedByServer,
+    /// The desktop host alone; the remote server answers `counterpart` in its place, never this
+    /// name otherwise.
+    ByDesktop { counterpart: &'static str },
+    /// The remote server alone, in place of the desktop host's command `in_place_of`.
+    ByServer { in_place_of: &'static str },
+}
+
+impl Answered {
+    /// Whether the desktop host registers the command.
+    pub fn by_desktop(self) -> bool {
+        !matches!(self, Answered::ByServer { .. })
+    }
+
+    /// Whether the remote server's dispatch has an answer for the command, a refusal included.
+    pub fn by_server(self) -> bool {
+        !matches!(self, Answered::ByDesktop { .. })
+    }
+}
+
+/// Every command of the hosts of the web interface, once: the desktop host's handlers, the
+/// remote server's dispatch, and what the web interface sends are each tested to be this list
+/// (ADR-0037).
+pub const COMMANDS: &[(&str, Answered)] = &[
+    ("startup_repo", Answered::ByBoth),
+    ("open_repo", Answered::ByBoth),
+    (
+        "browse_repo",
+        Answered::ByDesktop {
+            counterpart: "list_folders",
+        },
+    ),
+    (
+        "list_folders",
+        Answered::ByServer {
+            in_place_of: "browse_repo",
+        },
+    ),
+    ("read_window", Answered::ByBoth),
+    ("select_row", Answered::ByBoth),
+    ("selection", Answered::ByBoth),
+    ("deselect", Answered::ByBoth),
+    ("search_history", Answered::ByBoth),
+    ("rows_of", Answered::ByBoth),
+    ("select_commit", Answered::ByBoth),
+    ("get_file_diff", Answered::ByBoth),
+    ("write_discards", Answered::ByBoth),
+    ("perform_write", Answered::WriteRefusedByServer),
+    // Stops the write that runs; with none running, as in the remote server, it stops nothing.
+    ("cancel_write", Answered::ByBoth),
+];
+
 /// What a host checks a repository's path against before every command that reaches it: the
 /// remote server's server root (ADR-0039). It answers why it refuses.
 pub type Guard = Arc<dyn Fn(&Path) -> Result<(), String> + Send + Sync>;
+
+/// Why a command of the `Host` failed. The kind, not the words, tells a host what it may pass
+/// on: the remote server lets a refusal's reason through to the browser and replaces what git
+/// said, which may name a path on the server (ADR-0039). The desktop host shows each as it reads.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum HostError {
+    /// No repository is open for the command to reach.
+    NoRepository,
+    /// Ocelli refused, for the reason given: the guard, a path that does not exist, a write
+    /// while another runs.
+    Refused(String),
+    /// git failed, or the read around it: what it said. A write the git adapter refuses is one
+    /// too, since the adapter's error tells its refusals from git's failures by no type.
+    Git(String),
+}
+
+impl std::fmt::Display for HostError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            HostError::NoRepository => f.write_str("No repository open"),
+            HostError::Refused(reason) | HostError::Git(reason) => f.write_str(reason),
+        }
+    }
+}
+
+impl std::error::Error for HostError {}
+
+impl From<HostError> for String {
+    fn from(error: HostError) -> String {
+        error.to_string()
+    }
+}
+
+/// What git, or the read around it, said, as a `HostError`.
+fn git(error: impl std::fmt::Display) -> HostError {
+    HostError::Git(error.to_string())
+}
 
 /// What one window or tab has open.
 #[derive(Default)]
@@ -52,7 +148,7 @@ impl Host {
         }
     }
 
-    fn check(&self, path: &Path) -> Result<(), String> {
+    fn check(&self, path: &Path) -> Result<(), HostError> {
         checked(&self.guard, path)
     }
 
@@ -71,9 +167,9 @@ impl Host {
         label: String,
         select: Option<String>,
         to: R,
-    ) -> Result<(), String> {
+    ) -> Result<(), HostError> {
         if !path.exists() {
-            return Err(format!("Path does not exist: {label}"));
+            return Err(HostError::Refused(format!("Path does not exist: {label}")));
         }
         self.check(&path)?;
         *self.current_repo.lock().unwrap() = Some(path.clone());
@@ -130,44 +226,42 @@ impl Host {
 
     /// The open repository and the guard to check it with, on the blocking pool with the read
     /// it guards, since the check reads the file system.
-    fn repo(&self) -> Result<(PathBuf, Option<Guard>), String> {
+    fn repo(&self) -> Result<(PathBuf, Option<Guard>), HostError> {
         let path = self
             .current_repo
             .lock()
             .unwrap()
             .clone()
-            .ok_or_else(|| "No repository open".to_string())?;
+            .ok_or(HostError::NoRepository)?;
         Ok((path, self.guard.clone()))
     }
 
     /// Loads the files `sha` changed and sends them as a `commit-files` event.
-    pub async fn select_commit<R: Report>(&self, sha: String, to: &R) -> Result<(), String> {
+    pub async fn select_commit<R: Report>(&self, sha: String, to: &R) -> Result<(), HostError> {
         let (repo_path, guard) = self.repo()?;
         let files = tokio::task::spawn_blocking(move || {
             checked(&guard, &repo_path)?;
-            GitReader
-                .load_commit_files(&repo_path, &sha)
-                .map_err(|e| e.to_string())
+            GitReader.load_commit_files(&repo_path, &sha).map_err(git)
         })
         .await
-        .map_err(|e| e.to_string())??;
-        let json = serde_json::to_string(&files).map_err(|e| e.to_string())?;
+        .map_err(git)??;
+        let json = serde_json::to_string(&files).map_err(git)?;
         to.report("commit-files", json);
         Ok(())
     }
 
     /// The diff lines of one file in a commit, as JSON.
-    pub async fn get_file_diff(&self, sha: String, file_path: String) -> Result<String, String> {
+    pub async fn get_file_diff(&self, sha: String, file_path: String) -> Result<String, HostError> {
         let (repo_path, guard) = self.repo()?;
         let lines = tokio::task::spawn_blocking(move || {
             checked(&guard, &repo_path)?;
             GitReader
                 .load_file_diff(&repo_path, &sha, &file_path)
-                .map_err(|e| e.to_string())
+                .map_err(git)
         })
         .await
-        .map_err(|e| e.to_string())??;
-        serde_json::to_string(&lines).map_err(|e| e.to_string())
+        .map_err(git)??;
+        serde_json::to_string(&lines).map_err(git)
     }
 
     /// What `write` discards, in the core's words for the question the web interface puts
@@ -185,7 +279,7 @@ impl Host {
         write: Write,
         confirmed: bool,
         to: R,
-    ) -> Result<Option<String>, String> {
+    ) -> Result<Option<String>, HostError> {
         let confirmation = if confirmed {
             Confirmation::Given
         } else {
@@ -194,7 +288,7 @@ impl Host {
         let (repo_path, guard) = self.repo()?;
         // One write at a time, so that a cancel reaches the write it was meant for.
         if self.writing.swap(true, Ordering::AcqRel) {
-            return Err("A write is still running".into());
+            return Err(HostError::Refused("A write is still running".into()));
         }
         // A transfer reports how far it has come as `write-progress` events, at most every
         // tenth of a second, and stops once `cancel_write` sets the flag this write was handed
@@ -211,12 +305,11 @@ impl Host {
                 }
                 !cancel.load(Ordering::Relaxed)
             };
-            port::perform(&GitWriter, &repo_path, &write, confirmation, &mut progress)
-                .map_err(|e| e.to_string())
+            port::perform(&GitWriter, &repo_path, &write, confirmation, &mut progress).map_err(git)
         })
         .await;
         self.writing.store(false, Ordering::Release);
-        written.map_err(|e| e.to_string())?
+        written.map_err(git)?
     }
 
     /// Stops the write that runs, where it reports its progress.
@@ -225,9 +318,11 @@ impl Host {
     }
 }
 
-/// `path` checked with `guard`, where the host has one.
-fn checked(guard: &Option<Guard>, path: &Path) -> Result<(), String> {
-    guard.as_ref().map_or(Ok(()), |guard| guard(path))
+/// `path` checked with `guard`, where the host has one: a refusal for the reason it gives.
+fn checked(guard: &Option<Guard>, path: &Path) -> Result<(), HostError> {
+    guard
+        .as_ref()
+        .map_or(Ok(()), |guard| guard(path).map_err(HostError::Refused))
 }
 
 /// The most matches the results panel lists; every match is reachable by cycling through them.
@@ -614,21 +709,95 @@ mod tests {
             Ok(())
         );
         let let_through = runtime.block_on(host.get_file_diff("c".into(), "f".into()));
-        assert!(let_through.is_err_and(|e| e != "refused"));
+        assert!(matches!(let_through, Err(HostError::Git(_))));
 
         refusing.store(true, Ordering::SeqCst);
+        let refused = HostError::Refused("refused".into());
         assert_eq!(
             runtime.block_on(host.get_file_diff("c".into(), "f".into())),
-            Err("refused".into())
+            Err(refused.clone())
         );
         assert_eq!(
             runtime.block_on(host.select_commit("c".into(), &Nowhere)),
-            Err("refused".into())
+            Err(refused.clone())
         );
         assert_eq!(
             host.open_repo(dir.clone(), "d".into(), None, Nowhere),
-            Err("refused".into())
+            Err(refused)
         );
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    // Verifies: ADR-0039
+    fn each_failure_of_a_command_carries_its_kind() {
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .build()
+            .unwrap();
+        let _in = runtime.enter();
+        let host = Host::default();
+        // Nothing open yet: every command that reaches a repository says so.
+        assert_eq!(
+            runtime.block_on(host.get_file_diff("c".into(), "f".into())),
+            Err(HostError::NoRepository)
+        );
+        assert_eq!(
+            runtime.block_on(host.select_commit("c".into(), &Nowhere)),
+            Err(HostError::NoRepository)
+        );
+        // A path that does not exist is Ocelli's refusal, naming the label it was given.
+        let missing = std::env::temp_dir().join(format!("ocelli-missing-{}", std::process::id()));
+        assert!(matches!(
+            host.open_repo(missing, "gone".into(), None, Nowhere),
+            Err(HostError::Refused(reason)) if reason.contains("gone")
+        ));
+        // A folder without a repository opens, and what git then says is git's failure.
+        let dir = std::env::temp_dir().join(format!("ocelli-kinds-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        host.open_repo(dir.clone(), "d".into(), None, Nowhere)
+            .unwrap();
+        assert!(matches!(
+            runtime.block_on(host.get_file_diff("c".into(), "f".into())),
+            Err(HostError::Git(_))
+        ));
+        assert!(matches!(
+            runtime.block_on(host.select_commit("c".into(), &Nowhere)),
+            Err(HostError::Git(_))
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_failure_reads_as_its_reason_in_the_desktop_host() {
+        assert_eq!(HostError::NoRepository.to_string(), "No repository open");
+        assert_eq!(String::from(HostError::Refused("why".into())), "why");
+        assert_eq!(String::from(HostError::Git("git said".into())), "git said");
+    }
+
+    #[test]
+    // Verifies: ADR-0037
+    fn the_list_names_each_command_once_and_each_counterpart_both_ways() {
+        let names: std::collections::BTreeSet<_> = COMMANDS.iter().map(|(n, _)| *n).collect();
+        assert_eq!(names.len(), COMMANDS.len(), "a command listed twice");
+        let answered = |name: &str| COMMANDS.iter().find(|(n, _)| *n == name).map(|(_, a)| *a);
+        for (name, how) in COMMANDS {
+            match how {
+                Answered::ByDesktop { counterpart } => assert_eq!(
+                    answered(counterpart),
+                    Some(Answered::ByServer { in_place_of: name }),
+                    "{name}"
+                ),
+                Answered::ByServer { in_place_of } => assert_eq!(
+                    answered(in_place_of),
+                    Some(Answered::ByDesktop { counterpart: name }),
+                    "{name}"
+                ),
+                Answered::ByBoth | Answered::WriteRefusedByServer => {
+                    assert!(how.by_desktop() && how.by_server(), "{name}")
+                }
+            }
+        }
+        assert!(!answered("browse_repo").unwrap().by_server());
+        assert!(!answered("list_folders").unwrap().by_desktop());
     }
 }

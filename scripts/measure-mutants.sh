@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
 #
 # Runs cargo-mutants over the git adapter's guards, the checks every write makes before it changes
-# anything (crates/git/src/guard.rs) and the checks of a remote's address and its credentials
-# (crates/git/src/remote.rs): each mutant changes one guard, and the suite of the git adapter must
-# fail on it. A mutant the suite lets through is a guard no test decides, as the credential guard
+# anything (crates/git/src/guard.rs), the checks of a remote's address and its credentials
+# (crates/git/src/remote.rs), and the confinement to a server root (crates/git/src/confine.rs),
+# which the remote server's tests decide too, so the web interface must be built first: each
+# mutant changes one guard, and the suites of the git adapter and the server must fail on it. A mutant the suite lets through is a guard no test decides, as the credential guard
 # against line breaks was until its own test came (ADR-0033, ADR-0035). The surviving mutants are
 # listed, and appended to the job summary when GITHUB_STEP_SUMMARY is set.
 #
@@ -42,6 +43,7 @@ exclude=(
 
 cd "$ROOT" || exit 1
 cargo mutants --package ocelli-git --file crates/git/src/guard.rs --file crates/git/src/remote.rs \
+  --file crates/git/src/confine.rs --test-package ocelli-git --test-package ocelli-server \
   "${exclude[@]}" --jobs "$jobs" --output "$out"
 status=$?
 missed="$out/mutants.out/missed.txt"
