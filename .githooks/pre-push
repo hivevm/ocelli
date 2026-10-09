@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 #
-# Git pre-push hook: the checks pass before anything is pushed.
+# Git pre-push hook: the checks pass before anything is pushed, and nothing lands on a branch
+# whose CI is red unless the push says it may.
 #
 # AGENTS.md, section 5 requires scripts/check-all.sh to pass before a push, and CI runs the same
 # checks on every pull request. This hook runs them first, so a red push never leaves the machine.
@@ -11,12 +12,75 @@
 # refuses while tracked files differ from HEAD or untracked files lie about that git does not
 # ignore, and when a ref pushed is not the checked-out commit.
 #
+# Where the repository has .github/workflows/checks.yml, the hook then asks gh for the last
+# completed run of that workflow on each branch pushed to, and refuses while it is red, naming the
+# run and its failed jobs. OCELLI_PUSH_OVER_RED=1 pushes anyway, for the push that fixes the red.
+# Where gh is missing, not authenticated, offline, slower than OCELLI_PUSH_CI_TIMEOUT seconds
+# (default 5), or the branch has no completed run yet, the hook says it could not tell and goes on.
+#
 # A repository without scripts/check-all.sh has nothing to run, and the push proceeds.
 # Bypassable with 'git push --no-verify'. scripts/test-git-hooks.sh exercises this hook.
 
 set -uo pipefail
 
 root="$(git rev-parse --show-toplevel 2>/dev/null || true)"
+refs="$(cat)"
+workflow="checks.yml"
+limit="${OCELLI_PUSH_CI_TIMEOUT:-5}"
+
+# bounded <cmd...> — run a command with stdin closed and stderr dropped, print its stdout, and
+# kill it after $limit seconds. Bash and sleep only: macOS has no coreutils 'timeout'.
+bounded() {
+  "$@" </dev/null 2>/dev/null &
+  local pid=$!
+  (sleep "$limit"; kill "$pid") >/dev/null 2>&1 &
+  local watcher=$!
+  wait "$pid"
+  local rc=$?
+  kill "$watcher" 2>/dev/null
+  return "$rc"
+}
+
+# ci_red <branch> — succeeds when the branch's last completed run of the workflow is red and the
+# push stops; says what it found, or why it could not tell.
+ci_red() {
+  local branch="$1" run conclusion id url jobs
+  local unsure="pre-push: could not tell whether CI is red on '$branch'"
+  if ! command -v gh >/dev/null 2>&1; then
+    echo "$unsure: gh is not installed. Going on." >&2
+    return 1
+  fi
+  if ! run="$(bounded gh run list --workflow "$workflow" --branch "$branch" --status completed \
+      --limit 1 --json conclusion,databaseId,url \
+      --jq '.[] | [.conclusion, (.databaseId | tostring), .url] | join("\t")')"; then
+    echo "$unsure: gh failed or took longer than ${limit}s (not authenticated, or offline?). Going on." >&2
+    return 1
+  fi
+  if [[ -z "$run" ]]; then
+    echo "$unsure: it has no completed $workflow run yet. Going on." >&2
+    return 1
+  fi
+  IFS=$'\t' read -r conclusion id url <<< "$run"
+  case "$conclusion" in
+    failure | timed_out | startup_failure) ;;
+    *) return 1 ;;
+  esac
+  if [[ "${OCELLI_PUSH_OVER_RED:-}" == 1 ]]; then
+    echo "pre-push: CI is red on '$branch' (run $id, $url); pushing anyway, as OCELLI_PUSH_OVER_RED=1 asks." >&2
+    return 1
+  fi
+  jobs="$(bounded gh run view "$id" --json jobs \
+    --jq '.jobs[] | select(.conclusion == "failure" or .conclusion == "timed_out") | .name')" || jobs=""
+  echo "pre-push: refused — the last completed $workflow run on '$branch' is red ($conclusion): run $id, $url" >&2
+  if [[ -n "$jobs" ]]; then
+    echo "  Failed jobs:" >&2
+    while IFS= read -r line; do printf '    %s\n' "$line" >&2; done <<< "$jobs"
+  else
+    echo "  Its failed jobs could not be listed." >&2
+  fi
+  echo "  Push on top of red only to fix it: OCELLI_PUSH_OVER_RED=1 git push ..." >&2
+  return 0
+}
 
 if [[ -n "$root" && -f "$root/scripts/check-all.sh" ]]; then
   differs="$(git -C "$root" status --porcelain --untracked-files=normal)"
@@ -32,7 +96,19 @@ if [[ -n "$root" && -f "$root/scripts/check-all.sh" ]]; then
       echo "pre-push: refused — $local_ref is not the checked-out commit, so the checks would judge another tree. Check it out, then push again." >&2
       exit 1
     fi
-  done
+  done <<< "$refs"
+fi
+
+if [[ -n "$root" && -f "$root/.github/workflows/$workflow" ]]; then
+  while read -r _ local_sha remote_ref _; do
+    [[ -z "${local_sha:-}" || "$local_sha" =~ ^0+$ || "$remote_ref" != refs/heads/* ]] && continue
+    if ci_red "${remote_ref#refs/heads/}"; then
+      exit 1
+    fi
+  done <<< "$refs"
+fi
+
+if [[ -n "$root" && -f "$root/scripts/check-all.sh" ]]; then
   if ! bash "$root/scripts/check-all.sh"; then
     echo >&2
     echo "pre-push: refused — the checks are red, and they pass before anything is pushed (AGENTS.md, section 5). Fix them, then push again." >&2

@@ -155,7 +155,8 @@ restates nothing, and a rule this file does not state is not a rule of this proj
   Pushing, `gh`, and anything that rewrites or discards history (`reset`, `rebase`, `merge`,
   `restore`, `clean`) wait for an instruction that names it and implies no next one. The git
   hooks under [`.githooks/`](.githooks/) refuse a commit on `main` and a push while the checks of
-  [§5](#5-quality-bar--definition-of-done) are red.
+  [§5](#5-quality-bar--definition-of-done) are red, or while the branch's last completed CI run
+  is; `OCELLI_PUSH_OVER_RED=1` lets through the push that fixes that red.
 - **Authenticate `gh` through its web flow;** a human enters the one-time code. Never request,
   store, or hard-code personal access tokens.
 - **Changes reach `main` through a pull request.** What no file can enforce is listed under

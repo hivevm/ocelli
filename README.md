@@ -69,7 +69,11 @@ The problem, the goals, and the success criteria live in
    preconfigured agent extensions build automatically, and the container enables the repository's
    git hooks ([`.githooks/`](.githooks/)): no commit on `main`, and the checks run before a push.
    Working outside the container? Enable them yourself, once per clone:
-   `git config core.hooksPath .githooks`.
+   `git config core.hooksPath .githooks`. The push hook also asks `gh` for the last completed
+   **Checks** run of the branch pushed to and refuses while it is red, naming the run and its
+   failed jobs; the push that fixes it goes through with `OCELLI_PUSH_OVER_RED=1 git push`. Where
+   `gh` is missing, not authenticated, offline, or slower than `OCELLI_PUSH_CI_TIMEOUT` seconds
+   (default 5), or the branch has no completed run yet, it says it could not tell and goes on.
 2. Authenticate your coding agent inside the container (for Claude Code: `claude login`).
 3. Start working with the agent. Drive the work from the specification and the ADRs.
 
@@ -215,7 +219,7 @@ src-tauri/            # the desktop host (ADR-0018)
 src-web/              # the web interface the desktop host and the remote server show (ADR-0022)
 flatpak/              # the Flatpak manifest of the release pipeline (ADR-0025)
 scripts/              # consistency checks and sensors (check-all.sh runs them all), run in CI
-.githooks/            # git hooks: refuse a commit on main and a push while the checks are red
+.githooks/            # git hooks: refuse a commit on main and a push while the checks or CI are red
 .github/              # CI workflows, Dependabot, issue & pull request templates, code owners
 .devcontainer/        # Dev Container definition (Dockerfile + Features)
 .vscode/              # shared editor settings
