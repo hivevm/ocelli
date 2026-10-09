@@ -143,8 +143,8 @@ keeps does not name the address or the host name any more, or where only half of
 other accounts may read, is kept, and says what to remove. The browser opens
 the repository the server root is, or one chosen with Open Repo from the folders below the root,
 and nothing outside the root
-([ADR-0039](docs/adr/0039-git-adapter-confined-to-the-server-root.md)); the
-server only reads, and every restart prints a new URL.
+([ADR-0039](docs/adr/0039-git-adapter-confined-to-the-server-root.md));
+the server only reads, and every restart prints a new URL.
 
 ### In the terminal
 

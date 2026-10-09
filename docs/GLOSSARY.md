@@ -98,7 +98,7 @@ to invent.
   the web interface to the developer's browser, as VS Code's remote development does.
   _Avoid:_ backend, daemon, agent.
 - **Server root** — the folder the remote server is started with; a browser opens only the
-  repositories below it.
+  repositories whose files all lie below it, and reads nothing outside it.
   _Avoid:_ workspace, base directory.
 - **Stash node** — the node of the commit graph that stands for one entry of the stash, joined to
   the commit it was made on, and carrying its place `n` of `stash@{n}`.

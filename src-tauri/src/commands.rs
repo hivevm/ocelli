@@ -42,9 +42,9 @@ pub async fn open_repo(
     window: Window,
     state: State<'_, AppState>,
 ) -> Result<(), String> {
-    state
+    Ok(state
         .host
-        .open_repo(PathBuf::from(&path), path, select, ToWindow(window))
+        .open_repo(PathBuf::from(&path), path, select, ToWindow(window))?)
 }
 
 #[tauri::command(async)]
@@ -110,7 +110,7 @@ pub async fn select_commit(
     window: Window,
     state: State<'_, AppState>,
 ) -> Result<(), String> {
-    state.host.select_commit(sha, &ToWindow(window)).await
+    Ok(state.host.select_commit(sha, &ToWindow(window)).await?)
 }
 
 #[tauri::command]
@@ -125,10 +125,10 @@ pub async fn perform_write(
     window: Window,
     state: State<'_, AppState>,
 ) -> Result<Option<String>, String> {
-    state
+    Ok(state
         .host
         .perform_write(write, confirmed, ToWindow(window))
-        .await
+        .await?)
 }
 
 #[tauri::command(async)]
@@ -142,5 +142,5 @@ pub async fn get_file_diff(
     file_path: String,
     state: State<'_, AppState>,
 ) -> Result<String, String> {
-    state.host.get_file_diff(sha, file_path).await
+    Ok(state.host.get_file_diff(sha, file_path).await?)
 }

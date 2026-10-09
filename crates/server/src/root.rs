@@ -4,7 +4,7 @@
 //! common directory, and object stores all lie below the server root, checking it again before
 //! every command that reaches it.
 
-use ocelli_git::confine::{Refused, WALK_CAP, check_below, still_below};
+use ocelli_git::confine::{Refused, WALK_CAP, below, check_below, still_below};
 use serde::Serialize;
 use std::path::{Component, Path, PathBuf};
 
@@ -89,15 +89,6 @@ pub fn too_large(relative: &str) -> String {
     format!(
         "{relative} holds more in its git directory than the server checks, so it is not opened"
     )
-}
-
-/// Whether `reason` is one of the server root's own refusals.
-pub fn is_refusal(reason: &str) -> bool {
-    reason.ends_with(" is no repository below the server root")
-        || reason.ends_with(" is no folder below the server root")
-        || reason.ends_with(
-            " holds more in its git directory than the server checks, so it is not opened",
-        )
 }
 
 impl Root {
@@ -207,7 +198,7 @@ impl Root {
             let Ok(target) = entry.path().canonicalize() else {
                 continue;
             };
-            if !target.starts_with(&self.path) || !target.is_dir() || self.in_git(&target) {
+            if !below(&target, &self.path) || !target.is_dir() || self.in_git(&target) {
                 continue;
             }
             let path = if label == "." {

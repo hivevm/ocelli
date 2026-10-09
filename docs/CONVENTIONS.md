@@ -12,6 +12,11 @@ an ADR. What the golden path already shows needs none. Few entries that hold bea
 skimmed. The design revision drops what prevented nothing
 ([`AGENTS.md` §5](../AGENTS.md#5-quality-bar--definition-of-done)).
 
+- **A path and a name are the file system's to spell, on every system CI runs on.** On Windows
+  libgit2 writes a path with forward slashes and without the `\\?\` prefix `canonicalize` adds,
+  and APFS refuses a name that is not UTF-8; a path is compared with another only after both are
+  resolved the same way, and a fixture that needs such a name is made where the file system
+  takes it, the assertion holding either way. The local checks run on Linux alone.
 - **A test looks only for what it started.** A process or a file it checks for carries its own
   run's mark, its scratch directory or its process group: a machine-wide search sees another
   session's run.

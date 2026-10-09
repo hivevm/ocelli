@@ -10,7 +10,7 @@
 use crate::Limits;
 use crate::root::Root;
 use axum::extract::ws::{Message, WebSocket};
-use ocelli_commands::{Host, Report};
+use ocelli_commands::{Host, HostError, Report};
 use ocelli_core::port::Write;
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
@@ -42,14 +42,13 @@ struct Command {
     args: Value,
 }
 
-/// The reason of a command that reached the repository as the browser may read it: Ocelli's own
-/// refusals as they are, and anything git said, which may name a path on the server, replaced
-/// by `READ_FAILED` (ADR-0039).
-pub fn scrub(reason: String) -> String {
-    if crate::root::is_refusal(&reason) || reason == "No repository open" {
-        reason
-    } else {
-        READ_FAILED.into()
+/// The failure of a command that reached the repository as the browser may read it, decided by
+/// its kind: Ocelli's own refusals and that no repository is open as they are, and anything git
+/// said, which may name a path on the server, as `READ_FAILED` (ADR-0039).
+pub fn scrub(error: HostError) -> String {
+    match error {
+        HostError::NoRepository | HostError::Refused(_) => error.to_string(),
+        HostError::Git(_) => READ_FAILED.into(),
     }
 }
 
@@ -328,6 +327,7 @@ async fn answer(tab: &Arc<Tab>, cmd: &str, a: Value) -> Result<Value, String> {
                 let opened = tab.root.open(&path)?;
                 tab.host
                     .open_repo(opened.path, opened.label, select, tab.to.clone())
+                    .map_err(scrub)
             })
             .await?;
             value(())
@@ -440,19 +440,26 @@ mod tests {
     #[test]
     // Verifies: ADR-0039
     fn what_git_says_reaches_the_browser_only_as_reading_failed() {
+        // What git says is replaced whatever its words, Ocelli's own included.
         for said in [
-            "failed to resolve path '/nonexistent/x': No such file or directory",
-            "revspec 'c' not found; class=Reference (4); code=NotFound (-3)",
-            "could not open C:\\Users\\a\\repo",
+            "failed to resolve path '/nonexistent/x': No such file or directory".to_string(),
+            "could not open C:\\Users\\a\\repo".to_string(),
+            crate::root::refused("app"),
         ] {
-            assert_eq!(scrub(said.to_string()), READ_FAILED, "{said}");
+            assert_eq!(scrub(HostError::Git(said.clone())), READ_FAILED, "{said}");
         }
-        for ours in [
-            "No repository open",
-            "app is no repository below the server root",
+        // A refusal reaches the browser with its reason, whatever its words.
+        for reason in [
+            crate::root::refused("app"),
+            crate::root::too_large("app"),
+            "any reason at all".to_string(),
         ] {
-            assert_eq!(scrub(ours.to_string()), ours);
+            assert_eq!(scrub(HostError::Refused(reason.clone())), reason);
         }
+        assert_eq!(
+            scrub(HostError::NoRepository),
+            HostError::NoRepository.to_string()
+        );
         let tree = Tree::new("status");
         let root = Root::new(&tree.0.join("root")).unwrap();
         let mut status = json!("Error: failed to resolve path '/srv/x'");

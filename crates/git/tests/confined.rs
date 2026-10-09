@@ -1,4 +1,4 @@
-//! Verifies: ADR-0039
+//! Verifies: ADR-0039, Q-5
 //!
 //! Confined to a folder, as the remote server confines it, the adapter opens a repository only
 //! at the folder it is given: a folder without its own `.git`, or one whose `.git` vanished
