@@ -108,7 +108,7 @@ fn over_the_network(url: &str) -> bool {
 /// transport unless it is an absolute path, or a `file://` address of one, that resolves below
 /// the root the repository at `repo_path` lies below: a fetch from a repository outside the root
 /// would copy its objects inside, where the browser reads them, and a push would write it, which
-/// ADR-0039 rules out however a repository inside points outside. An address over the network is
+/// ADR-0037 rules out however a repository inside points outside. An address over the network is
 /// the server account's to reach (ADR-0037). Not confined, every address passes.
 pub(crate) fn remote_within_root(repo_path: &Path, name: &str, url: &str) -> anyhow::Result<()> {
     let root = match root_of(repo_path) {

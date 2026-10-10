@@ -169,7 +169,8 @@ golden path and the test pattern an agent copies from are named here.
   interface's reads of it, windows of rows, search, and the selected commit with its lineage,
   and writes through `GitWriter` on the same pool, one write at a time, telling the web interface
   a transfer's progress as `write-progress` events at most every tenth of a second and stopping it
-  on `cancel_write` ([ADR-0031](adr/0031-front-ends-read-row-windows.md)); a `Host` given
+  on `cancel_write` ([ADR-0031](adr/0031-front-ends-read-row-windows.md) for the reads,
+  [ADR-0037](adr/0037-remote-server-websocket-per-tab.md) for the writes); a `Host` given
   a `TakeTurn` writes only once it gives it the repository's turn, and tells the turn how the write
   ended before giving it back. Its events go to a
   `Report`, the window or the socket. A command fails with a `HostError`: no repository open, a
@@ -343,7 +344,7 @@ lives between them. Only what a newcomer would otherwise reconstruct from code.
   nothing and its reason goes to the developer. A write done starts a new load session of the
   same repository, which takes the commit the write made, or else the commit selected before, and
   names its row once a chunk lays it out, unless the developer has chosen another by then; the
-  desktop host passes the row on with `history-grew`, and the front end selects it
+  shared `Host` passes the row on with `history-grew`, and the front end selects it
   ([ADR-0033](adr/0033-writes-what-git-writes.md)).
 - **Transferring.** A fetch, a pull, or a push is a `Write` like any other, handed to
   `port::perform` with a callback that the git adapter tells how far the transfer has come and
@@ -354,5 +355,5 @@ lives between them. Only what a newcomer would otherwise reconstruct from code.
   moved before its refusal included, until the next reload
   ([ADR-0035](adr/0035-remotes-through-libgit2-transports.md)).
 - **State between sessions.** The web interface keeps the theme, the avatars toggle, the diff
-  layout, and the sidebar in `localStorage`; the terminal application keeps the same in
-  `ocelli/cli-state.json` under the user's state directory.
+  layout, and the sidebar in `localStorage`; the terminal application keeps the same but the
+  avatars toggle in `ocelli/cli-state.json` under the user's state directory.

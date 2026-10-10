@@ -1,8 +1,7 @@
 <script lang="ts">
   // The repository sidebar (ADR-0026, ADR-0027): local branches, remote branches
   // grouped by remote, working trees, tags, and submodules. It navigates and
-  // nothing else — the specification's "Not a git client" Non-Goal rules out
-  // checkout, fetch, and every other write, however much the layout invites them.
+  // nothing else: the writes on a ref are the ref chips' (ADR-0033).
   //
   // Rows come in two kinds. Branches and tags *reveal* a commit in the graph.
   // Working trees, submodules and the parent row *open* a repository, because

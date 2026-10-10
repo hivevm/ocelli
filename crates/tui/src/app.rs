@@ -3,10 +3,8 @@
 //! sidebar, graph with lineage highlight, search, commit detail with
 //! parent/child links, flat or tree file list, unified or side-by-side diff,
 //! theme switch, open and refresh — with guitar-style keys (ADR-0028). Every
-//! key reads but the writes (ADR-0033): `t` tags the selected commit, `s`
-//! stashes the uncommitted changes, `a` applies the selected stash, and `p`
-//! and `d` on it pop and drop it, as `d` on a tag in the sidebar deletes it,
-//! once the developer has answered `y` (ADR-0034). The keys are here; the
+//! key reads but the writes (ADR-0033, ADR-0035), the G-4 to G-7 operations; one that
+//! discards work runs only once the developer has answered `y` (ADR-0034). The keys are here; the
 //! requests they build and the one write that runs are in [`crate::writes`].
 
 use crate::chips::RefContext;

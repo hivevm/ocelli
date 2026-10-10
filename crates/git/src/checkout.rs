@@ -10,7 +10,7 @@ use std::path::{Path, PathBuf};
 /// Checks `target`'s tree out over the checked-out one, the uncommitted changes carried along,
 /// or refuses with nothing changed, naming what is in the way: what a switch and a fast-forward
 /// both do to the working directory and the index. Each path goes back to libgit2 in the bytes
-/// it read, a name that is not UTF-8 among them, which Windows cannot hold and refuses.
+/// it read, a name that is not UTF-8 among them, which Windows and macOS cannot hold and refuse.
 pub(crate) fn check_out(repo: &Repository, target: &Commit) -> Result<()> {
     nothing_in_progress(repo, true)?;
     let head = repo.head().ok().and_then(|h| h.peel_to_tree().ok());

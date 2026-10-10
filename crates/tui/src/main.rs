@@ -1,8 +1,8 @@
 //! `ocelli-cli` — the terminal frontend of Ocelli (ADR-0028).
 //!
 //! History and refs come from `ocelli-git` and the layout from `ocelli-core`,
-//! exactly as for the desktop application; this crate only rasterises and
-//! navigates them.
+//! exactly as for the desktop application; this crate rasterises and
+//! navigates them and hands the developer's writes to the core.
 
 mod app;
 mod chips;

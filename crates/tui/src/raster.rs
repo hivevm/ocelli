@@ -6,8 +6,8 @@
 //! column occupies two cells — the glyph cell at `x = 2 * col` and a connector
 //! cell to its right — and every row is one line.
 //!
-//! Edge shapes follow the *Edge rendering* table of the specification, keyed on
-//! the edge type (ADR-0030): a BRANCH edge runs horizontally along the parent's
+//! Edge shapes follow the table of ADR-0030, keyed on
+//! the edge type: a BRANCH edge runs horizontally along the parent's
 //! row and bends up into the child's column; a MERGE edge runs up the parent's
 //! column and bends at the child's row — whichever side the child is on. The
 //! rounded box corners `╭ ╮ ╰ ╯` are the terminal form of the softened bend.
