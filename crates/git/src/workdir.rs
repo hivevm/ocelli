@@ -1,5 +1,5 @@
 //! Every libgit2 call that writes the working directory, each behind the one guard
-//! (ADR-0033, ADR-0039). libgit2 follows a link it meets where it expects a directory, and where
+//! (ADR-0033). libgit2 follows a link it meets where it expects a directory, and where
 //! the index does not hold a link as one it writes a file through it, out of the repository
 //! perhaps; it opens a conflicted path to write a side of the conflict there, and writes a side of
 //! a conflict between a file and a directory, or between two renames, under the path with `~` and

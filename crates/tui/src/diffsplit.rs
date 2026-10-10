@@ -1,5 +1,5 @@
 // Verifies: ADR-0020
-//! Folds a unified diff into side-by-side rows — ported from the desktop's
+//! Folds a unified diff into side-by-side rows — as the desktop's
 //! `diffSplit.ts`. Within a change block (deletes followed by adds, as git
 //! emits them) the i-th deleted line pairs with the i-th added one; the longer
 //! side runs against empty cells. Hunk headers and meta lines become banners.

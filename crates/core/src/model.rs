@@ -36,8 +36,8 @@ pub struct CommitData {
 }
 
 /// A connection between a child commit and one of its parents.
-/// `is_branch` marks a BRANCH edge (the first parent, staying in one column);
-/// otherwise it is a MERGE edge, which crosses columns.
+/// `is_branch` marks a BRANCH edge, to the child's first parent, which runs up the child's
+/// lane; otherwise it is a MERGE edge, which runs up the parent's lane or its track (ADR-0030).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Edge {
@@ -163,7 +163,7 @@ pub struct Graph {
 
 /// A local branch and where it stands relative to its configured upstream.
 /// `ahead`/`behind` are computed from refs already on disk and are therefore as
-/// current as the last fetch — the viewer never fetches (specification Non-Goals).
+/// current as the last fetch.
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct LocalBranch {
@@ -221,8 +221,8 @@ pub struct Worktree {
 #[derive(Debug, Serialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub enum SubmoduleState {
-    /// Configured, but no working copy on disk. Nothing to open, and the viewer
-    /// never clones one — that would be both a write and egress (ADR-0023).
+    /// Configured, but no working copy on disk: nothing to open, and initialising
+    /// one is out of scope (ADR-0027).
     Uninitialized,
     /// Checked out at a different commit than the superproject records.
     Modified,

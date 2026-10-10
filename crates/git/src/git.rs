@@ -37,7 +37,7 @@ pub fn load_chunks(
     // setting holds for the whole process: the per-commit reads after it read a commit at a time
     // and gain little from the cache.
     git2::opts::enable_caching(false);
-    // 1. Open repo (walks up to find .git, supports bare repos)
+    // 1. Open the repository: searched for upwards, or, confined, at `repo_path` alone (ADR-0039)
     let repo = crate::confine::open(repo_path)?;
 
     // 2. Collect all refs and map peeled SHA -> Vec<String> ref names

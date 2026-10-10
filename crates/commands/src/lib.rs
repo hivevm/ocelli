@@ -186,7 +186,7 @@ impl Host {
     /// Loads the repository at `path`, labelled `label` for the web interface. Returns as soon as
     /// the load is spawned; the history arrives chunk by chunk, each announced by a
     /// `history-grew` event, and the refs as a `load-refs` event right after the first chunk,
-    /// read with it so the two describe the same state (ADR-0016, ADR-0031). `select` names the
+    /// read with it so the two describe the same state (ADR-0016, ADR-0026). `select` names the
     /// commit a write left selected, which a `history-grew` event names the row of once it is
     /// laid out (ADR-0033).
     ///

@@ -4,7 +4,7 @@ use commands::AppState;
 use std::sync::Mutex;
 
 /// The repository named on the command line: the first argument after the program that is not an
-/// option, as `ocelli-cli [PATH]` takes it (ADR-0028). Options are left alone, so that what a
+/// option, as `ocelli-cli [PATH]` takes it. Options are left alone, so that what a
 /// platform or a launcher adds is never read as a path.
 pub fn startup_path(args: impl IntoIterator<Item = String>) -> Option<String> {
     args.into_iter().skip(1).find(|arg| !arg.starts_with('-'))

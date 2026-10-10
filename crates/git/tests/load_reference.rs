@@ -1,8 +1,8 @@
 //! Verifies: ADR-0008, ADR-0019, ADR-0024, ADR-0026, G-11, G-12
 //!
-//! Loading is carried over unchanged: a repository built the same way each time, with a merge,
+//! Loading matches the reference: a repository built the same way each time, with a merge,
 //! branches, a remote branch, an annotated and a lightweight tag, and a stash, loads, lays out,
-//! and lists its refs, changed files, and diffs exactly as the reference implementation did,
+//! and lists its refs, changed files, and diffs exactly as the reference output holds,
 //! with a clean and with a dirty working tree.
 
 #![allow(
@@ -32,7 +32,7 @@ fn json<T: serde::Serialize>(value: &T) -> Value {
     serde_json::to_value(value).unwrap()
 }
 
-/// Takes the stash nodes' places out of a graph, which came after the reference implementation
+/// Takes the stash nodes' places out of a graph, which the reference output does not hold
 /// (G-7), and returns them with each node's label.
 fn stash_places(graph: &mut Value) -> Vec<(String, Value)> {
     let mut places = Vec::new();
@@ -73,7 +73,7 @@ fn a_fixed_repository_loads_as_the_reference_did() {
         );
         worktree["path"] = "<repo>/".into();
     }
-    // Whether a tag is annotated came after the reference implementation (G-7).
+    // Whether a tag is annotated, which the reference output does not hold (G-7).
     let annotated: Vec<_> = refs["tags"]
         .as_array_mut()
         .unwrap()
@@ -81,7 +81,7 @@ fn a_fixed_repository_loads_as_the_reference_did() {
         .map(|tag| tag.as_object_mut().unwrap().remove("annotated").unwrap())
         .collect();
     assert_eq!(annotated, [false, true], "light, v1.0");
-    // Whether a branch is merged came after it too (G-4).
+    // Whether a branch is merged, which it does not hold either (G-4).
     let merged: Vec<_> = refs["locals"]
         .as_array_mut()
         .unwrap()
@@ -89,7 +89,7 @@ fn a_fixed_repository_loads_as_the_reference_did() {
         .map(|branch| branch.as_object_mut().unwrap().remove("merged").unwrap())
         .collect();
     assert_eq!(merged, [true, false, true], "feature, hotfix, main");
-    // So did the remote a fetch reaches without one named (G-4): none, since the fixture's
+    // Nor the remote a fetch reaches without one named (G-4): none, since the fixture's
     // remote branch was written without a remote configured.
     let default_remote = refs
         .as_object_mut()
@@ -97,7 +97,7 @@ fn a_fixed_repository_loads_as_the_reference_did() {
         .remove("defaultRemote")
         .unwrap();
     assert_eq!(default_remote, serde_json::Value::Null);
-    // So did the operation in progress (G-6): none in the fixture.
+    // Nor the operation in progress (G-6): none in the fixture.
     let in_progress = refs.as_object_mut().unwrap().remove("inProgress").unwrap();
     assert_eq!(in_progress, serde_json::Value::Null);
     assert_eq!(refs, expected("repo-refs.json"));
@@ -130,8 +130,8 @@ fn a_fixed_repository_loads_as_the_reference_did() {
         }
     }
     assert_eq!(graph, expected("repo-graph-dirty.json"));
-    // How much of each change is staged, and the content shown, came after the reference
-    // implementation (G-4).
+    // How much of each change is staged, and the content shown, which the reference output
+    // does not hold (G-4).
     let mut files = json(&reader.load_commit_files(&dir, WORKDIR_SHA).unwrap());
     let staged: Vec<_> = files
         .as_array_mut()

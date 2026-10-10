@@ -1,6 +1,6 @@
 [package]
 name = "ocelli-git"
-description = "The repository port implemented with git2 (ADR-0009)"
+description = "The repository port implemented with git2 (ADR-0019)"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
