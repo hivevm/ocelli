@@ -25,10 +25,32 @@ skimmed. The design revision drops what prevented nothing
   outside its guarded wrapper. `crates/git/tests/git2_unwraps.txt` audits every place the locked
   git2 panics, against the libgit2 its libgit2-sys holds, and an upgrade of either fails until
   the changed places are audited again. A diff's path, which git2 would unwrap as UTF-8 on
-  Windows, is read in bytes, lossily on Windows alone; on Windows, too, a submodule or working
+  Windows, is read in bytes, lossily on Windows alone, to be shown. A path handed back to libgit2
+  or the file system, or a check's, goes in the bytes it was read in, `guard::exact_path`, since
+  a lossy one names another file or none, and a path a caller gives that stands for such a name
+  shown lossily is refused, never acted on. On Windows, too, a submodule or working
   tree whose path libgit2 reads from a file that is not UTF-8 is left out, while elsewhere every
   one is listed as configured. libgit2 reads those files again after the check: one another
   program changes in between is not caught.
+- **Every write of the working directory goes through `workdir`, behind its guard.** libgit2
+  writes through a link where it expects a directory, and through one at a file's place the index
+  does not hold as a link; it opens a conflicted path to write a side there, and writes a side of
+  a conflict between a file and a directory, or between two renames, under the path with `~` and
+  a label, opening it through a link that points nowhere; a name the file system cannot hold
+  stops it half done; and it does not check that a tree a hostile remote delivered is well
+  formed. Before each such call, which the git adapter's `clippy.toml` allows nowhere else, every
+  path the call can change, as the difference between what it writes and what is there, is looked
+  at, and every tree the call reads along such a path: a link at a path the write changes or at a
+  directory above one, a link at a conflicted path or beside it under its name and `~`, a conflict
+  between a file and a directory, a tree that names one entry twice or two entries one name where
+  the file system or `core.ignorecase` does not tell them apart, a name that is not UTF-8 on
+  Windows or macOS, or one longer than a file system takes refuses the write before anything
+  changes. A link is passed only where the checked-out commit and the index both hold it as a
+  link and the write replaces it; a link the developer only staged is never trusted, and a check
+  of the guard's own that would look past a link leaves the link to the guard. A second program
+  that swaps a directory for a link, or a file for a hard link to one outside, between the look
+  and the write is not caught: a local attacker racing the write, which the threat model leaves
+  out.
 - **What a connection starts ends with it, and every wait on shared state is bounded.** A task,
   a wait for a turn, or a transfer a closed tab started is aborted, given up, or stopped; past a
   bound a request is refused at once.

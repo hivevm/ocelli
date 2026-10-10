@@ -1992,3 +1992,808 @@ fn a_stash_libgit2_would_make_by_writing_past_it_is_refused() {
         "kept\n"
     );
 }
+
+/// A repository made by [`with_file`], and beside it a directory outside it whose `f` holds a
+/// secret.
+fn beside_outside(name: &str) -> (Scratch, Scratch) {
+    let outside = Scratch::new(&format!("{name}-outside"));
+    std::fs::write(outside.0.join("f"), "SECRET\n").unwrap();
+    (with_file(name), outside)
+}
+
+/// Commits everything in `dir` as `message`, and the commit made.
+fn commit_all(dir: &Path, message: &str) -> String {
+    git(dir, &["add", "--all"]);
+    git(dir, &["commit", "--quiet", "-m", message]);
+    git(dir, &["rev-parse", "HEAD"])
+}
+
+/// Puts a link at `at` to `to`.
+fn link(to: &Path, at: &Path) {
+    std::os::unix::fs::symlink(to, at).unwrap();
+}
+
+/// Asserts that nothing outside the repository changed: the secret as it was, and nothing new.
+fn kept(outside: &Scratch) {
+    assert_eq!(
+        std::fs::read_to_string(outside.0.join("f")).unwrap(),
+        "SECRET\n"
+    );
+    let found: Vec<_> = std::fs::read_dir(&outside.0)
+        .unwrap()
+        .map(|e| e.unwrap().file_name())
+        .collect();
+    assert_eq!(found.len(), 1, "written outside: {found:?}");
+}
+
+/// What only the guard of every write of the working directory says of a link in the way.
+const LINK_IN_THE_WAY: &str = "is a link, which writing";
+
+/// A repository beside a directory outside it, with `side` adding `d/f`, `main` ahead of where
+/// they parted, and an untracked link at `d` to the directory outside: (repository, outside,
+/// main, side).
+fn link_where_side_adds_a_directory(name: &str) -> (Scratch, Scratch, String, String) {
+    let (scratch, outside) = beside_outside(name);
+    let d = &scratch.0;
+    git(d, &["switch", "--quiet", "-c", "side"]);
+    write_file(d, "d/f", "side\n");
+    let side = commit_all(d, "side");
+    git(d, &["switch", "--quiet", "main"]);
+    write_file(d, "g", "main\n");
+    let main = commit_all(d, "main");
+    link(&outside.0, &d.join("d"));
+    (scratch, outside, main, side)
+}
+
+#[test]
+// Verifies: ADR-0033, ADR-0039, Q-6
+fn a_switch_goes_through_no_link_the_index_does_not_hold() {
+    let (scratch, outside, _, side) = link_where_side_adds_a_directory("link-switch");
+    let switch = Write::SwitchBranch {
+        name: "side".into(),
+        tip: side,
+    };
+    refused(&scratch.0, &switch, LINK_IN_THE_WAY);
+    kept(&outside);
+}
+
+#[test]
+// Verifies: ADR-0033, ADR-0039, Q-6
+fn a_merge_goes_through_no_link_the_index_does_not_hold() {
+    let (scratch, outside, main, side) = link_where_side_adds_a_directory("link-merge");
+    let merge = Write::Merge {
+        branch: "main".into(),
+        tip: main,
+        commit: side,
+        name: None,
+    };
+    refused(&scratch.0, &merge, LINK_IN_THE_WAY);
+    kept(&outside);
+}
+
+#[test]
+// Verifies: ADR-0033, ADR-0039, Q-6
+fn a_cherry_pick_goes_through_no_link_the_index_does_not_hold() {
+    let (scratch, outside, main, side) = link_where_side_adds_a_directory("link-pick");
+    let pick = Write::CherryPick {
+        branch: "main".into(),
+        tip: main,
+        commit: side,
+    };
+    refused(&scratch.0, &pick, LINK_IN_THE_WAY);
+    kept(&outside);
+}
+
+#[test]
+// Verifies: ADR-0033, ADR-0039, Q-6
+fn a_revert_goes_through_no_link_the_index_does_not_hold() {
+    let (scratch, outside) = beside_outside("link-revert");
+    let d = &scratch.0;
+    write_file(d, "d/f", "tracked\n");
+    commit_all(d, "d");
+    git(d, &["rm", "-r", "--quiet", "d"]);
+    let removed = commit_all(d, "no d");
+    link(&outside.0, &d.join("d"));
+    let revert = Write::Revert {
+        branch: "main".into(),
+        tip: removed.clone(),
+        commit: removed,
+    };
+    refused(d, &revert, LINK_IN_THE_WAY);
+    kept(&outside);
+}
+
+#[test]
+// Verifies: ADR-0033, ADR-0039, Q-6
+fn a_rebase_goes_through_no_link_the_index_does_not_hold_as_it_starts_or_steps() {
+    // Its start checks out what it rebases onto.
+    let (scratch, outside, main, side) = link_where_side_adds_a_directory("link-rebase-start");
+    let rebase = Write::Rebase {
+        branch: "main".into(),
+        tip: main,
+        onto: side,
+    };
+    refused(&scratch.0, &rebase, LINK_IN_THE_WAY);
+    kept(&outside);
+
+    // A step continued after a stop writes what its commit adds.
+    let (scratch, outside) = beside_outside("link-rebase-step");
+    let d = &scratch.0;
+    git(d, &["switch", "--quiet", "-c", "side"]);
+    write_file(d, "f", "side\n");
+    let side = commit_all(d, "side");
+    git(d, &["switch", "--quiet", "main"]);
+    write_file(d, "f", "main\n");
+    commit_all(d, "main");
+    write_file(d, "d/f", "main\n");
+    let main = commit_all(d, "d");
+    git(d, &["rm", "-r", "--quiet", "d"]);
+    let main = {
+        let _ = main;
+        commit_all(d, "no d")
+    };
+    let stopped = GitWriter
+        .write(
+            d,
+            &Write::Rebase {
+                branch: "main".into(),
+                tip: main,
+                onto: side,
+            },
+        )
+        .unwrap();
+    assert_eq!(stopped, None, "the rebase stopped on f");
+    git(d, &["checkout", "--quiet", "--theirs", "--", "f"]);
+    git(d, &["add", "f"]);
+    link(&outside.0, &d.join("d"));
+    let next = Write::Continue {
+        operation: ocelli_core::model::Operation::Rebase,
+        head: git(d, &["rev-parse", "HEAD"]),
+    };
+    // The step resolved is committed first, as `git rebase --continue` commits it; the next one
+    // is refused before it writes anything.
+    support::stopped_partway(d, &next, LINK_IN_THE_WAY);
+    assert!(
+        d.join(".git/rebase-merge").exists(),
+        "the rebase is still in progress"
+    );
+    kept(&outside);
+}
+
+#[test]
+// Verifies: ADR-0033, ADR-0039, Q-6
+fn a_rebase_s_abort_goes_through_no_link_the_index_does_not_hold() {
+    let (scratch, outside) = beside_outside("link-rebase-abort");
+    let d = &scratch.0;
+    git(d, &["switch", "--quiet", "-c", "side"]);
+    write_file(d, "f", "side\n");
+    let side = commit_all(d, "side");
+    git(d, &["switch", "--quiet", "main"]);
+    write_file(d, "f", "main\n");
+    write_file(d, "d/f", "main\n");
+    let main = commit_all(d, "main");
+    let stopped = GitWriter
+        .write(
+            d,
+            &Write::Rebase {
+                branch: "main".into(),
+                tip: main,
+                onto: side,
+            },
+        )
+        .unwrap();
+    assert_eq!(stopped, None, "the rebase stopped on f");
+    std::fs::remove_dir_all(d.join("d")).unwrap();
+    link(&outside.0, &d.join("d"));
+    let abort = Write::Abort {
+        operation: ocelli_core::model::Operation::Rebase,
+        head: git(d, &["rev-parse", "HEAD"]),
+    };
+    refused(d, &abort, LINK_IN_THE_WAY);
+    kept(&outside);
+}
+
+#[test]
+// Verifies: ADR-0033, ADR-0039, Q-6
+fn a_hard_reset_goes_through_no_link_the_index_does_not_hold() {
+    let reset_hard = |d: &Path| {
+        let head = git(d, &["rev-parse", "HEAD"]);
+        Write::Reset {
+            branch: "main".into(),
+            tip: head.clone(),
+            commit: head,
+            mode: ocelli_core::port::ResetMode::Hard,
+        }
+    };
+    // The link where the index has a directory, and where it has a file.
+    let (scratch, outside) = beside_outside("link-reset");
+    let d = &scratch.0;
+    write_file(d, "d/f", "tracked\n");
+    commit_all(d, "d");
+    std::fs::remove_dir_all(d.join("d")).unwrap();
+    link(&outside.0, &d.join("d"));
+    refused(
+        d,
+        &reset_hard(d),
+        "d is a link, which writing d/f would go through",
+    );
+    kept(&outside);
+    std::fs::remove_file(d.join("d")).unwrap();
+    git(d, &["checkout", "--quiet", "--", "d"]);
+    std::fs::remove_file(d.join("f")).unwrap();
+    link(&outside.0.join("f"), &d.join("f"));
+    refused(
+        d,
+        &reset_hard(d),
+        "f is a link, which writing f would go through",
+    );
+    kept(&outside);
+}
+
+#[test]
+// Verifies: ADR-0033, ADR-0039, Q-6
+fn a_stash_goes_through_no_link_the_index_does_not_hold() {
+    // Only the checked-out commit still has the directory the link stands in.
+    let (scratch, outside) = beside_outside("link-stash");
+    let d = &scratch.0;
+    write_file(d, "d/f", "tracked\n");
+    commit_all(d, "d");
+    git(d, &["rm", "-r", "--cached", "--quiet", "d"]);
+    std::fs::remove_dir_all(d.join("d")).unwrap();
+    link(&outside.0, &d.join("d"));
+    refused(d, &create_stash(None, false), LINK_IN_THE_WAY);
+    kept(&outside);
+
+    // The untracked files, an untracked link among them: stashed as the link it is.
+    let (scratch, outside) = beside_outside("link-stash-untracked");
+    let d = &scratch.0;
+    link(&outside.0, &d.join("d"));
+    GitWriter.write(d, &create_stash(None, true)).unwrap();
+    assert!(!d.join("d").exists(), "the link is stashed");
+    kept(&outside);
+
+    // Applied where a link stands in a directory the stash's untracked files go to.
+    let (scratch, outside) = beside_outside("link-stash-apply");
+    let d = &scratch.0;
+    write_file(d, "d/f", "untracked\n");
+    GitWriter.write(d, &create_stash(None, true)).unwrap();
+    link(&outside.0, &d.join("d"));
+    let stash = git(d, &["rev-parse", "refs/stash"]);
+    refused(d, &apply(0, &stash, false), LINK_IN_THE_WAY);
+    kept(&outside);
+}
+
+/// A repository beside a directory outside it, stopped in a cherry-pick of `side` that
+/// conflicts on `f`, with `f` then put as a link to the secret outside: (repository, outside).
+fn conflict_on_a_link(name: &str) -> (Scratch, Scratch) {
+    let (scratch, outside) = beside_outside(name);
+    let d = &scratch.0;
+    git(d, &["switch", "--quiet", "-c", "side"]);
+    write_file(d, "f", "side\n");
+    commit_all(d, "side");
+    git(d, &["switch", "--quiet", "main"]);
+    write_file(d, "f", "main\n");
+    commit_all(d, "main");
+    assert!(!support::git_may_fail(d, &["cherry-pick", "side"]));
+    std::fs::remove_file(d.join("f")).unwrap();
+    link(&outside.0.join("f"), &d.join("f"));
+    (scratch, outside)
+}
+
+#[test]
+// Verifies: ADR-0033, ADR-0039, Q-6
+fn an_abort_and_a_resolve_go_through_no_link_the_index_does_not_hold() {
+    let (scratch, outside) = conflict_on_a_link("link-abort");
+    let d = &scratch.0;
+    let abort = Write::Abort {
+        operation: ocelli_core::model::Operation::CherryPick,
+        head: git(d, &["rev-parse", "HEAD"]),
+    };
+    refused(d, &abort, LINK_IN_THE_WAY);
+    kept(&outside);
+
+    let (scratch, outside) = conflict_on_a_link("link-resolve");
+    let d = &scratch.0;
+    let conflict = ocelli_git::GitReader
+        .load_refs(d)
+        .unwrap()
+        .in_progress
+        .unwrap()
+        .conflicts
+        .remove(0);
+    let resolve = Write::Resolve {
+        path: "f".into(),
+        conflict,
+        take: ocelli_core::port::Take::Theirs,
+    };
+    refused(d, &resolve, LINK_IN_THE_WAY);
+    kept(&outside);
+}
+
+/// A repository beside a directory outside it where `main` adds a file `x` and `side` a
+/// directory `x`, and a link where libgit2 would write the file's side of their conflict, under
+/// `x~HEAD`, to a file outside that is not there yet: (repository, outside, main, side).
+fn file_and_directory_conflict(name: &str) -> (Scratch, Scratch, String, String) {
+    let (scratch, outside) = beside_outside(name);
+    let d = &scratch.0;
+    git(d, &["switch", "--quiet", "-c", "side"]);
+    write_file(d, "x/y", "side\n");
+    let side = commit_all(d, "side");
+    git(d, &["switch", "--quiet", "main"]);
+    write_file(d, "x", "planted\n");
+    let main = commit_all(d, "main");
+    link(&outside.0.join("planted"), &d.join("x~HEAD"));
+    (scratch, outside, main, side)
+}
+
+/// What the guard says of a conflict between a file and a directory.
+const FILE_AND_DIRECTORY: &str = "a file and a directory named x conflict";
+
+#[test]
+// Verifies: ADR-0033, ADR-0039, Q-6
+fn a_conflict_between_a_file_and_a_directory_is_refused_by_every_write_that_merges() {
+    let (scratch, outside, main, side) = file_and_directory_conflict("df-merge");
+    let merge = Write::Merge {
+        branch: "main".into(),
+        tip: main,
+        commit: side,
+        name: None,
+    };
+    refused(&scratch.0, &merge, FILE_AND_DIRECTORY);
+    kept(&outside);
+
+    let (scratch, outside, main, side) = file_and_directory_conflict("df-pick");
+    let pick = Write::CherryPick {
+        branch: "main".into(),
+        tip: main,
+        commit: side,
+    };
+    refused(&scratch.0, &pick, FILE_AND_DIRECTORY);
+    kept(&outside);
+
+    // A revert bringing back the directory the file now stands in.
+    let (scratch, outside) = beside_outside("df-revert");
+    let d = &scratch.0;
+    write_file(d, "x/y", "tracked\n");
+    commit_all(d, "x/y");
+    git(d, &["rm", "-r", "--quiet", "x"]);
+    let removed = commit_all(d, "no x");
+    write_file(d, "x", "planted\n");
+    let main = commit_all(d, "x");
+    link(&outside.0.join("planted"), &d.join("x~HEAD"));
+    let revert = Write::Revert {
+        branch: "main".into(),
+        tip: main,
+        commit: removed,
+    };
+    refused(d, &revert, FILE_AND_DIRECTORY);
+    kept(&outside);
+
+    // A rebase whose step adds the file onto the directory.
+    let (scratch, outside, main, side) = file_and_directory_conflict("df-rebase");
+    let rebase = Write::Rebase {
+        branch: "main".into(),
+        tip: main,
+        onto: side,
+    };
+    refused(&scratch.0, &rebase, FILE_AND_DIRECTORY);
+    kept(&outside);
+
+    // A stash whose untracked file stands where the checked-out commit now has a directory.
+    let (scratch, outside) = beside_outside("df-stash");
+    let d = &scratch.0;
+    write_file(d, "x", "planted\n");
+    GitWriter.write(d, &create_stash(None, true)).unwrap();
+    write_file(d, "x/y", "tracked\n");
+    commit_all(d, "x/y");
+    link(&outside.0.join("planted"), &d.join("x~Stashed changes"));
+    let stash = git(d, &["rev-parse", "refs/stash"]);
+    // Refused before the guard: a stash that would overwrite a tracked path is never applied.
+    refused(d, &apply(0, &stash, false), "x is tracked by now");
+    kept(&outside);
+}
+
+#[test]
+// Verifies: ADR-0033, ADR-0039, Q-6
+fn a_conflict_libgit2_writes_through_a_link_or_beside_its_path_is_refused() {
+    // Two files renamed to one name, whose sides libgit2 writes as c~HEAD and c~<commit>.
+    let (scratch, outside) = beside_outside("rename-collision");
+    let d = &scratch.0;
+    write_file(d, "a", &"alpha line\n".repeat(20));
+    write_file(d, "b", &"beta line\n".repeat(20));
+    commit_all(d, "a and b");
+    git(d, &["switch", "--quiet", "-c", "side"]);
+    git(d, &["mv", "b", "c"]);
+    let side = commit_all(d, "b to c");
+    git(d, &["switch", "--quiet", "main"]);
+    git(d, &["mv", "a", "c"]);
+    let main = commit_all(d, "a to c");
+    link(&outside.0.join("planted"), &d.join("c~HEAD"));
+    let merge = Write::Merge {
+        branch: "main".into(),
+        tip: main,
+        commit: side,
+        name: None,
+    };
+    refused(
+        d,
+        &merge,
+        "c~HEAD is a link where libgit2 would write a side",
+    );
+    kept(&outside);
+
+    // A link the checked-out commit tracks, which the other side changes as a file.
+    let (scratch, outside) = beside_outside("link-file-conflict");
+    let d = &scratch.0;
+    git(d, &["switch", "--quiet", "-c", "side"]);
+    write_file(d, "f", "side\n");
+    let side = commit_all(d, "f changed");
+    git(d, &["switch", "--quiet", "main"]);
+    std::fs::remove_file(d.join("f")).unwrap();
+    link(&outside.0.join("planted"), &d.join("f"));
+    let main = commit_all(d, "f a link");
+    let merge = Write::Merge {
+        branch: "main".into(),
+        tip: main,
+        commit: side,
+        name: None,
+    };
+    refused(
+        d,
+        &merge,
+        "f is a link, which libgit2 would write a side of its conflict through",
+    );
+    kept(&outside);
+}
+
+/// What `git` prints in `dir` for `args`, `input` on its standard input, trimmed.
+fn git_fed(dir: &Path, args: &[&str], input: &[u8]) -> String {
+    use std::io::Write as _;
+    let mut child = git_command(dir)
+        .args(args)
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .spawn()
+        .unwrap();
+    child.stdin.take().unwrap().write_all(input).unwrap();
+    let out = child.wait_with_output().unwrap();
+    assert!(out.status.success(), "git {args:?}");
+    String::from_utf8(out.stdout).unwrap().trim().to_string()
+}
+
+#[test]
+// Verifies: ADR-0033, Q-6
+fn a_tree_naming_one_path_both_a_file_and_a_directory_is_never_written() {
+    let scratch = with_file("tree-twice");
+    let d = &scratch.0;
+    let raw = |id: &str| -> Vec<u8> {
+        (0..id.len())
+            .step_by(2)
+            .map(|i| u8::from_str_radix(&id[i..i + 2], 16).unwrap())
+            .collect()
+    };
+    let blob = git_fed(d, &["hash-object", "-w", "--stdin"], b"file\n");
+    let inner = git_fed(
+        d,
+        &["mktree"],
+        format!("100644 blob {blob}\ty\n").as_bytes(),
+    );
+    // `x` as a file and as a directory in one tree, which only a damaged or forged repository
+    // holds: `git fsck` reports it.
+    let mut tree = b"100644 x\0".to_vec();
+    tree.extend(raw(&blob));
+    tree.extend_from_slice(b"40000 x\0");
+    tree.extend(raw(&inner));
+    let twice = git_fed(
+        d,
+        &["hash-object", "-t", "tree", "--literally", "-w", "--stdin"],
+        &tree,
+    );
+    let head = git(d, &["rev-parse", "HEAD"]);
+    let commit = git(d, &["commit-tree", &twice, "-p", &head, "-m", "x twice"]);
+    git(d, &["branch", "twice", &commit]);
+    let switch = Write::SwitchBranch {
+        name: "twice".into(),
+        tip: commit,
+    };
+    refused(d, &switch, "a tree names x twice");
+}
+
+/// The tree whose entries are `entries`, (mode, name, id), as written, a name twice included,
+/// which only `git hash-object --literally` makes.
+fn raw_tree(dir: &Path, entries: &[(&str, &str, &str)]) -> String {
+    let mut bytes = Vec::new();
+    for (mode, name, id) in entries {
+        bytes.extend_from_slice(format!("{mode} {name}\0").as_bytes());
+        for i in (0..id.len()).step_by(2) {
+            bytes.push(u8::from_str_radix(&id[i..i + 2], 16).unwrap());
+        }
+    }
+    git_fed(
+        dir,
+        &["hash-object", "-t", "tree", "--literally", "-w", "--stdin"],
+        &bytes,
+    )
+}
+
+/// The id `dir`'s tree at `rev` gives `name`.
+fn entry_id(dir: &Path, rev: &str, name: &str) -> String {
+    git(dir, &["rev-parse", &format!("{rev}:{name}")])
+}
+
+/// Every write that checks a commit out or merges one, of `side` onto `main` in `d`: (what it is,
+/// the write).
+fn writes_of(main: &str, side: &str) -> Vec<(&'static str, Write)> {
+    vec![
+        (
+            "switch",
+            Write::SwitchBranch {
+                name: "side".into(),
+                tip: side.into(),
+            },
+        ),
+        (
+            "reset",
+            Write::Reset {
+                branch: "main".into(),
+                tip: main.into(),
+                commit: side.into(),
+                mode: ocelli_core::port::ResetMode::Hard,
+            },
+        ),
+        (
+            "merge",
+            Write::Merge {
+                branch: "main".into(),
+                tip: main.into(),
+                commit: side.into(),
+                name: None,
+            },
+        ),
+        (
+            "cherry-pick",
+            Write::CherryPick {
+                branch: "main".into(),
+                tip: main.into(),
+                commit: side.into(),
+            },
+        ),
+        (
+            "rebase",
+            Write::Rebase {
+                branch: "main".into(),
+                tip: main.into(),
+                onto: side.into(),
+            },
+        ),
+    ]
+}
+
+#[test]
+// Verifies: ADR-0033, Q-6
+fn a_tree_naming_a_plain_file_twice_is_refused_by_every_write_that_reads_it() {
+    // No link and no conflict with the checked-out commit: only reading the target's own tree
+    // finds the duplicate, so every write that reads a tree must read this one.
+    for what in ["switch", "reset", "merge", "cherry-pick", "rebase"] {
+        let scratch = with_file(&format!("plain-twice-{what}"));
+        let d = &scratch.0;
+        let main = git(d, &["rev-parse", "HEAD"]);
+        let one = git_fed(d, &["hash-object", "-w", "--stdin"], b"one\n");
+        let two = git_fed(d, &["hash-object", "-w", "--stdin"], b"two\n");
+        let f = entry_id(d, &main, "f");
+        let tree = raw_tree(
+            d,
+            &[
+                ("100644", "b", &one),
+                ("100644", "b", &two),
+                ("100644", "f", &f),
+            ],
+        );
+        let side = git(d, &["commit-tree", &tree, "-p", &main, "-m", "b twice"]);
+        git(d, &["branch", "side", &side]);
+        let write = writes_of(&main, &side)
+            .into_iter()
+            .find(|(w, _)| *w == what)
+            .map(|(_, w)| w)
+            .unwrap();
+        refused(d, &write, "a tree names b twice");
+    }
+}
+
+/// A repository beside a directory outside it whose `main` commits a link `a` to that directory,
+/// or to the secret where `to_secret` says so, and whose `side` names `a` twice in one tree, as
+/// the link and as `also`, a directory holding `x` or a file: (repository, outside, main, side).
+fn named_twice(
+    name: &str,
+    to_secret: bool,
+    also: &str,
+    link_first: bool,
+) -> (Scratch, Scratch, String, String) {
+    let (scratch, outside) = beside_outside(name);
+    let d = &scratch.0;
+    let target = if to_secret {
+        outside.0.join("f")
+    } else {
+        outside.0.clone()
+    };
+    link(&target, &d.join("a"));
+    let main = commit_all(d, "link a");
+    let pwned = git_fed(d, &["hash-object", "-w", "--stdin"], b"PWNED\n");
+    let other = if also == "directory" {
+        ("40000", raw_tree(d, &[("100644", "x", &pwned)]))
+    } else {
+        ("100644", pwned)
+    };
+    let a = entry_id(d, &main, "a");
+    let f = entry_id(d, &main, "f");
+    let mut entries = vec![
+        ("120000", "a", a.as_str()),
+        (other.0, "a", other.1.as_str()),
+    ];
+    if !link_first {
+        entries.reverse();
+    }
+    entries.push(("100644", "f", &f));
+    let tree = raw_tree(d, &entries);
+    let side = git(d, &["commit-tree", &tree, "-p", &main, "-m", "a twice"]);
+    git(d, &["branch", "side", &side]);
+    (scratch, outside, main, side)
+}
+
+#[test]
+// Verifies: ADR-0033, ADR-0039, Q-6
+fn a_tree_naming_a_link_twice_is_never_written_through() {
+    for (also, link_first, to_secret) in [
+        ("directory", true, false),
+        ("file", true, true),
+        ("file", false, true),
+    ] {
+        for what in ["switch", "reset", "merge", "cherry-pick", "rebase"] {
+            let name = format!("twice-{also}-{link_first}-{what}");
+            let (scratch, outside, main, side) = named_twice(&name, to_secret, also, link_first);
+            let write = writes_of(&main, &side)
+                .into_iter()
+                .find(|(w, _)| *w == what)
+                .map(|(_, w)| w)
+                .unwrap();
+            refused(&scratch.0, &write, "a tree names a twice");
+            kept(&outside);
+        }
+    }
+}
+
+#[test]
+// Verifies: ADR-0033, ADR-0039, Q-6
+fn a_tree_naming_a_link_and_a_file_one_name_is_never_written_by_a_pull() {
+    let (scratch, outside) = beside_outside("twice-pull");
+    let d = &scratch.0;
+    let main = git(d, &["rev-parse", "HEAD"]);
+    let pwned = git_fed(d, &["hash-object", "-w", "--stdin"], b"PWNED\n");
+    let target = outside.0.join("f");
+    let to = git_fed(
+        d,
+        &["hash-object", "-w", "--stdin"],
+        target.to_str().unwrap().as_bytes(),
+    );
+    let f = entry_id(d, &main, "f");
+    let tree = raw_tree(
+        d,
+        &[
+            ("120000", "a", &to),
+            ("100644", "a", &pwned),
+            ("100644", "f", &f),
+        ],
+    );
+    let twice = git(d, &["commit-tree", &tree, "-p", &main, "-m", "a twice"]);
+    let clone = Scratch::new("twice-pull-clone");
+    std::fs::remove_dir_all(&clone.0).unwrap();
+    git(
+        Path::new("/"),
+        &[
+            "clone",
+            "--quiet",
+            d.to_str().unwrap(),
+            clone.0.to_str().unwrap(),
+        ],
+    );
+    git(d, &["update-ref", "refs/heads/main", &twice]);
+    // Fetched first, which a refused pull has done too.
+    git(&clone.0, &["fetch", "--quiet", "origin"]);
+    let pull = Write::Pull {
+        branch: "main".into(),
+        tip: main,
+    };
+    refused(&clone.0, &pull, "a tree names a twice");
+    kept(&outside);
+}
+
+#[test]
+// Verifies: ADR-0033, ADR-0039, Q-6
+fn a_link_only_staged_is_never_written_through() {
+    // A switch to a commit that adds a/x, the link staged where a stands.
+    let (scratch, outside) = beside_outside("staged-switch");
+    let d = &scratch.0;
+    git(d, &["switch", "--quiet", "-c", "side"]);
+    write_file(d, "a/x", "PWNED\n");
+    let side = commit_all(d, "a/x");
+    git(d, &["switch", "--quiet", "main"]);
+    link(&outside.0, &d.join("a"));
+    git(d, &["add", "a"]);
+    let switch = Write::SwitchBranch {
+        name: "side".into(),
+        tip: side,
+    };
+    refused(d, &switch, LINK_IN_THE_WAY);
+    kept(&outside);
+
+    // A hard reset and a stash, where the commit has the directory and the index the link.
+    for what in ["reset", "stash"] {
+        let (scratch, outside) = beside_outside(&format!("staged-{what}"));
+        let d = &scratch.0;
+        write_file(d, "a/x", "PWNED\n");
+        let head = commit_all(d, "a/x");
+        git(d, &["rm", "-r", "--quiet", "--cached", "a"]);
+        std::fs::remove_dir_all(d.join("a")).unwrap();
+        link(&outside.0, &d.join("a"));
+        git(d, &["add", "a"]);
+        let write = if what == "reset" {
+            Write::Reset {
+                branch: "main".into(),
+                tip: head.clone(),
+                commit: head,
+                mode: ocelli_core::port::ResetMode::Hard,
+            }
+        } else {
+            create_stash(None, false)
+        };
+        refused(d, &write, LINK_IN_THE_WAY);
+        kept(&outside);
+    }
+}
+
+#[test]
+// Verifies: ADR-0033, ADR-0039
+fn a_committed_link_a_write_turns_into_a_directory_is_replaced_not_written_through() {
+    for what in ["switch", "reset", "cherry-pick"] {
+        let (scratch, outside) = beside_outside(&format!("typechange-{what}"));
+        let d = &scratch.0;
+        link(&outside.0, &d.join("a"));
+        let main = commit_all(d, "link a");
+        git(d, &["switch", "--quiet", "-c", "side"]);
+        std::fs::remove_file(d.join("a")).unwrap();
+        write_file(d, "a/x", "side\n");
+        let side = commit_all(d, "a/x");
+        git(d, &["switch", "--quiet", "main"]);
+        let write = writes_of(&main, &side)
+            .into_iter()
+            .find(|(w, _)| *w == what)
+            .map(|(_, w)| w)
+            .unwrap();
+        GitWriter.write(d, &write).unwrap();
+        assert!(d.join("a").symlink_metadata().unwrap().is_dir(), "{what}");
+        assert_eq!(std::fs::read_to_string(d.join("a/x")).unwrap(), "side\n");
+        kept(&outside);
+    }
+}
+
+#[test]
+// Verifies: ADR-0033, ADR-0039
+fn names_one_where_case_is_not_told_apart_are_refused_where_the_repository_says_so() {
+    let scratch = with_file("ignorecase");
+    let d = &scratch.0;
+    git(d, &["switch", "--quiet", "-c", "side"]);
+    write_file(d, "a", "lower\n");
+    write_file(d, "A", "upper\n");
+    let side = commit_all(d, "a and A");
+    git(d, &["switch", "--quiet", "main"]);
+    git(d, &["config", "core.ignorecase", "true"]);
+    let switch = Write::SwitchBranch {
+        name: "side".into(),
+        tip: side.clone(),
+    };
+    refused(d, &switch, "one name where case is not told apart");
+    // Where case is told apart, both are written.
+    git(d, &["config", "core.ignorecase", "false"]);
+    GitWriter.write(d, &switch).unwrap();
+    assert_eq!(std::fs::read_to_string(d.join("A")).unwrap(), "upper\n");
+}

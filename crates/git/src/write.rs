@@ -90,11 +90,13 @@ pub fn write(
         Write::DeleteBranch { name, tip, merged } => delete_branch(&repo, name, tip, *merged),
         Write::StageFile { path, shown } => {
             repository_path(path)?;
+            crate::guard::named_exactly(&repo, path)?;
             as_shown(&repo, path, shown, |s| s.workdir)?;
             stage_file(&repo, path)
         }
         Write::UnstageFile { path, shown } => {
             repository_path(path)?;
+            crate::guard::named_exactly(&repo, path)?;
             as_shown(&repo, path, shown, |s| s.index)?;
             unstage_file(&repo, path)
         }
@@ -195,7 +197,7 @@ fn unstage_file(repo: &Repository, path: &str) -> Result<()> {
     match repo.head().ok().and_then(|h| h.peel_to_commit().ok()) {
         Some(head) => {
             let mut index = repo.index()?;
-            entry_as_in(&mut index, &head.tree()?, path)?;
+            entry_as_in(&mut index, &head.tree()?, Path::new(path))?;
             index.write()?;
         }
         None => {
