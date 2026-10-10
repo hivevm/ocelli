@@ -1,6 +1,8 @@
 # Ocelli — View and Edit Git Repositories
 
-[![Checks](https://github.com/mbrigl/git-viewer/actions/workflows/checks.yml/badge.svg)](https://github.com/mbrigl/git-viewer/actions/workflows/checks.yml)
+[![Checks](https://github.com/hivevm/ocelli/actions/workflows/checks.yml/badge.svg)](https://github.com/hivevm/ocelli/actions/workflows/checks.yml)
+[![Release](https://img.shields.io/github/v/release/hivevm/ocelli?include_prereleases&sort=semver)](https://github.com/hivevm/ocelli/releases)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
 **Ocelli** is named after the three simple eyes on top of a bee's head, with which it reads
 light and the horizon at a glance. Ocelli gives a Git repository the same: a commit graph that
@@ -20,6 +22,11 @@ Git history is a directed acyclic graph, but the usual tools flatten it into a l
 ASCII art that becomes unreadable once several branches run in parallel. Ocelli draws that graph
 properly: time runs downwards, each branch keeps its own lane, and merges are drawn as unambiguous
 orthogonal edges, on the desktop and in the terminal.
+
+![Ocelli desktop application: sidebar, commit graph, and commit detail](docs/screenshots/desktop.png)
+
+![ocelli-cli in the terminal: the same layout drawn with box-drawing characters](docs/screenshots/cli.png)
+
 ```
  ● abc1234   main   Fix login bug                    Alice      2024-01-12 14:30
  ●─┐ def567         Merge feature/oauth into main    Bob        2024-01-11 09:15
@@ -146,16 +153,17 @@ the repository the server root is, or one chosen with Open Repo from the folders
 and nothing outside the root
 ([ADR-0039](docs/adr/0039-git-adapter-confined-to-the-server-root.md));
 every restart prints a new URL. The server only reads unless it is started with
-`--allow-writes`: then the browser stages, unstages, and commits as the desktop application
-does, as the user the server runs as, with the identity git's configuration names for that user, and
-whoever holds a session can write; it refuses the other writes the desktop application offers
+`--allow-writes`: then the browser writes, fetches, pulls, and pushes as the desktop application
+does, as the user the server runs as, with the identity and credentials git's configuration
+names for that user, and whoever holds a session can write
 ([ADR-0037](docs/adr/0037-remote-server-websocket-per-tab.md)).
 
 ### In the terminal
 
 `ocelli-cli [--ascii] [PATH]` opens the repository at `PATH` (default: the current directory)
 in the terminal — the same rows, columns and edges as the desktop app, drawn with box-drawing
-characters (`--ascii` for terminals without them). It only reads, and it never touches the network.
+characters (`--ascii` for terminals without them). It writes what the desktop application
+writes, and reaches the network only when you fetch, pull, or push.
 The newest commits show at once; the older history loads in the background while you scroll,
 search, and follow lineage, and the status line counts what has arrived.
 
@@ -250,11 +258,12 @@ scripts/*.sh          # run by hand, steps 7 and 8 of the integration branches: 
 
 ## Dev Container
 
-The environment is defined entirely in
-[`.devcontainer/devcontainer.json`](.devcontainer/devcontainer.json). It starts from a prebuilt
-base image and layers Dev Container Features and VS Code extensions on top; no Dockerfile or
-Compose file is required. Customise the environment by adding Features, switching the base image,
-or adding extensions. Features are pinned by major tag and resolved in the committed
+The environment is defined in
+[`.devcontainer/devcontainer.json`](.devcontainer/devcontainer.json) and the
+[`Dockerfile`](.devcontainer/Dockerfile) it builds from, which adds the desktop host's system
+libraries to the base image, with Dev Container Features and VS Code extensions layered on top
+([ADR-0011](docs/adr/0011-dev-container-dockerfile.md)). Customise the environment by adding
+Features or extensions. Features are pinned by major tag and resolved in the committed
 `devcontainer-lock.json`. Extensions are listed by identifier only, because a published extension
 version cannot be repointed and a version suffix is VS Code-specific.
 
@@ -269,9 +278,9 @@ folder is reopened in the container.
 
 ## Coding Agents
 
-This Dev Container preinstalls the **Claude Code** and **Mistral Vibe** VS Code extensions (see
+This Dev Container preinstalls the **Claude Code** VS Code extension (see
 [`.devcontainer/devcontainer.json`](.devcontainer/devcontainer.json)); other agents (OpenAI Codex,
-Cursor, OpenCode, GitHub Copilot) work too once you add them.
+Cursor, OpenCode, GitHub Copilot, Mistral Vibe) work too once you add them.
 
 The rules every agent follows live in [`AGENTS.md`](AGENTS.md); that there is exactly one such file
 is decided in [ADR-0001](docs/adr/0001-agent-governance-model.md). An agent that cannot read it

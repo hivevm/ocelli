@@ -30,7 +30,7 @@ fn clean_start<'r>(repo: &'r Repository, name: &str, tip: &str) -> Result<git2::
         .statuses(Some(&mut options))?
         .iter()
         .filter(|e| e.status() != Status::CURRENT && !e.status().is_ignored())
-        .filter_map(|e| e.path().map(str::to_string))
+        .map(|e| String::from_utf8_lossy(e.path_bytes()).into_owned())
         .collect();
     if !changed.is_empty() {
         bail!(
@@ -111,7 +111,7 @@ pub(crate) fn merge(
     let head = repo.head()?.peel_to_commit()?;
     let result = repo.merge_commits(&head, &theirs, None)?;
     nothing_untracked_in_the_way(repo, &files_written(&head.tree()?, &result)?)?;
-    repo.merge(&[&annotated], None, None).map_err(in_the_way)?;
+    crate::workdir::merge(repo, &annotated, &result, their_name)?.map_err(in_the_way)?;
     // libgit2 prepared its own subject; git's goes first, its list of conflicts kept.
     let prepared = repo.path().join("MERGE_MSG");
     let rest: String = std::fs::read_to_string(&prepared)
@@ -220,10 +220,8 @@ fn apply(
         _ => repo.cherrypick_commit(&picked, &head, 0, None)?,
     };
     nothing_untracked_in_the_way(repo, &files_written(&head.tree()?, &result)?)?;
-    match operation {
-        Operation::Revert => repo.revert(&picked, None).map_err(in_the_way)?,
-        _ => repo.cherrypick(&picked, None).map_err(in_the_way)?,
-    }
+    let revert = operation == Operation::Revert;
+    crate::workdir::pick(repo, &picked, revert, &result)?.map_err(in_the_way)?;
     if repo.index()?.has_conflicts() {
         // Stopped, `git` keeps where it started in ORIG_HEAD.
         set_orig_head(repo, Some(before))?;
@@ -307,17 +305,24 @@ pub(crate) fn rebase(
         .find_reference("ORIG_HEAD")
         .ok()
         .and_then(|r| r.target());
-    let mut rebase = repo
-        .rebase(Some(&ours), Some(&onto), None, None)
+    let mut rebase = crate::workdir::Rebase::start(repo, &ours, &onto)?
         .map_err(in_the_way)
         .inspect_err(|_| {
             let _ = set_orig_head(repo, orig_head);
         })?;
     // A step that cannot be applied, an untracked file in its way, undoes the whole rebase:
     // nothing of the developer's is in it yet, and a rebase left at that step would skip it.
-    run_rebase(repo, &mut rebase, &me).inspect_err(|_| {
-        let _ = rebase.abort();
+    let ran = run_rebase(repo, &mut rebase, &me);
+    drop(rebase);
+    ran.map_err(|e| {
+        let undone = crate::conflicts::abort_rebase(repo);
         let _ = set_orig_head(repo, orig_head);
+        match undone {
+            Ok(()) => e,
+            Err(not) => anyhow::anyhow!(
+                "{e}; and the rebase could not be undone, so it is still in progress: {not}"
+            ),
+        }
     })
 }
 
@@ -325,10 +330,10 @@ pub(crate) fn rebase(
 /// or a step conflicts.
 pub(crate) fn run_rebase(
     repo: &Repository,
-    rebase: &mut git2::Rebase,
+    rebase: &mut crate::workdir::Rebase,
     me: &Signature,
 ) -> Result<Option<String>> {
-    while let Some(step) = rebase.next() {
+    while let Some(step) = rebase.next()? {
         if let Err(e) = step {
             // libgit2 has moved on to the step it could not apply: a later commit would take it
             // for one resolved to nothing and drop it, so it is marked as never applied.
@@ -341,13 +346,13 @@ pub(crate) fn run_rebase(
         if repo.index()?.has_conflicts() {
             return Ok(None);
         }
-        match rebase.commit(None, me, None) {
+        match rebase.commit(me) {
             Ok(_) => {}
             Err(e) if e.code() == ErrorCode::Applied => {}
             Err(e) => return Err(e.into()),
         }
     }
-    rebase.finish(Some(me))?;
+    rebase.finish(me)?;
     Ok(Some(repo.head()?.peel_to_commit()?.id().to_string()))
 }
 
@@ -372,7 +377,7 @@ pub(crate) fn reset(
         ResetMode::Hard => ResetType::Hard,
     };
     let before = repo.head()?.peel_to_commit()?.id();
-    repo.reset(target.as_object(), kind, None)?;
+    crate::workdir::reset(repo, &target, kind)?;
     // `git reset` keeps where the branch was in ORIG_HEAD.
     set_orig_head(repo, Some(before))?;
     Ok(Some(target.id().to_string()))

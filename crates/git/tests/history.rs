@@ -1444,3 +1444,342 @@ fn what_only_git_finishes_is_named_alike_by_every_refusal() {
     }
     assert_eq!(GitReader.load_refs(d).unwrap().in_progress, None);
 }
+
+/// `git`'s conflicted file with the difference ADR-0040 decides taken out of its markers' labels:
+/// the subject `git` appends to a commit's label, ` (<subject>)`, dropped, and a `/` in a branch's
+/// name flattened to `_`, as the labels the writer gives libgit2 are path-safe. The side's label
+/// and the base's, which `git`'s `diff3` and `zdiff3` styles write, alike.
+fn without_the_label_departure(text: &str) -> String {
+    text.lines()
+        .map(|line| {
+            for marker in [">>>>>>> ", "||||||| "] {
+                if let Some(label) = line.strip_prefix(marker) {
+                    let label = match label.find(" (") {
+                        Some(at) if label.ends_with(')') => &label[..at],
+                        _ => label,
+                    };
+                    return format!("{marker}{}", label.replace('/', "_"));
+                }
+            }
+            line.to_string()
+        })
+        .map(|line| format!("{line}\n"))
+        .collect()
+}
+
+/// Asserts that the conflicted `path` reads in `ours`, stopped by the writer, as in `theirs`,
+/// stopped by `git`, but for the label departure; returns the writer's file. libgit2 labels a
+/// `diff3` base line only where the file has a base (`merge_file.c`): a file both sides added
+/// has a bare `|||||||` line where `git` labels it, another departure of ADR-0040, taken out
+/// here only where the writer's base line is bare and `base_unlabelled` says the file has none.
+fn markers_as_git_with(
+    ours: &Path,
+    theirs: &Path,
+    path: &str,
+    what: &str,
+    base_unlabelled: bool,
+) -> String {
+    let by_ocelli = std::fs::read_to_string(ours.join(path)).unwrap();
+    let by_git = std::fs::read_to_string(theirs.join(path)).unwrap();
+    assert!(
+        by_ocelli.contains("<<<<<<< HEAD\n"),
+        "{what}: {by_ocelli:?}"
+    );
+    let mut expected = without_the_label_departure(&by_git);
+    if base_unlabelled {
+        expected = expected
+            .lines()
+            .map(|l| match l.starts_with("||||||| ") {
+                true => "|||||||\n".to_string(),
+                false => format!("{l}\n"),
+            })
+            .collect();
+    }
+    assert_eq!(
+        by_ocelli, expected,
+        "{what}: the writer's markers against git's {by_git:?}"
+    );
+    by_ocelli
+}
+
+/// [`markers_as_git_with`] for a file with a base, every label compared.
+fn markers_as_git(ours: &Path, theirs: &Path, path: &str, what: &str) -> String {
+    markers_as_git_with(ours, theirs, path, what, false)
+}
+
+/// Sets `merge.conflictStyle` to `style` in `dir`, where one is given.
+fn style_of(dir: &Path, style: Option<&str>) {
+    if let Some(style) = style {
+        git(dir, &["config", "merge.conflictStyle", style]);
+    }
+}
+
+/// The label the writer's markers give the side applied, read off its conflicted file.
+fn their_label(markers: &str) -> &str {
+    markers
+        .lines()
+        .find_map(|l| l.strip_prefix(">>>>>>> "))
+        .unwrap()
+}
+
+/// The merge, the cherry-pick, the revert, and the rebase, as it starts and on a continue, each
+/// stopped by the writer and by `git` on a twin, in the conflict style `style`, `git`'s default
+/// where none is given; and the merge's label against the name `git` gives a side's file.
+fn stopped_operations_mark_as_git(style: Option<&str>) {
+    let tag = style.unwrap_or("merge");
+    // A merge of a branch whose name holds a `/`.
+    let repo = diverged(&format!("markers-merge-{tag}"), "ours\n", "theirs\n");
+    style_of(&repo.0, style);
+    git(&repo.0, &["branch", "-m", "side", "feature/x"]);
+    let other = twin(&repo, &format!("markers-merge-{tag}-git"));
+    let made = GitWriter
+        .write(&repo.0, &merge(&repo.0, "feature/x", Some("feature/x")))
+        .unwrap();
+    assert_eq!(made, None, "the merge stopped");
+    assert!(!git_may_fail(
+        &other.0,
+        &["merge", "--no-edit", "feature/x"]
+    ));
+    let markers = markers_as_git(&repo.0, &other.0, "f", &format!("merge, {tag}"));
+    // Where `git` writes a side to a file of its own, a file meeting a directory, it names it as
+    // the writer labels the side: `x~` and the branch, flattened. The writer refuses that
+    // conflict before writing anything, a departure of ADR-0033.
+    let df = Scratch::new(&format!("markers-df-{tag}"));
+    let d = &df.0;
+    git(d, &["init", "--quiet", "-b", "main"]);
+    git(d, &["config", "user.name", "Ada"]);
+    git(d, &["config", "user.email", "ada@example.invalid"]);
+    write_file(d, "keep", "base\n");
+    git(d, &["add", "keep"]);
+    git(d, &["commit", "--quiet", "-m", "base"]);
+    git(d, &["switch", "--quiet", "-c", "feature/x"]);
+    write_file(d, "x", "file\n");
+    git(d, &["add", "x"]);
+    git(d, &["commit", "--quiet", "-m", "x a file"]);
+    git(d, &["switch", "--quiet", "main"]);
+    write_file(d, "x/y", "dir\n");
+    git(d, &["add", "x"]);
+    git(d, &["commit", "--quiet", "-m", "x a directory"]);
+    assert!(!git_may_fail(d, &["merge", "--no-edit", "feature/x"]));
+    let side = format!("x~{}", their_label(&markers));
+    assert!(d.join(&side).exists(), "git names the side's file {side}");
+
+    // A cherry-pick, its side labelled by the commit, the base `parent of` it.
+    let repo = diverged(&format!("markers-pick-{tag}"), "ours\n", "theirs\n");
+    style_of(&repo.0, style);
+    let other = twin(&repo, &format!("markers-pick-{tag}-git"));
+    let pick = Write::CherryPick {
+        branch: "main".into(),
+        tip: head(&repo.0),
+        commit: git(&repo.0, &["rev-parse", "side"]),
+    };
+    assert_eq!(GitWriter.write(&repo.0, &pick).unwrap(), None);
+    assert!(!git_may_fail(&other.0, &["cherry-pick", "side"]));
+    markers_as_git(&repo.0, &other.0, "f", &format!("cherry-pick, {tag}"));
+
+    // A revert, its side labelled `parent of` the commit, the base the commit.
+    let repo = diverged(&format!("markers-revert-{tag}"), "ours\n", "base\n");
+    style_of(&repo.0, style);
+    write_file(&repo.0, "f", "again\n");
+    git(&repo.0, &["commit", "--quiet", "-am", "again"]);
+    let other = twin(&repo, &format!("markers-revert-{tag}-git"));
+    let revert = Write::Revert {
+        branch: "main".into(),
+        tip: head(&repo.0),
+        commit: git(&repo.0, &["rev-parse", "HEAD~1"]),
+    };
+    assert_eq!(GitWriter.write(&repo.0, &revert).unwrap(), None);
+    assert!(!git_may_fail(&other.0, &["revert", "--no-edit", "HEAD~1"]));
+    markers_as_git(&repo.0, &other.0, "f", &format!("revert, {tag}"));
+
+    // A rebase, stopped as it starts, then again on a continue: each step labelled by its own
+    // commit, the rebase opened again with its options for the second.
+    let repo = diverged(&format!("markers-rebase-{tag}"), "ours\n", "theirs\n");
+    style_of(&repo.0, style);
+    write_file(&repo.0, "s", "main's own\n");
+    git(&repo.0, &["add", "s"]);
+    git(&repo.0, &["commit", "--quiet", "-m", "main adds s"]);
+    let other = twin(&repo, &format!("markers-rebase-{tag}-git"));
+    let rebase = Write::Rebase {
+        branch: "main".into(),
+        tip: head(&repo.0),
+        onto: git(&repo.0, &["rev-parse", "side"]),
+    };
+    assert_eq!(GitWriter.write(&repo.0, &rebase).unwrap(), None);
+    assert!(!git_may_fail(&other.0, &["rebase", "side"]));
+    markers_as_git(
+        &repo.0,
+        &other.0,
+        "f",
+        &format!("rebase as it starts, {tag}"),
+    );
+    for dir in [&repo.0, &other.0] {
+        write_file(dir, "f", "resolved\n");
+        git(dir, &["add", "f"]);
+    }
+    let next = Write::Continue {
+        operation: Operation::Rebase,
+        head: head(&repo.0),
+    };
+    assert_eq!(
+        GitWriter.write(&repo.0, &next).unwrap(),
+        None,
+        "stopped again"
+    );
+    assert!(!git_may_fail(&other.0, &["rebase", "--continue"]));
+    // `s` both sides added: a file with no base, whose base line libgit2 leaves bare.
+    markers_as_git_with(
+        &repo.0,
+        &other.0,
+        "s",
+        &format!("rebase continued, {tag}"),
+        style.is_some(),
+    );
+}
+
+#[test]
+// Verifies: ADR-0033, ADR-0040
+fn a_stopped_operation_writes_the_markers_git_writes_but_for_the_listed_label_departure() {
+    stopped_operations_mark_as_git(None);
+}
+
+#[test]
+// Verifies: ADR-0033, ADR-0040
+fn in_the_diff3_styles_the_base_is_labelled_as_git_labels_it() {
+    stopped_operations_mark_as_git(Some("diff3"));
+    stopped_operations_mark_as_git(Some("zdiff3"));
+}
+
+#[test]
+// Verifies: ADR-0033, ADR-0040
+fn a_merge_labels_its_base_as_git_does_with_several_bases_or_none() {
+    // Two branches each merged into the other: two merge bases, `merged common ancestors`.
+    let s = Scratch::new("markers-criss-cross");
+    let d = &s.0;
+    git(d, &["init", "--quiet", "-b", "main"]);
+    git(d, &["config", "user.name", "Ada"]);
+    git(d, &["config", "user.email", "ada@example.invalid"]);
+    git(d, &["config", "merge.conflictStyle", "diff3"]);
+    write_file(d, "f", "base\n");
+    git(d, &["add", "f"]);
+    git(d, &["commit", "--quiet", "-m", "base"]);
+    git(d, &["switch", "--quiet", "-c", "side"]);
+    write_file(d, "s", "s\n");
+    git(d, &["add", "s"]);
+    git(d, &["commit", "--quiet", "-m", "s"]);
+    git(d, &["switch", "--quiet", "main"]);
+    write_file(d, "m", "m\n");
+    git(d, &["add", "m"]);
+    git(d, &["commit", "--quiet", "-m", "m"]);
+    git(d, &["merge", "--quiet", "--no-edit", "side"]);
+    git(d, &["switch", "--quiet", "side"]);
+    git(d, &["merge", "--quiet", "--no-edit", "main~1"]);
+    write_file(d, "f", "side\n");
+    git(d, &["commit", "--quiet", "-am", "side f"]);
+    git(d, &["switch", "--quiet", "main"]);
+    write_file(d, "f", "main\n");
+    git(d, &["commit", "--quiet", "-am", "main f"]);
+    assert_eq!(
+        git(d, &["merge-base", "--all", "main", "side"])
+            .lines()
+            .count(),
+        2
+    );
+    let other = twin(&s, "markers-criss-cross-git");
+    assert_eq!(
+        GitWriter.write(d, &merge(d, "side", Some("side"))).unwrap(),
+        None
+    );
+    assert!(!git_may_fail(&other.0, &["merge", "--no-edit", "side"]));
+    let markers = markers_as_git(d, &other.0, "f", "criss-cross");
+    assert!(
+        markers.contains("||||||| merged common ancestors\n"),
+        "{markers:?}"
+    );
+
+    // Two histories with no base at all: `empty tree`.
+    let s = Scratch::new("markers-no-base");
+    let d = &s.0;
+    git(d, &["init", "--quiet", "-b", "main"]);
+    git(d, &["config", "user.name", "Ada"]);
+    git(d, &["config", "user.email", "ada@example.invalid"]);
+    git(d, &["config", "merge.conflictStyle", "diff3"]);
+    write_file(d, "f", "main\n");
+    git(d, &["add", "f"]);
+    git(d, &["commit", "--quiet", "-m", "main"]);
+    git(d, &["switch", "--quiet", "--orphan", "other"]);
+    write_file(d, "f", "other\n");
+    git(d, &["add", "f"]);
+    git(d, &["commit", "--quiet", "-m", "other"]);
+    git(d, &["switch", "--quiet", "main"]);
+    let other = twin(&s, "markers-no-base-git");
+    assert_eq!(
+        GitWriter
+            .write(d, &merge(d, "other", Some("other")))
+            .unwrap(),
+        None
+    );
+    assert!(!git_may_fail(
+        &other.0,
+        &["merge", "--no-edit", "--allow-unrelated-histories", "other"]
+    ));
+    // With no base, no file has one: `git` writes `||||||| empty tree`, libgit2 a bare line.
+    let markers = markers_as_git_with(d, &other.0, "f", "no base", true);
+    assert!(markers.contains("|||||||\n"), "{markers:?}");
+}
+
+#[test]
+// Verifies: ADR-0033, ADR-0040
+fn a_numeric_core_abbrev_sets_the_length_of_a_labelled_commit_as_git_sets_it() {
+    let repo = diverged("markers-abbrev", "ours\n", "theirs\n");
+    git(&repo.0, &["config", "core.abbrev", "12"]);
+    let other = twin(&repo, "markers-abbrev-git");
+    let pick = Write::CherryPick {
+        branch: "main".into(),
+        tip: head(&repo.0),
+        commit: git(&repo.0, &["rev-parse", "side"]),
+    };
+    assert_eq!(GitWriter.write(&repo.0, &pick).unwrap(), None);
+    assert!(!git_may_fail(&other.0, &["cherry-pick", "side"]));
+    let markers = markers_as_git(&repo.0, &other.0, "f", "core.abbrev 12");
+    assert_eq!(their_label(&markers).len(), 12, "{markers:?}");
+}
+
+#[test]
+// Verifies: ADR-0033, ADR-0040
+fn a_merge_labels_its_side_by_the_branch_only_where_the_branch_is_at_the_commit() {
+    // The name given is a branch elsewhere: the side is labelled by the commit, as for a commit.
+    let repo = diverged("markers-moved-branch", "ours\n", "theirs\n");
+    let side = git(&repo.0, &["rev-parse", "side"]);
+    git(&repo.0, &["branch", "elsewhere", "main~1"]);
+    let short = git(&repo.0, &["rev-parse", "--short", &side]);
+    let named = Write::Merge {
+        branch: "main".into(),
+        tip: head(&repo.0),
+        commit: side,
+        name: Some("elsewhere".into()),
+    };
+    assert_eq!(GitWriter.write(&repo.0, &named).unwrap(), None);
+    let markers = std::fs::read_to_string(repo.0.join("f")).unwrap();
+    assert_eq!(their_label(&markers), short, "{markers:?}");
+}
+
+#[test]
+// Verifies: ADR-0033, ADR-0040
+fn a_branch_name_windows_refuses_in_a_file_name_labels_the_side_by_the_commit_instead() {
+    // `git` takes `<` in a branch's name, which Windows refuses in a file's: labelled by it, the
+    // side's file `<path>~<label>` would stop the write half done there, so the commit labels it.
+    let repo = diverged("markers-windows-name", "ours\n", "theirs\n");
+    git(&repo.0, &["branch", "-m", "side", "a<b"]);
+    let side = git(&repo.0, &["rev-parse", "a<b"]);
+    let short = git(&repo.0, &["rev-parse", "--short", &side]);
+    let named = Write::Merge {
+        branch: "main".into(),
+        tip: head(&repo.0),
+        commit: side,
+        name: Some("a<b".into()),
+    };
+    assert_eq!(GitWriter.write(&repo.0, &named).unwrap(), None);
+    let markers = std::fs::read_to_string(repo.0.join("f")).unwrap();
+    assert_eq!(their_label(&markers), short, "{markers:?}");
+}

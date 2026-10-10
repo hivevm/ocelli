@@ -1,6 +1,6 @@
 //! Verifies: ADR-0008, ADR-0015, ADR-0030, G-2, G-9, G-10, G-15
 //!
-//! The layout is carried over unchanged: for 500 generated histories, with merges, octopus
+//! The layout matches the reference implementation: for 500 generated histories, with merges, octopus
 //! merges, several roots, equal commit times, parents outside the loaded set, and stash and
 //! working-directory nodes, the serialized graph hashes to the value the reference
 //! implementation produced. A difference in a single row, lane, edge, or field fails.

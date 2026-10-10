@@ -1,5 +1,5 @@
 //! The repository ports (ADR-0009): what the core needs from a repository, owned by the core and
-//! implemented by an adapter. Every path names a directory inside the repository.
+//! implemented by an adapter. Every `repo` path names a directory inside the repository.
 
 use crate::model::{CommitData, DiffLine, FileChange, RepoRefs};
 use anyhow::{Result, bail};
@@ -266,7 +266,7 @@ pub enum Confirmation {
     Absent,
 }
 
-/// Writes to a repository, running no program the repository names (ADR-0033).
+/// Writes to a repository, running no program (ADR-0033).
 pub trait RepositoryWriter {
     /// Performs `write`, or refuses it with nothing changed and says why. Returns the commit the
     /// write made, which the load after it selects, where it made one. A transfer tells

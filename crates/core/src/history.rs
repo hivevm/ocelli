@@ -657,8 +657,7 @@ mod tests {
         }
     }
 
-    // ── Search (G-16), the reference cases of the web interface's `search.test.ts` and the
-    // terminal application's `explore.rs` ─────────────────────────────────────────────────
+    // ── Search (G-16) ──────────────────────────────────────────────────────────────────────
 
     fn found(h: &History, query: &str) -> Vec<String> {
         h.search(query)
@@ -722,8 +721,7 @@ mod tests {
         assert_eq!(h.search("commit").len(), 90);
     }
 
-    // ── Lineage (G-17), the reference cases of the web interface's `ancestry.test.ts` and the
-    // terminal application's `explore.rs` ─────────────────────────────────────────────────
+    // ── Lineage (G-17) ─────────────────────────────────────────────────────────────────────
 
     fn shas(h: &History, rows: HashSet<usize>) -> Vec<String> {
         let mut out: Vec<String> = rows.into_iter().map(|r| h.node(r).sha.clone()).collect();

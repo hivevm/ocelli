@@ -13,6 +13,7 @@ pub mod refs;
 mod remote;
 mod stash;
 mod wildmatch;
+mod workdir;
 mod write;
 
 use anyhow::Result;

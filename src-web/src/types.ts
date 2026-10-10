@@ -139,7 +139,7 @@ export interface LocalBranch {
   isHead: boolean;
   /** Full upstream name (e.g. `origin/main`), null when none is configured. */
   upstream: string | null;
-  /** Position against the upstream as of the last fetch — the viewer never fetches. */
+  /** Position against the upstream as of the last fetch. */
   ahead: number;
   behind: number;
   /** Whether every commit of the branch is in its upstream, or in HEAD without one. */

@@ -6,8 +6,8 @@
 # the two reads the remote server's turns key and compare a repository by (common_dir and
 # refs_digest in crates/git/src/refs.rs), which the remote server's tests decide too, so the web
 # interface must be built first: each mutant changes one guard, and the suites of the git adapter
-# and the server must fail on it. A mutant the suite lets through is a guard no test decides, as
-# the credential guard against line breaks was until its own test came (ADR-0033, ADR-0035). The surviving mutants are
+# and the server must fail on it. A mutant the suite lets through is a guard no test decides
+# (ADR-0008). The surviving mutants are
 # listed, and appended to the job summary when GITHUB_STEP_SUMMARY is set.
 #
 # Usage:

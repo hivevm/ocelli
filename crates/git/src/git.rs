@@ -37,7 +37,7 @@ pub fn load_chunks(
     // setting holds for the whole process: the per-commit reads after it read a commit at a time
     // and gain little from the cache.
     git2::opts::enable_caching(false);
-    // 1. Open repo (walks up to find .git, supports bare repos)
+    // 1. Open the repository: searched for upwards, or, confined, at `repo_path` alone (ADR-0039)
     let repo = crate::confine::open(repo_path)?;
 
     // 2. Collect all refs and map peeled SHA -> Vec<String> ref names
@@ -386,25 +386,31 @@ pub(crate) fn shown(repo: &Repository, path: &str) -> Shown {
     let index = repo
         .index()
         .ok()
-        .and_then(|index| index_entry(&index, path, 0))
+        .and_then(|index| index_entry(&index, Path::new(path), 0))
         .map(|entry| entry.id.to_string());
     Shown { workdir, index }
 }
 
 /// The entry of `index` at `path` and `stage`. git2's `Index::get_path` panics on a path it does
-/// not take as one of the repository's, an empty, absolute, or `.`/`..`-led one or one holding a
-/// NUL; such a path, whether a caller gave it or a repository holds it, has no entry.
-pub(crate) fn index_entry(index: &git2::Index, path: &str, stage: i32) -> Option<git2::IndexEntry> {
-    let taken = !path.is_empty()
-        && !path.contains('\0')
-        && Path::new(path)
+/// not take as one of the repository's, an empty, absolute, or `.`/`..`-led one, one holding a
+/// NUL, or on Windows one that is not UTF-8; such a path, whether a caller gave it or a
+/// repository holds it, has no entry.
+pub(crate) fn index_entry(
+    index: &git2::Index,
+    path: &Path,
+    stage: i32,
+) -> Option<git2::IndexEntry> {
+    let taken = !path.as_os_str().is_empty()
+        && !path.as_os_str().as_encoded_bytes().contains(&0)
+        && (cfg!(not(windows)) || path.to_str().is_some())
+        && path
             .components()
             .all(|part| matches!(part, std::path::Component::Normal(_)));
     #[expect(
         clippy::disallowed_methods,
         reason = "the path is one git2 takes as a repository's, which it does not panic on"
     )]
-    let entry = taken.then(|| index.get_path(Path::new(path), stage));
+    let entry = taken.then(|| index.get_path(path, stage));
     entry.flatten()
 }
 
@@ -428,11 +434,15 @@ fn working_blob(root: &Path, path: &str) -> Option<git2::Oid> {
             }
         } else if meta.file_type().is_symlink() {
             let target = std::fs::read_link(&at).ok()?;
-            return git2::Oid::hash_object(
-                git2::ObjectType::Blob,
-                target.to_string_lossy().as_bytes(),
-            )
-            .ok();
+            // `git` hashes the target's bytes, one that is not UTF-8 too.
+            #[cfg(unix)]
+            let target = {
+                use std::os::unix::ffi::OsStrExt;
+                target.as_os_str().as_bytes().to_vec()
+            };
+            #[cfg(not(unix))]
+            let target = target.to_string_lossy().into_owned().into_bytes();
+            return git2::Oid::hash_object(git2::ObjectType::Blob, &target).ok();
         } else if !meta.is_file() {
             return None;
         }

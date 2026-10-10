@@ -208,7 +208,7 @@ impl Data {
             .submodules
             .iter()
             .map(|s| match s.state {
-                // Opening would need a clone — a write and egress (ADR-0023).
+                // No working copy to open; initialising one is out of scope (ADR-0027).
                 SubmoduleState::Uninitialized => item(
                     &s.path,
                     "not initialized",

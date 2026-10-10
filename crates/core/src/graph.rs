@@ -887,7 +887,7 @@ pub(crate) mod tests {
         );
     }
 
-    /// Specification Goal 9: the same input always yields the same layout.
+    /// G-15: the same input always yields the same layout.
     #[test]
     // Verifies: ADR-0015, G-15
     fn layout_is_deterministic() {
@@ -1084,7 +1084,7 @@ pub(crate) mod tests {
             .collect()
     }
 
-    /// Regression: a merge edge ran vertically through an unrelated commit.
+    /// A merge edge must not run vertically through an unrelated commit.
     ///
     /// `typo` forks `api` off main, and `merge` (on main) takes `login` as
     /// its second parent. `api` sits between `merge` and `login` and briefly

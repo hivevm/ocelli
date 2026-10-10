@@ -12,7 +12,7 @@ name: Measure
 #   application over the empty application, by scripts/measure-memory.sh under a virtual display on
 #   Linux.
 # - The guards of the git adapter, each changed by a mutant the suite must catch, by
-#   scripts/measure-mutants.sh (ADR-0033, ADR-0035).
+#   scripts/measure-mutants.sh (ADR-0008).
 # Each job fails when its goal is missed or it cannot measure.
 
 on:

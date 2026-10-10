@@ -384,9 +384,9 @@ impl Origin {
 /// out, since the two sides make the same commit at different times. Where the two read alike
 /// but for the ids they name, the ids are taken in pairs, one from each side at the same place: a
 /// pair of one id keeps it, and a pair of two commits or two tags made since the twins parted
-/// stands for their contents, their parents or objects paired alike. Whether the other side
-/// holds an id does not decide, since it may have made the same commit elsewhere, at the second
-/// this side made it.
+/// stands for their contents, their parents or objects and the ids their messages name paired
+/// alike. Whether the other side holds an id does not decide, since it may have made the same
+/// commit elsewhere, at the second this side made it.
 pub fn as_twins(a: &Path, b: &Path, origin: &Origin) -> (Snapshot, Snapshot) {
     snapshots_as_twins((a, snapshot(a)), (b, snapshot(b)), origin)
 }
@@ -502,9 +502,9 @@ impl Names<'_> {
 
     /// The names of the ids `x` on this side and `y` on the twin, read at the same place: one id
     /// keeps it; two commits or two tags made since the twins parted whose headers have the same
-    /// fields stand for their contents, their times left out and their parents or objects
-    /// paired; any other pair is named alone, so that an object the twins parted with differs
-    /// from every other.
+    /// fields stand for their contents, their times left out and their parents or objects and
+    /// the ids their messages name paired; any other pair is named alone, so that an object the
+    /// twins parted with differs from every other.
     fn pair(&mut self, x: &str, y: &str) -> (String, String) {
         if x == y {
             return (x.to_string(), y.to_string());
@@ -532,7 +532,11 @@ impl Names<'_> {
                     ours.push(a);
                     theirs.push(b);
                 }
-                (l.named(&ours), m.named(&theirs))
+                // A message names a commit as text, as a revert's, a cherry-pick's with `-x`, or
+                // a merge's of a commit does: its ids are paired as the header's are.
+                let (mut said, mut said_there) = (l.message.clone(), m.message.clone());
+                self.name_both(&mut said, &mut said_there);
+                (l.named(&ours, &said), m.named(&theirs, &said_there))
             }
             _ => (self.alone(0, x), self.alone(1, y)),
         };
@@ -559,7 +563,7 @@ impl Names<'_> {
 
     /// The id `id` on side `side`, named alone: itself where the twins parted with it or it is
     /// neither a commit nor a tag, else its content, its time left out and its parents or object
-    /// named alone.
+    /// and the ids its message names named alone.
     fn alone(&mut self, side: usize, id: &str) -> String {
         if self.origin.holds(id) {
             return id.to_string();
@@ -579,7 +583,9 @@ impl Names<'_> {
                         _ => timeless(line),
                     })
                     .collect();
-                object.named(&header)
+                let mut said = object.message.clone();
+                self.name_alone(side, &mut said);
+                object.named(&header, &said)
             }
             None => id.to_string(),
         };
@@ -639,12 +645,13 @@ impl Made {
             .collect()
     }
 
-    /// The object as it stands for its content, its header read as `header`.
-    fn named(&self, header: &[String]) -> String {
+    /// The object as it stands for its content, its header read as `header` and its message as
+    /// `message`.
+    fn named(&self, header: &[String], message: &str) -> String {
         format!(
             "<{} made apart: {:?}>",
             self.kind,
-            format!("{}\n\n{}", header.join("\n"), self.message)
+            format!("{}\n\n{message}", header.join("\n"))
         )
     }
 }

@@ -30,9 +30,9 @@ than anywhere else, and none beats one that has stopped being true.
 Ocelli reads repositories on the local file system through git2, and writes to them through git2
 only what the developer asks for, a tag, a stash, the index, a commit, a branch, a merge, a
 rebase, a cherry-pick, a revert, a reset, and the resolution of their conflicts
-([ADR-0033](adr/0033-writes-what-git-writes.md)). It reaches a remote only when
-the developer fetches, pulls, or pushes, through libgit2's own transports with the credentials of
-the developer's own setup
+([ADR-0033](adr/0033-writes-what-git-writes.md)).
+It reaches a remote only when the developer fetches, pulls, or pushes, through libgit2's own
+transports with the credentials of the developer's own setup
 ([ADR-0035](adr/0035-remotes-through-libgit2-transports.md)),
 and makes no other network request but Gravatar avatars in the desktop application, off until the
 developer turns them on ([ADR-0023](adr/0023-no-egress-hardened-webview.md)). The web interface runs
@@ -89,7 +89,11 @@ golden path and the test pattern an agent copies from are named here.
   state whoever started it. `GitWriter` implements the writer port in `write.rs`, which
   dispatches each write and holds the tag, index, commit, and branch writes, the stash's in
   `stash.rs`, each checked against the state it names before anything changes by the checks of
-  `guard.rs`, the index and the working directory written through `checkout.rs` and a message
+  `guard.rs`, the index and the working directory written through `checkout.rs`, every libgit2
+  call that writes the working directory made in `workdir.rs` behind one guard against a link in
+  the way, a malformed tree a hostile remote delivered, or a name the file system cannot hold,
+  and giving a conflict's sides the path-safe labels `git` writes, so libgit2 writes a side
+  beside its path, and a message
   cleaned up by `message.rs` as `git` cleans it up, and returns the commit a write made; a
   commit or an annotated tag is refused where the configuration asks for a signature. A path a
   caller gives, to stage, unstage, resolve, or read a diff, is refused before git2 sees it unless
@@ -97,16 +101,17 @@ golden path and the test pattern an agent copies from are named here.
   path only through `git::index_entry`, since git2's `Index::get_path` panics on some; a write any
   string of which holds a NUL is refused before git2 sees it, and a reference name is checked
   only through `guard::valid_ref_name`, since git2 unwraps both into C strings. Each write
-  does what `git` does for the same command, and where it departs, the one ADR of the writer
-  lists why ([ADR-0033](adr/0033-writes-what-git-writes.md)). A fetch, a pull, which then
-  fast-forwards the checked-out branch, and a push, never by force and where `push.default` sends
-  it, live in `remote.rs` and reach the remote through libgit2's own transports with the SSH agent
-  and the credential helper of the developer's global and system configuration, a helper asked
-  only for a remote named by its domain over HTTPS, and with libgit2's server timeouts set once
-  for the process, the git adapter's one `unsafe` block; a push learns what the remote took from
-  the remote-tracking branch libgit2 moves, or, where it moves none, from the remote's branch
-  fetched again from the address pushed to into a scratch reference under `refs/ocelli/`, which
-  no load and no digest of the refs counts
+  does what `git` does for the same command, and where it departs, the writer's ADRs list why
+  ([ADR-0033](adr/0033-writes-what-git-writes.md), and
+  [ADR-0040](adr/0040-conflict-labels-path-safe.md) for a conflict's labels).
+  A fetch, a pull, which then fast-forwards the checked-out branch, and a push, never by force
+  and where `push.default` sends it, live in `remote.rs` and reach the remote through libgit2's
+  own transports with the SSH agent and the credential helper of the developer's global and
+  system configuration, a helper asked only for a remote named by its domain over HTTPS, and
+  with libgit2's server timeouts set once for the process, the git adapter's one `unsafe`
+  block; a push learns what the remote took from the remote-tracking branch libgit2 moves, or,
+  where it moves none, from the remote's branch fetched again from the address pushed to into a
+  scratch reference under `refs/ocelli/`, which no load and no digest of the refs counts
   ([ADR-0035](adr/0035-remotes-through-libgit2-transports.md)).
   The refs name the default remote; for the remote server's turns, `refs.rs` also reads a
   repository's resolved common directory (`common_dir`) and a digest of where its refs point
@@ -166,7 +171,8 @@ golden path and the test pattern an agent copies from are named here.
   interface's reads of it, windows of rows, search, and the selected commit with its lineage,
   and writes through `GitWriter` on the same pool, one write at a time, telling the web interface
   a transfer's progress as `write-progress` events at most every tenth of a second and stopping it
-  on `cancel_write` ([ADR-0031](adr/0031-front-ends-read-row-windows.md)); a `Host` given
+  on `cancel_write` ([ADR-0031](adr/0031-front-ends-read-row-windows.md) for the reads,
+  [ADR-0037](adr/0037-remote-server-websocket-per-tab.md) for the writes); a `Host` given
   a `TakeTurn` writes only once it gives it the repository's turn, and tells the turn how the write
   ended before giving it back. Its events go to a
   `Report`, the window or the socket. A command fails with a `HostError`: no repository open, a
@@ -340,7 +346,7 @@ lives between them. Only what a newcomer would otherwise reconstruct from code.
   nothing and its reason goes to the developer. A write done starts a new load session of the
   same repository, which takes the commit the write made, or else the commit selected before, and
   names its row once a chunk lays it out, unless the developer has chosen another by then; the
-  desktop host passes the row on with `history-grew`, and the front end selects it
+  shared `Host` passes the row on with `history-grew`, and the front end selects it
   ([ADR-0033](adr/0033-writes-what-git-writes.md)).
 - **Transferring.** A fetch, a pull, or a push is a `Write` like any other, handed to
   `port::perform` with a callback that the git adapter tells how far the transfer has come and
@@ -351,5 +357,5 @@ lives between them. Only what a newcomer would otherwise reconstruct from code.
   moved before its refusal included, until the next reload
   ([ADR-0035](adr/0035-remotes-through-libgit2-transports.md)).
 - **State between sessions.** The web interface keeps the theme, the avatars toggle, the diff
-  layout, and the sidebar in `localStorage`; the terminal application keeps the same in
-  `ocelli/cli-state.json` under the user's state directory.
+  layout, and the sidebar in `localStorage`; the terminal application keeps the same but the
+  avatars toggle in `ocelli/cli-state.json` under the user's state directory.

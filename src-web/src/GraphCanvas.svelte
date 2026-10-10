@@ -126,9 +126,9 @@
   function nodeY(row: number): number { return row * ROW_HEIGHT + ROW_HEIGHT / 2; }
 
   // ── Rows in view ───────────────────────────────────────────────────────────
-  // Rendering must cost O(visible rows), not O(history) — see "Virtual rendering"
-  // in docs/SPECIFICATION.md. The host keeps the history and answers a window of
-  // rows with every edge crossing it, so drawing touches only that window.
+  // Rendering must cost O(visible rows), not O(history) (ADR-0017). The host keeps the
+  // history and answers a window of rows with every edge crossing it, so drawing touches
+  // only that window.
   const width = $derived(rowCount === 0 ? EMPTY_GRAPH_WIDTH : graphAreaWidth(lanes - 1));
 
   /** The rows last asked for, so a frame inside them asks for nothing, and the load they belong to. */
@@ -243,7 +243,8 @@
     ctx.lineTo(infoX, H);
     ctx.stroke();
 
-    // Edges — orthogonal L-shapes with a short curve at the corner.
+    // Edges — orthogonal runs through the corners the core routes, each bend softened by a
+    // short curve (ADR-0030).
     // An edge is drawn when its row span intersects the visible range, so edges
     // running in from off-screen rows are still drawn.
     ctx.lineWidth = LINE_WIDTH;
@@ -350,7 +351,7 @@
       ctx!.stroke();
 
       // Merge commits (more than one parent) get an inner ring — the
-      // "double circle" from the README roadmap.
+      // double-circle marker of the README's features.
       if (node.parents.length > 1) {
         ctx!.beginPath();
         ctx!.arc(cx, cy, NODE_RADIUS - 2.5, 0, Math.PI * 2);

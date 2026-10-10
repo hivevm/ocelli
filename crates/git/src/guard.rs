@@ -10,7 +10,7 @@ use git2::{
     BranchType, ConfigEntry, ErrorCode, Oid, Reference, Repository, RepositoryState, Transaction,
 };
 use ocelli_core::port::{Conflict, Write};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 /// The refusal where no identity is configured to write with.
 pub(crate) const NO_IDENTITY: &str =
@@ -231,8 +231,67 @@ pub(crate) fn diff_path(file: &git2::DiffFile) -> Option<PathBuf> {
     file.path_bytes().map(bytes_to_path)
 }
 
+/// The path a tree, the index, or a diff names in `bytes`, to hand back to libgit2 or to the file
+/// system: the bytes it is, and on Windows, whose paths are UTF-16, and on macOS, whose APFS
+/// takes UTF-8 alone, only where it is UTF-8. libgit2 takes a path's bytes, and one rebuilt from
+/// a lossy reading names another file or none (a checkout's exact pathspec matches nothing, and
+/// the file is not written while `HEAD` moves).
+pub(crate) fn exact_path(bytes: &[u8]) -> Result<PathBuf> {
+    #[cfg(any(windows, target_os = "macos"))]
+    if std::str::from_utf8(bytes).is_err() {
+        bail!(
+            "{} is not UTF-8, a name this system cannot give a file",
+            String::from_utf8_lossy(bytes)
+        );
+    }
+    Ok(bytes_to_path(bytes))
+}
+
+/// Refuses a path a caller gives that is the lossy reading of a name that is not UTF-8, one the
+/// index or the working directory holds: the caller was shown a name that cannot be shown
+/// exactly, and acting on the lossy one would act on another file or none.
+pub(crate) fn named_exactly(repo: &Repository, path: &str) -> Result<()> {
+    if !path.contains(char::REPLACEMENT_CHARACTER) {
+        return Ok(());
+    }
+    let lossy = |bytes: &[u8]| {
+        std::str::from_utf8(bytes).is_err() && String::from_utf8_lossy(bytes) == path
+    };
+    let mut options = git2::StatusOptions::new();
+    options
+        .include_untracked(true)
+        .recurse_untracked_dirs(true)
+        .exclude_submodules(true);
+    if repo.index()?.iter().any(|e| lossy(&e.path))
+        || repo
+            .statuses(Some(&mut options))?
+            .iter()
+            .any(|e| lossy(e.path_bytes()))
+    {
+        bail!(
+            "{path} stands for a name that is not UTF-8, which cannot be shown exactly: use git \
+             for this file"
+        );
+    }
+    Ok(())
+}
+
+/// The bytes of the repository's path `path`, as the index holds it: those [`exact_path`] read
+/// it from, and on Windows its UTF-8 with forward slashes.
+pub(crate) fn path_bytes(path: &Path) -> Vec<u8> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::ffi::OsStrExt;
+        path.as_os_str().as_bytes().to_vec()
+    }
+    #[cfg(not(unix))]
+    {
+        path.to_string_lossy().replace('\\', "/").into_bytes()
+    }
+}
+
 /// The path the bytes `bytes` spell, lossily where a path is UTF-16, on Windows.
-fn bytes_to_path(bytes: &[u8]) -> PathBuf {
+pub(crate) fn bytes_to_path(bytes: &[u8]) -> PathBuf {
     #[cfg(unix)]
     {
         use std::os::unix::ffi::OsStrExt;

@@ -1295,3 +1295,435 @@ fn a_working_tree_whose_link_is_not_utf8_is_left_out_on_windows_alone() {
         "{left:?}"
     );
 }
+
+/// A name that is not UTF-8: `café.txt` in Latin-1, as a tree may hold it.
+const NOT_UTF8: &[u8] = b"caf\xe9.txt";
+
+/// What `git` prints in `dir` for `args`, `input` on its standard input, in bytes.
+fn git_fed(dir: &Path, args: &[&str], input: &[u8]) -> Vec<u8> {
+    use std::io::Write as _;
+    let mut child = support::git_command(dir)
+        .args(args)
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .spawn()
+        .unwrap();
+    child.stdin.take().unwrap().write_all(input).unwrap();
+    let out = child.wait_with_output().unwrap();
+    assert!(out.status.success(), "git {args:?}");
+    out.stdout
+}
+
+/// The commit on top of `HEAD` of `dir` that adds `a.txt`, which a checkout writes first, and a
+/// file named `name`, made by `git` from the bytes alone, with no such file on disk, which not
+/// every file system takes.
+fn commit_adding(dir: &Path, name: &[u8]) -> String {
+    let id = |out: Vec<u8>| String::from_utf8(out).unwrap().trim().to_string();
+    let blob = id(git_fed(dir, &["hash-object", "-w", "--stdin"], b"odd\n"));
+    let mut entries = git_fed(dir, &["ls-tree", "-z", "HEAD"], b"");
+    entries.extend_from_slice(format!("100644 blob {blob}\ta.txt\0").as_bytes());
+    entries.extend_from_slice(format!("100644 blob {blob}\t").as_bytes());
+    entries.extend_from_slice(name);
+    entries.push(0);
+    let tree = id(git_fed(dir, &["mktree", "-z"], &entries));
+    let head = git(dir, &["rev-parse", "HEAD"]);
+    git(dir, &["commit-tree", &tree, "-p", &head, "-m", "odd"])
+}
+
+/// Puts a file named [`NOT_UTF8`] in the index of `dir`, from the bytes alone, as `git add`
+/// would where the file system took the name; written with git2, which takes any bytes on every
+/// system, where `git` on Windows may refuse the name.
+fn stage_a_name_not_utf8(dir: &Path) {
+    let repo = git2::Repository::open(dir).unwrap();
+    let id = repo.blob(b"odd\n").unwrap();
+    let mut index = repo.index().unwrap();
+    let zero = git2::IndexTime::new(0, 0);
+    index
+        .add(&git2::IndexEntry {
+            ctime: zero,
+            mtime: zero,
+            dev: 0,
+            ino: 0,
+            mode: 0o100644,
+            uid: 0,
+            gid: 0,
+            file_size: 0,
+            id,
+            flags: 0,
+            flags_extended: 0,
+            path: NOT_UTF8.to_vec(),
+        })
+        .unwrap();
+    index.write().unwrap();
+}
+
+/// The index of `dir` as `git` lists it, every name quoted in ASCII.
+fn staged(dir: &Path) -> String {
+    git(dir, &["ls-files", "--stage"])
+}
+
+/// Where the system cannot give a file a name that is not UTF-8: a stash of an index holding one
+/// is refused before anything is written, the index and `HEAD` as they were.
+fn refused_where_no_file_can_have_the_name(scratch: &Scratch) {
+    let dir = scratch.0.join("unnamable");
+    std::fs::create_dir_all(&dir).unwrap();
+    pushing_to(&dir, "git://127.0.0.1:9/repo");
+    stage_a_name_not_utf8(&dir);
+    let (index, head) = (staged(&dir), git(&dir, &["rev-parse", "HEAD"]));
+    let stash = Write::CreateStash {
+        message: None,
+        untracked: false,
+    };
+    let refused = panics_in(|| GitWriter.write(&dir, &stash)).expect("no panic");
+    let refused = refused.unwrap_err().to_string();
+    assert!(refused.contains("is not UTF-8"), "{refused}");
+    assert_eq!(staged(&dir), index);
+    assert_eq!(git(&dir, &["rev-parse", "HEAD"]), head);
+}
+
+/// The file named [`NOT_UTF8`] in `dir`, where the system can name one.
+#[cfg(unix)]
+fn not_utf8_in(dir: &Path) -> Option<PathBuf> {
+    use std::os::unix::ffi::OsStrExt;
+    Some(dir.join(std::ffi::OsStr::from_bytes(NOT_UTF8)))
+}
+
+/// Windows names a file in UTF-16, which holds no such name.
+#[cfg(not(unix))]
+fn not_utf8_in(_: &Path) -> Option<PathBuf> {
+    None
+}
+
+/// Whether the file system below `dir` takes a file named [`NOT_UTF8`]: Linux does, APFS and
+/// Windows do not.
+fn takes_a_name_not_utf8(dir: &Path) -> bool {
+    let Some(probe) = not_utf8_in(dir) else {
+        return false;
+    };
+    let taken = std::fs::write(&probe, "").is_ok();
+    let _ = std::fs::remove_file(probe);
+    taken
+}
+
+#[test]
+// Verifies: ADR-0033, ADR-0037
+fn a_switch_and_a_fast_forward_write_a_name_not_utf8_or_refuse_it_without_a_panic() {
+    let scratch = Scratch::new("checkout-not-utf8");
+    let dir = scratch.0.join("repo");
+    std::fs::create_dir_all(&dir).unwrap();
+    pushing_to(&dir, "git://127.0.0.1:9/repo");
+    let clone = scratch.0.join("clone");
+    let (from, to) = (dir.to_str().unwrap(), clone.to_str().unwrap());
+    git(&scratch.0, &["clone", "--quiet", from, to]);
+    let odd = commit_adding(&dir, NOT_UTF8);
+    git(&dir, &["branch", "odd", &odd]);
+    let main = git(&dir, &["rev-parse", "main"]);
+    let takes = takes_a_name_not_utf8(&scratch.0);
+    let read = |dir: &Path| not_utf8_in(dir).and_then(|f| std::fs::read_to_string(f).ok());
+    // `a.txt` sorts before the name: a refusal that came after a write would leave it.
+    let status = |dir: &Path| {
+        let a = dir.join("a.txt").exists();
+        format!(
+            "{}{}",
+            git(dir, &["status", "--porcelain", "--ignored"]),
+            if a { "a.txt" } else { "" }
+        )
+    };
+
+    let switch = |name: &str, tip: &str| Write::SwitchBranch {
+        name: name.into(),
+        tip: tip.into(),
+    };
+    let switched = panics_in(|| GitWriter.write(&dir, &switch("odd", &odd))).expect("no panic");
+    if takes {
+        switched.unwrap();
+        assert_eq!(git(&dir, &["rev-parse", "HEAD"]), odd);
+        assert_eq!(read(&dir).as_deref(), Some("odd\n"), "written");
+        assert_eq!(
+            status(&dir),
+            "a.txt",
+            "the working directory is the commit's"
+        );
+        GitWriter.write(&dir, &switch("main", &main)).unwrap();
+        assert_eq!(read(&dir), None, "removed again");
+        assert_eq!(status(&dir), "", "the working directory is the commit's");
+    } else {
+        assert!(
+            switched.is_err(),
+            "a name the system cannot hold is refused"
+        );
+        assert_eq!(git(&dir, &["rev-parse", "HEAD"]), main, "HEAD stays");
+        assert_eq!(status(&dir), "", "nothing written");
+    }
+
+    // A pull fast-forwarding onto the same commit.
+    git(&dir, &["update-ref", "refs/heads/main", &odd]);
+    let pull = Write::Pull {
+        branch: "main".into(),
+        tip: main.clone(),
+    };
+    let pulled = panics_in(|| GitWriter.write(&clone, &pull)).expect("no panic");
+    if takes {
+        pulled.unwrap();
+        assert_eq!(git(&clone, &["rev-parse", "HEAD"]), odd);
+        assert_eq!(read(&clone).as_deref(), Some("odd\n"), "written");
+        assert_eq!(
+            status(&clone),
+            "a.txt",
+            "the working directory is the commit's"
+        );
+    } else {
+        assert!(pulled.is_err(), "a name the system cannot hold is refused");
+        assert_eq!(git(&clone, &["rev-parse", "HEAD"]), main, "HEAD stays");
+        assert_eq!(status(&clone), "", "nothing written");
+    }
+}
+
+#[test]
+// Verifies: ADR-0033
+fn an_operation_sees_a_name_not_utf8_at_its_start_and_its_abort_puts_it_back() {
+    let scratch = Scratch::new("abort-not-utf8");
+    if !takes_a_name_not_utf8(&scratch.0) {
+        // `git` cannot stop a cherry-pick here with such a file in the working directory, and
+        // Ocelli refuses one before writing anything.
+        refused_where_no_file_can_have_the_name(&scratch);
+        return;
+    }
+    let dir = scratch.0.join("repo");
+    std::fs::create_dir_all(&dir).unwrap();
+    pushing_to(&dir, "git://127.0.0.1:9/repo");
+    let odd = not_utf8_in(&dir).unwrap();
+    std::fs::write(&odd, "base\n").unwrap();
+    git(&dir, &["add", "--all"]);
+    git(&dir, &["commit", "--quiet", "-m", "base"]);
+    git(&dir, &["switch", "--quiet", "-c", "side"]);
+    std::fs::write(&odd, "side\n").unwrap();
+    write_file(&dir, "f", "side\n");
+    git(&dir, &["commit", "--quiet", "-am", "side"]);
+    git(&dir, &["switch", "--quiet", "main"]);
+    write_file(&dir, "f", "main\n");
+    git(&dir, &["commit", "--quiet", "-am", "main"]);
+    assert!(!support::git_may_fail(&dir, &["cherry-pick", "side"]));
+    assert_eq!(std::fs::read_to_string(&odd).unwrap(), "side\n");
+
+    let abort = Write::Abort {
+        operation: ocelli_core::model::Operation::CherryPick,
+        head: git(&dir, &["rev-parse", "HEAD"]),
+    };
+    GitWriter.write(&dir, &abort).unwrap();
+    assert_eq!(std::fs::read_to_string(&odd).unwrap(), "base\n", "put back");
+    assert_eq!(git(&dir, &["status", "--porcelain", "--ignored"]), "");
+
+    // A change of the developer's own to such a file keeps an operation from starting, one that
+    // leaves the file alone too.
+    git(&dir, &["switch", "--quiet", "-c", "other"]);
+    write_file(&dir, "g", "other\n");
+    git(&dir, &["add", "g"]);
+    git(&dir, &["commit", "--quiet", "-m", "other"]);
+    git(&dir, &["switch", "--quiet", "main"]);
+    std::fs::write(&odd, "mine\n").unwrap();
+    let pick = Write::CherryPick {
+        branch: "main".into(),
+        tip: git(&dir, &["rev-parse", "main"]),
+        commit: git(&dir, &["rev-parse", "other"]),
+    };
+    let refused = GitWriter.write(&dir, &pick).unwrap_err().to_string();
+    assert!(refused.contains("uncommitted changes"), "{refused}");
+    assert_eq!(std::fs::read_to_string(&odd).unwrap(), "mine\n");
+}
+
+#[test]
+// Verifies: ADR-0033
+fn a_stash_sees_what_is_in_its_way_under_a_name_not_utf8() {
+    let scratch = Scratch::new("stash-not-utf8");
+    if !takes_a_name_not_utf8(&scratch.0) {
+        // No such name can stand in the working directory here, and Ocelli refuses one before
+        // writing anything.
+        refused_where_no_file_can_have_the_name(&scratch);
+        return;
+    }
+    let refused = |dir: &Path, write: &Write, why: &str| {
+        let head = git(dir, &["rev-parse", "HEAD"]);
+        let error = GitWriter.write(dir, write).unwrap_err().to_string();
+        assert!(error.contains(why), "{error}");
+        assert_eq!(git(dir, &["rev-parse", "HEAD"]), head);
+    };
+    let stash = |untracked| Write::CreateStash {
+        message: None,
+        untracked,
+    };
+    let repository = |name: &str| {
+        let dir = scratch.0.join(name);
+        std::fs::create_dir_all(&dir).unwrap();
+        pushing_to(&dir, "git://127.0.0.1:9/repo");
+        dir
+    };
+
+    // A link where the index has a directory, to one outside the repository.
+    let outside = scratch.0.join("outside");
+    std::fs::create_dir_all(&outside).unwrap();
+    std::fs::write(outside.join("f"), "SECRET\n").unwrap();
+    let dir = repository("link");
+    let odd = not_utf8_in(&dir).unwrap();
+    std::fs::create_dir(&odd).unwrap();
+    write_file(&odd, "f", "tracked\n");
+    git(&dir, &["add", "--all"]);
+    git(&dir, &["commit", "--quiet", "-m", "odd"]);
+    std::fs::remove_dir_all(&odd).unwrap();
+    #[cfg(unix)]
+    std::os::unix::fs::symlink(&outside, &odd).unwrap();
+    refused(
+        &dir,
+        &stash(false),
+        "is a link where the index has a directory",
+    );
+    assert_eq!(
+        std::fs::read_to_string(outside.join("f")).unwrap(),
+        "SECRET\n"
+    );
+
+    // An ignored file in a directory only untracked files make, which -u would delete.
+    let dir = repository("ignored");
+    std::fs::write(dir.join(".gitignore"), "*.log\n").unwrap();
+    git(&dir, &["add", ".gitignore"]);
+    git(&dir, &["commit", "--quiet", "-m", "ignore logs"]);
+    let odd = not_utf8_in(&dir).unwrap();
+    std::fs::create_dir(&odd).unwrap();
+    std::fs::write(odd.join("u"), "untracked\n").unwrap();
+    std::fs::write(odd.join("l.log"), "kept\n").unwrap();
+    refused(&dir, &stash(true), "is ignored in");
+    assert_eq!(
+        std::fs::read_to_string(odd.join("l.log")).unwrap(),
+        "kept\n"
+    );
+
+    // An untracked file the stash took along, which the checked-out commit tracks by now.
+    let dir = repository("tracked-by-now");
+    let odd = not_utf8_in(&dir).unwrap();
+    std::fs::write(&odd, "stashed\n").unwrap();
+    GitWriter.write(&dir, &stash(true)).unwrap();
+    std::fs::write(&odd, "committed\n").unwrap();
+    git(&dir, &["add", "--all"]);
+    git(&dir, &["commit", "--quiet", "-m", "odd"]);
+    let apply = Write::ApplyStash {
+        index: 0,
+        commit: git(&dir, &["rev-parse", "refs/stash"]),
+        drop: false,
+    };
+    refused(&dir, &apply, "is tracked by now");
+    assert_eq!(std::fs::read_to_string(&odd).unwrap(), "committed\n");
+}
+
+#[test]
+// Verifies: ADR-0033, ADR-0037
+fn a_name_not_utf8_is_never_acted_on_by_its_lossy_reading_and_unnamable_ones_refuse_an_abort() {
+    let scratch = Scratch::new("index-not-utf8");
+    let dir = scratch.0.join("repo");
+    std::fs::create_dir_all(&dir).unwrap();
+    pushing_to(&dir, "git://127.0.0.1:9/repo");
+    let takes = takes_a_name_not_utf8(&scratch.0);
+    let committed = staged(&dir);
+    stage_a_name_not_utf8(&dir);
+    if let Some(odd) = not_utf8_in(&dir).filter(|_| takes) {
+        std::fs::write(odd, "odd\n").unwrap();
+    }
+    let head = git(&dir, &["rev-parse", "HEAD"]);
+    let index = staged(&dir);
+
+    // The name as a front end shows it, which names no file: refused, not acted on.
+    let lossy = String::from_utf8_lossy(NOT_UTF8).into_owned();
+    let conflict = ocelli_core::port::Conflict {
+        path: lossy.clone(),
+        ancestor: None,
+        ours: None,
+        theirs: None,
+    };
+    for write in [
+        Write::StageFile {
+            path: lossy.clone(),
+            shown: None,
+        },
+        Write::UnstageFile {
+            path: lossy.clone(),
+            shown: None,
+        },
+        Write::Resolve {
+            path: lossy.clone(),
+            conflict,
+            take: ocelli_core::port::Take::Ours,
+        },
+    ] {
+        let refused = panics_in(|| GitWriter.write(&dir, &write)).expect("no panic");
+        let refused = refused.unwrap_err().to_string();
+        assert!(refused.contains("cannot be shown exactly"), "{refused}");
+        assert_eq!(staged(&dir), index);
+    }
+
+    // A cherry-pick stopped with the name staged: its abort takes the name out where the system
+    // can hold it, and is refused with nothing changed where it cannot.
+    let picked = dir.join(".git").join("CHERRY_PICK_HEAD");
+    std::fs::write(&picked, format!("{head}\n")).unwrap();
+    let abort = Write::Abort {
+        operation: ocelli_core::model::Operation::CherryPick,
+        head: head.clone(),
+    };
+    let aborted = panics_in(|| GitWriter.write(&dir, &abort)).expect("no panic");
+    if takes {
+        aborted.unwrap();
+        assert_eq!(staged(&dir), committed, "taken out");
+        assert!(!picked.exists());
+        assert_eq!(git(&dir, &["status", "--porcelain"]), "");
+    } else {
+        let refused = aborted.unwrap_err().to_string();
+        assert!(refused.contains("is not UTF-8"), "{refused}");
+        assert_eq!(staged(&dir), index);
+        assert!(picked.exists(), "the cherry-pick is still stopped");
+    }
+    assert_eq!(git(&dir, &["rev-parse", "HEAD"]), head);
+}
+
+#[test]
+// Verifies: ADR-0033
+fn a_switch_to_a_name_longer_than_any_file_system_takes_writes_nothing() {
+    let scratch = Scratch::new("long-name");
+    let dir = scratch.0.join("repo");
+    std::fs::create_dir_all(&dir).unwrap();
+    pushing_to(&dir, "git://127.0.0.1:9/repo");
+    let main = git(&dir, &["rev-parse", "HEAD"]);
+    let long = commit_adding(&dir, "z".repeat(300).as_bytes());
+    git(&dir, &["branch", "long", &long]);
+    let switch = Write::SwitchBranch {
+        name: "long".into(),
+        tip: long,
+    };
+    let refused = panics_in(|| GitWriter.write(&dir, &switch)).expect("no panic");
+    let refused = refused.unwrap_err().to_string();
+    assert!(refused.contains("a name longer than"), "{refused}");
+    assert_eq!(git(&dir, &["rev-parse", "HEAD"]), main);
+    assert!(
+        !dir.join("a.txt").exists(),
+        "a.txt, before the name, not written"
+    );
+    assert_eq!(git(&dir, &["status", "--porcelain", "--ignored"]), "");
+}
+
+#[test]
+#[cfg(target_os = "linux")]
+// Verifies: ADR-0033
+fn a_link_whose_target_is_not_utf8_is_hashed_as_git_hashes_it() {
+    use std::os::unix::ffi::OsStrExt;
+    let scratch = Scratch::new("link-target");
+    let dir = scratch.0.join("repo");
+    std::fs::create_dir_all(&dir).unwrap();
+    pushing_to(&dir, "git://127.0.0.1:9/repo");
+    std::os::unix::fs::symlink(std::ffi::OsStr::from_bytes(NOT_UTF8), dir.join("l")).unwrap();
+    git(&dir, &["add", "l"]);
+    git(&dir, &["commit", "--quiet", "-m", "link"]);
+    // Unchanged, as `git` reads it: shown as the index has it, with nothing to stage.
+    let stage = Write::StageFile {
+        path: "l".into(),
+        shown: Some(git(&dir, &["rev-parse", ":l"])),
+    };
+    let refused = GitWriter.write(&dir, &stage).unwrap_err().to_string();
+    assert!(refused.contains("no change to stage"), "{refused}");
+}
