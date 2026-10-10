@@ -98,7 +98,8 @@ to invent.
   the web interface to the developer's browser, as VS Code's remote development does.
   _Avoid:_ backend, daemon, agent.
 - **Server root** — the folder the remote server is started with; a browser opens only the
-  repositories whose files all lie below it, and reads nothing outside it.
+  repositories whose files all lie below it, and reads nothing outside it, nor writes there, a
+  remote on the machine included.
   _Avoid:_ workspace, base directory.
 - **Stash node** — the node of the commit graph that stands for one entry of the stash, joined to
   the commit it was made on, and carrying its place `n` of `stash@{n}`.
@@ -113,6 +114,9 @@ to invent.
   after it whether it was written or refused, and a fetch, a pull's fetch included, can be stopped
   while it runs.
   _Avoid:_ sync, network write, a write that takes long.
+- **Turn** — a repository's turn to be written to by one of the remote server's tabs; a write of
+  another tab to it waits until it is given back.
+  _Avoid:_ lock, mutex.
 - **Upstream** — the remote branch a local branch follows, which a pull fetches and fast-forwards
   to and a push sends to; set where the branch tracks one.
   _Avoid:_ tracking branch (that is the local branch), remote counterpart.

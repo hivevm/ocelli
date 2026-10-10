@@ -399,9 +399,26 @@ pub(crate) fn shown(repo: &Repository, path: &str) -> Shown {
     let index = repo
         .index()
         .ok()
-        .and_then(|index| index.get_path(Path::new(path), 0))
+        .and_then(|index| index_entry(&index, path, 0))
         .map(|entry| entry.id.to_string());
     Shown { workdir, index }
+}
+
+/// The entry of `index` at `path` and `stage`. git2's `Index::get_path` panics on a path it does
+/// not take as one of the repository's, an empty, absolute, or `.`/`..`-led one or one holding a
+/// NUL; such a path, whether a caller gave it or a repository holds it, has no entry.
+pub(crate) fn index_entry(index: &git2::Index, path: &str, stage: i32) -> Option<git2::IndexEntry> {
+    let taken = !path.is_empty()
+        && !path.contains('\0')
+        && Path::new(path)
+            .components()
+            .all(|part| matches!(part, std::path::Component::Normal(_)));
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "the path is one git2 takes as a repository's, which it does not panic on"
+    )]
+    let entry = taken.then(|| index.get_path(Path::new(path), stage));
+    entry.flatten()
 }
 
 /// The blob id `git` gives `path` in the working directory `root`, as `git` reads it: a link as
@@ -448,6 +465,7 @@ fn staged(repo: &Repository, path: &str) -> Staged {
 
 /// Returns the unified diff of a single file in a commit as a Vec of DiffLine.
 pub fn load_file_diff(repo_path: &Path, sha: &str, file_path: &str) -> Result<Vec<DiffLine>> {
+    crate::guard::repository_path(file_path)?;
     let repo = crate::confine::open(repo_path)?;
 
     let mut opts = DiffOptions::new();

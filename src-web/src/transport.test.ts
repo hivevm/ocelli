@@ -7,6 +7,7 @@
 import { describe, expect, test } from 'bun:test';
 import { join } from 'node:path';
 import { CLOSED, SocketTransport, socketUrl, type SocketLike } from './transport.ts';
+import type { RepoWritten } from './types.ts';
 
 /** A socket that records what is sent and lets the test play the server. */
 class FakeSocket implements SocketLike {
@@ -99,6 +100,20 @@ describe('the WebSocket transport', () => {
     stop();
     socket.answer({ event: 'load-refs', payload });
     expect(got).toHaveLength(1);
+  });
+
+  test('the server\'s own repo-written event reaches its listener with the payload its type names', async () => {
+    // The message a tab receives once another tab wrote to its repository, as the server's
+    // two-tab test writes it (ADR-0037).
+    const fixture = join(import.meta.dir, '..', '..', 'crates', 'server', 'tests', 'fixtures', 'repo-written.json');
+    const message = await Bun.file(fixture).json();
+    expect(message.event).toBe('repo-written');
+    const { socket, transport } = connected();
+    const got: RepoWritten[] = [];
+    await transport.listen<RepoWritten>('repo-written', (e) => got.push(e.payload));
+    socket.answer(message);
+    expect(got).toEqual([message.payload]);
+    expect(typeof got[0]).toBe('string');
   });
 
   test('a closed connection rejects what waits and what is asked after, and says so', async () => {

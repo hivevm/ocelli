@@ -93,7 +93,7 @@ pub(crate) fn nothing_untracked_in_the_way(repo: &Repository, files: &[String]) 
         return Ok(());
     };
     let index = repo.index()?;
-    let tracked = |p: &str| index.get_path(Path::new(p), 0).is_some();
+    let tracked = |p: &str| crate::git::index_entry(&index, p, 0).is_some();
     for path in files {
         let dir = root.join(path);
         if dir.symlink_metadata().is_ok_and(|m| m.is_dir()) {

@@ -80,6 +80,107 @@ pub(crate) fn open(path: &Path) -> Result<Repository, git2::Error> {
     }
 }
 
+/// The common directory of the repository at `path`, opened without searching upwards, resolved,
+/// links included: one for a working directory and every worktree that belongs to it, which the
+/// remote server orders its tabs' writes by (ADR-0037). `None` where no repository opens there or
+/// its common directory does not resolve.
+pub fn common_dir(path: &Path) -> Option<PathBuf> {
+    let repo = Repository::open_ext(
+        path,
+        RepositoryOpenFlags::NO_SEARCH,
+        std::iter::empty::<&OsStr>(),
+    )
+    .ok()?;
+    repo.commondir().canonicalize().ok()
+}
+
+/// A digest of where `HEAD` and every ref of the repository at `path` point, opened without
+/// searching upwards: the remote server compares the digest taken before a write with the one after, to
+/// tell its other tabs on the repository to load again where a refused write moved a ref, as a
+/// pull's fetch does before its fast-forward is refused (ADR-0037). `None` where no repository
+/// opens there or its refs cannot be listed.
+pub fn refs_digest(path: &Path) -> Option<u64> {
+    use std::hash::{Hash, Hasher};
+    let repo = Repository::open_ext(
+        path,
+        RepositoryOpenFlags::NO_SEARCH,
+        std::iter::empty::<&OsStr>(),
+    )
+    .ok()?;
+    let mut digest = std::collections::hash_map::DefaultHasher::new();
+    let mut each = |reference: &git2::Reference| {
+        reference.name_bytes().hash(&mut digest);
+        reference
+            .target()
+            .map(|oid| oid.as_bytes().to_vec())
+            .hash(&mut digest);
+        reference.symbolic_target_bytes().hash(&mut digest);
+    };
+    if let Ok(head) = repo.find_reference("HEAD") {
+        each(&head);
+    }
+    for reference in repo.references().ok()? {
+        each(&reference.ok()?);
+    }
+    Some(digest.finish())
+}
+
+/// Whether libgit2 reaches `url` over the network rather than through its local transport, which
+/// opens a repository on this machine in-process: an address with a network scheme, or one that
+/// reads as `host:path` as ssh's does where no folder of that name exists, which libgit2 would
+/// open locally first. Anything else, a path or a `file://` address, is local.
+fn over_the_network(url: &str) -> bool {
+    let lower = url.to_ascii_lowercase();
+    let schemes = [
+        "http://",
+        "https://",
+        "ssh://",
+        "ssh+git://",
+        "git+ssh://",
+        "git://",
+    ];
+    if schemes.iter().any(|scheme| lower.starts_with(scheme)) {
+        return true;
+    }
+    let scp_like = !url.contains("://")
+        && url
+            .split_once(':')
+            .is_some_and(|(host, _)| host.len() > 1 && !host.contains(['/', '\\']));
+    scp_like && !Path::new(url).exists()
+}
+
+/// Confined, refuses a remote's address `url` that libgit2 would reach through its local
+/// transport unless it is an absolute path, or a `file://` address of one, that resolves below
+/// the root the repository at `repo_path` lies below: a fetch from a repository outside the root
+/// would copy its objects inside, where the browser reads them, and a push would write it, which
+/// ADR-0039 rules out however a repository inside points outside. An address over the network is
+/// the server account's to reach (ADR-0037). Not confined, every address passes.
+pub(crate) fn remote_within_root(repo_path: &Path, name: &str, url: &str) -> anyhow::Result<()> {
+    let root = match root_of(repo_path) {
+        Ok(None) => return Ok(()),
+        Ok(Some(root)) => root,
+        Err(()) => anyhow::bail!("the repository lies outside the server root"),
+    };
+    if over_the_network(url) {
+        return Ok(());
+    }
+    let lower = url.to_ascii_lowercase();
+    let path = if lower.starts_with("file://") {
+        &url["file://".len()..]
+    } else {
+        url
+    };
+    // A path libgit2 would decode or resolve against the process's folder is not followed.
+    let path = Path::new(path);
+    if url.contains('%') || !path.is_absolute() || !below(path, &root) {
+        anyhow::bail!(
+            "{name} is a repository on this machine outside the server root, which the remote \
+             server does not reach: fetch or push it with git"
+        );
+    }
+    Ok(())
+}
+
 /// Why a repository is not opened for a browser.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Refused {
@@ -351,5 +452,36 @@ mod tests {
         assert_eq!(alternates(objects, "outside/.git/objects"), None);
         assert_eq!(alternates(objects, "/abs/\tobjects"), None);
         assert_eq!(alternates(objects, ""), Some(vec![]));
+    }
+
+    #[test]
+    // Verifies: ADR-0039, ADR-0037
+    fn an_address_is_over_the_network_only_with_a_network_scheme_or_as_ssh_reads_host_and_path() {
+        for network in [
+            "https://example.org/r.git",
+            "HTTP://example.org/r.git",
+            "ssh://git@example.org/r.git",
+            "git+ssh://example.org/r",
+            "ssh+git://example.org/r",
+            "git://example.org/r",
+            "git@example.org:r.git",
+            "example.org:r.git",
+        ] {
+            assert!(over_the_network(network), "{network}");
+        }
+        for local in [
+            "/srv/remote.git",
+            "file:///srv/remote.git",
+            "FILE:///srv/remote.git",
+            "../remote.git",
+            "remote.git",
+            "C:\\remote.git",
+            "C:/remote.git",
+            "./a:b",
+            "/srv/a:b",
+            "",
+        ] {
+            assert!(!over_the_network(local), "{local}");
+        }
     }
 }

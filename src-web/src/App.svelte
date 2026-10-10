@@ -19,7 +19,7 @@
   import { avatarsOn } from './avatars.ts';
   import type {
     NodeJson, FileChange, DiffLine, RepoRefs, Growth, RowWindow, Relative, Selected, Found,
-    LoadedRefs, Offered, Transfer, Transfers,
+    LoadedRefs, Offered, Transfer, Transfers, RepoWritten,
   } from './types.ts';
   import { applyTheme, storedTheme, type Theme } from './theme/palette.ts';
 
@@ -308,6 +308,11 @@
       }),
       listen<string>('set-status',     (e) => { status = e.payload; }),
       listen<string>('write-progress', (e) => { if (fetching) status = e.payload; }),
+      // Another tab of the remote server wrote to this repository: it is loaded again, as after
+      // a write of this tab, and the status bar says why (ADR-0037).
+      listen<RepoWritten>('repo-written', (e) => {
+        void reloadAfterWrite(null).then(() => { notice = e.payload; });
+      }),
       listen<string>('commit-files', (e) => {
         try {
           changedFiles = typeof e.payload === 'string' ? JSON.parse(e.payload) : e.payload;

@@ -281,7 +281,7 @@ pub(crate) fn abort(repo: &Repository, operation: Operation, head: &str) -> Resu
         // there, unchanged; it is removed before the checkout, which would write through a link.
         let own_parents = std::cell::RefCell::new(Vec::new());
         let its_own = |dir: &str| {
-            let own = index.get_path(Path::new(dir), 0).is_some()
+            let own = crate::git::index_entry(&index, dir, 0).is_some()
                 && !changed.contains_key(dir)
                 && root.join(dir).symlink_metadata().is_ok_and(|m| !m.is_dir());
             if own {
@@ -304,7 +304,7 @@ pub(crate) fn abort(repo: &Repository, operation: Operation, head: &str) -> Resu
                     .join(path)
                     .symlink_metadata()
                     .is_ok_and(|m| !m.is_dir())
-                && index.get_path(Path::new(path), 0).is_some()
+                && crate::git::index_entry(&index, path, 0).is_some()
                 && !changed.contains_key(path.as_str())
             {
                 own_parents.push(path.clone());

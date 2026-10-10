@@ -94,7 +94,7 @@ Install the dependencies from the lockfile first, and again after a dependency c
 - **Run:** the desktop application with `bun run tauri dev`; the terminal application with
   `cargo run -p ocelli-cli -- [--ascii] [PATH]`; the remote server with
   `cargo run -p ocelli-server -- --root <folder> [--port <port>] [--listen <address>[:<port>]
-  [--cert <file> --key <file>]]`, which embeds the web
+  [--cert <file> --key <file>]] [--allow-writes]`, which embeds the web
   interface's build, so `bun run --cwd src-web build` runs before it is built
 
 ## Usage
@@ -148,7 +148,11 @@ other accounts may read, is kept, and says what to remove. The browser opens
 the repository the server root is, or one chosen with Open Repo from the folders below the root,
 and nothing outside the root
 ([ADR-0039](docs/adr/0039-git-adapter-confined-to-the-server-root.md));
-the server only reads, and every restart prints a new URL.
+every restart prints a new URL. The server only reads unless it is started with
+`--allow-writes`: then the browser stages, unstages, and commits as the desktop application
+does, as the user the server runs as, with the identity git's configuration names for that user, and
+whoever holds a session can write; it refuses the other writes the desktop application offers
+([ADR-0037](docs/adr/0037-remote-server-websocket-per-tab.md)).
 
 ### In the terminal
 
