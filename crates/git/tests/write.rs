@@ -141,6 +141,140 @@ fn twins_differ_where_one_swapped_branches_on_commits_they_parted_with_alike_but
     assert_ne!(ours, theirs);
 }
 
+#[test]
+fn twins_read_alike_where_the_messages_of_what_each_made_name_what_each_made_since_they_parted() {
+    let scratch = with_file("named-since");
+    let origin = Origin::of(&scratch.0);
+    let other = twin(&scratch, "named-since-twin");
+    // Each side makes the same commits and tags, the twin a second later, so that each id made
+    // since they parted differs and each message naming one names it as text.
+    for (dir, at) in [(&scratch.0, 1_700_000_000), (&other.0, 1_700_000_001)] {
+        let made = |args: &[&str]| git_at(dir, at, args);
+        write_file(dir, "three", "3\n");
+        made(&["add", "three"]);
+        made(&["commit", "--quiet", "-m", "three"]);
+        made(&["revert", "--no-edit", "HEAD"]);
+        made(&["switch", "--quiet", "-c", "side", "HEAD~2"]);
+        write_file(dir, "g", "g\n");
+        made(&["add", "g"]);
+        made(&["commit", "--quiet", "-m", "g"]);
+        made(&["switch", "--quiet", "main"]);
+        made(&["cherry-pick", "-x", "side"]);
+        let side = git(dir, &["rev-parse", "side"]);
+        made(&["merge", "--quiet", "--no-ff", "--no-edit", &side]);
+        made(&["tag", "-a", "t", "-m", &format!("from {side}"), "HEAD^2"]);
+    }
+    assert_twins_alike(&scratch.0, &other.0, &origin, "named a second apart");
+}
+
+#[test]
+fn twins_differ_where_the_messages_of_what_each_made_name_different_commits() {
+    let scratch = with_file("named-apart");
+    let d = &scratch.0;
+    // Two commits the twins part with, alike but for their time: `p` adds `g` to main, and `q`
+    // is `p` made again a second later, which a revert on `p` undoes just the same.
+    write_file(d, "g", "g\n");
+    git(d, &["add", "g"]);
+    git_at(d, 1_700_000_000, &["commit", "--quiet", "-m", "g"]);
+    git(d, &["switch", "--quiet", "-c", "q"]);
+    git_at(
+        d,
+        1_700_000_001,
+        &["commit", "--quiet", "--amend", "--no-edit"],
+    );
+    git(d, &["switch", "--quiet", "main"]);
+    let (p, q) = (git(d, &["rev-parse", "main"]), git(d, &["rev-parse", "q"]));
+    assert_ne!(p, q);
+    let origin = Origin::of(d);
+    let other = twin(&scratch, "named-apart-twin");
+    let reverting_p = twin(&scratch, "named-apart-p");
+    // Each reverts `p`, a second apart: alike.
+    git_at(d, 1_700_000_002, &["revert", "--no-edit", &p]);
+    git_at(&reverting_p.0, 1_700_000_003, &["revert", "--no-edit", &p]);
+    assert_twins_alike(d, &reverting_p.0, &origin, "reverted p a second apart");
+    // The twin reverts `q` instead, to the same tree on the same parent: only the message, which
+    // names another commit, differs.
+    git_at(&other.0, 1_700_000_003, &["revert", "--no-edit", &q]);
+    let (ours, theirs) = as_twins(d, &other.0, &origin);
+    let differences = ours.differences(&theirs, ("here", "on the twin"));
+    assert_eq!(differences.len(), 1, "only main differs: {differences:#?}");
+    assert_ne!(ours.refs, theirs.refs, "reverted p here and q on the twin");
+}
+
+#[test]
+fn twins_differ_where_the_messages_of_what_each_made_name_different_commits_made_since() {
+    let scratch = with_file("named-other");
+    let origin = Origin::of(&scratch.0);
+    let other = twin(&scratch, "named-other-twin");
+    // Each makes the branches `one` and `two` alike, a second apart, and then a commit whose
+    // message names `one` here and `two` on the twin.
+    for (dir, at, named) in [
+        (&scratch.0, 1_700_000_000, "one"),
+        (&other.0, 1_700_000_001, "two"),
+    ] {
+        for branch in ["one", "two"] {
+            git(dir, &["switch", "--quiet", "-c", branch, "main"]);
+            git_at(
+                dir,
+                at,
+                &["commit", "--quiet", "--allow-empty", "-m", branch],
+            );
+        }
+        git(dir, &["switch", "--quiet", "main"]);
+        let id = git(dir, &["rev-parse", named]);
+        git_at(dir, at, &["commit", "--quiet", "--allow-empty", "-m", &id]);
+    }
+    let (ours, theirs) = as_twins(&scratch.0, &other.0, &origin);
+    let differences = ours.differences(&theirs, ("here", "on the twin"));
+    assert_eq!(differences.len(), 1, "only main differs: {differences:#?}");
+    assert_ne!(ours.refs, theirs.refs, "main differs");
+}
+
+#[test]
+fn twins_differ_where_they_name_different_blobs_made_since_or_hex_that_is_no_object() {
+    // Each side does `make` with its own text, the twin a second later; the twins then differ in
+    // `part` alone.
+    let differ = |name: &str, texts: [&str; 2], make: &dyn Fn(&Path, u32, &str), part: &str| {
+        let scratch = with_file(name);
+        let origin = Origin::of(&scratch.0);
+        let other = twin(&scratch, &format!("{name}-twin"));
+        make(&scratch.0, 1_700_000_000, texts[0]);
+        make(&other.0, 1_700_000_001, texts[1]);
+        let (ours, theirs) = as_twins(&scratch.0, &other.0, &origin);
+        let differences = ours.differences(&theirs, ("here", "on the twin"));
+        assert_eq!(differences.len(), 1, "{name}: {differences:#?}");
+        assert!(
+            differences[0].trim_start().starts_with(part),
+            "{name}: {differences:#?}"
+        );
+    };
+    // A commit's message names a blob it wrote, of another content on each side.
+    let names_blob = |dir: &Path, at: u32, content: &str| {
+        write_file(dir, "blob", content);
+        let blob = git(dir, &["hash-object", "-w", "blob"]);
+        std::fs::remove_file(dir.join("blob")).unwrap();
+        git_at(
+            dir,
+            at,
+            &["commit", "--quiet", "--allow-empty", "-m", &blob],
+        );
+    };
+    differ("named-blob", ["one\n", "two\n"], &names_blob, "refs");
+    // The index holds another content of `f` on each side, the working directory the same.
+    let stages = |dir: &Path, _: u32, content: &str| {
+        write_file(dir, "f", content);
+        git(dir, &["add", "f"]);
+        write_file(dir, "f", "worked\n");
+    };
+    differ("staged-blob", ["one\n", "two\n"], &stages, "index");
+    // A commit's message holds 40 hexadecimal digits that are no object, other ones on each side.
+    let names_hex = |dir: &Path, at: u32, hex: &str| {
+        git_at(dir, at, &["commit", "--quiet", "--allow-empty", "-m", hex]);
+    };
+    let (a, b) = ("a".repeat(40), "b".repeat(40));
+    differ("named-hex", [&a, &b], &names_hex, "refs");
+}
+
 /// A repository with two commits on main, its identity in its own configuration, and the SHAs.
 fn repository(dir: &Path) -> (String, String) {
     git(dir, &["init", "--quiet", "-b", "main"]);
