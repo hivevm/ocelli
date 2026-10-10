@@ -4,6 +4,10 @@
 //! credential helpers, and the drivers its configuration names for diffing, filtering, and
 //! merging. A test's own `git` then runs nothing the repository brings, so a marker a Q-4 test
 //! finds was left by Ocelli. `tests_start_git_one_way` holds every test to it.
+//!
+//! The one exception is `git_running_its_programs`, the control of a Q-4 test: `git` with the
+//! same configuration out of reach and the repository's programs left on, which shows that the
+//! programs the test names would run where `git` performed what Ocelli performs.
 
 use std::path::Path;
 use std::process::Command;
@@ -52,6 +56,14 @@ pub fn git_command(dir: impl AsRef<Path>) -> Command {
     command
 }
 
+/// `git` in `dir` that runs the programs the repository names, for the control of a Q-4 test
+/// alone: the developer's global and system configuration out of reach, the editors and prompts
+/// turned off.
+#[allow(dead_code)] // only the controls of the tests of Q-4 start it
+pub fn git_running_its_programs(dir: impl AsRef<Path>) -> Command {
+    bare(dir.as_ref())
+}
+
 /// `git` in `dir` with nothing but the configuration out of reach and the editors and prompts
 /// turned off, environment variables that any `git` honours.
 fn bare(dir: &Path) -> Command {
@@ -61,9 +73,10 @@ fn bare(dir: &Path) -> Command {
         .arg(dir)
         .arg("--no-pager")
         .env("GIT_CONFIG_NOSYSTEM", "1")
+        // The null device: a global configuration that holds nothing, which no one can write to.
         .env(
             "GIT_CONFIG_GLOBAL",
-            std::env::temp_dir().join("ocelli-tests-no-global-config"),
+            if cfg!(windows) { "NUL" } else { "/dev/null" },
         )
         .env("GIT_EDITOR", "true")
         .env("GIT_SEQUENCE_EDITOR", "true")

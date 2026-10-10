@@ -279,7 +279,13 @@ The remote server's tests open a tab as a browser does through
 shared `Host` on a twin of the repository, as the desktop host does, and compares the two
 (`crates/server/tests/writes.rs`, and `crates/server/tests/transfers.rs`, a binary of its own for
 the developer's configuration it sets for the process, with a remote below the root and a local
-server that stalls a fetch).
+server that stalls a fetch). Each concern of the server is a test binary of its own:
+`server.rs` holds its reads, its login, its bounds, its confinement to the root, and that it
+links no part of Tauri or WebKit; `allow_writes.rs` what `--allow-writes` lets through and holds
+back, the turns of a repository's writes, and the programs a repository names, none of which its
+writes run while `git` performing the same writes runs each (Q-4);
+`command_list.rs` the shared list of commands each host answers; `tls.rs` where it listens and
+its TLS; `hostile_commands.rs` every command sent hostile arguments.
 Where the web interface spells the JSON of a core value,
 the core's `tests/write_fixture.rs` writes an example to `crates/core/tests/fixtures/` and the web
 interface's test reads it against its types. The server's own `repo-written` event is held to

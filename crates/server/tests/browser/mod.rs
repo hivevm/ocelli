@@ -46,6 +46,21 @@ impl Tree {
     }
 }
 
+/// The commit `name` names in `dir`.
+pub fn rev(dir: &Path, name: &str) -> String {
+    git(dir, &["rev-parse", &format!("{name}^{{commit}}")])
+}
+
+/// The sidebar row of `refs` under `list` whose `key` is `value`.
+pub fn row<'a>(refs: &'a Value, list: &str, key: &str, value: &str) -> &'a Value {
+    refs["refs"][list]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|r| r[key] == value)
+        .unwrap_or_else(|| panic!("no {list} row {value} in {refs}"))
+}
+
 /// A repository with three commits at `repo`.
 pub fn three_commits(repo: &Path) {
     std::fs::create_dir_all(repo).unwrap();
@@ -580,6 +595,15 @@ impl Pair {
         make: impl Fn(&Path) -> Write,
         confirmed: bool,
     ) -> Result<Value, String> {
+        self.answers(make, confirmed).await.0
+    }
+
+    /// [`Pair::alike`], with both answers: the server's, then the desktop host's.
+    pub async fn answers(
+        &mut self,
+        make: impl Fn(&Path) -> Write,
+        confirmed: bool,
+    ) -> (Result<Value, String>, Result<Value, String>) {
         let (write, mirrored) = (make(&self.root), make(&self.other));
         let here = perform_as(&mut self.tab, &write, confirmed).await;
         let there = self.desktop.write(&mirrored, confirmed).await;
@@ -593,7 +617,7 @@ impl Pair {
             &self.parted,
             &format!("{write:?}"),
         );
-        here
+        (here, there)
     }
 
     /// The write `make` makes, which discards work (ADR-0034): refused on both sides without a

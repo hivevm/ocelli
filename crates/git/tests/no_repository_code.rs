@@ -82,7 +82,11 @@ fn every_place_of_the_list_is_set_and_each_program_leaves_its_marker() {
     let _ = std::fs::remove_dir_all(&root);
     let _guard = Scratch(root.clone());
     let dir = root.join("repo");
-    git2::Repository::init(&dir).unwrap();
+    // A remote, for which the programs a fetch and a push start are named.
+    git2::Repository::init(&dir)
+        .unwrap()
+        .remote("origin", root.join("remote.git").to_str().unwrap())
+        .unwrap();
     let markers = programs::set_everywhere(&dir, &root.join("tools"));
 
     let config = git2::Repository::open(&dir).unwrap().config().unwrap();
@@ -90,6 +94,12 @@ fn every_place_of_the_list_is_set_and_each_program_leaves_its_marker() {
         let program = config.get_string(key).unwrap();
         let status = std::process::Command::new(&program).status().unwrap();
         assert!(status.success(), "{key}");
+    }
+    // Each stands in for git's own program, which fails without a repository to serve: that it
+    // ran is the marker it leaves.
+    for (key, _) in programs::REMOTE_PROGRAMS {
+        let program = config.get_string(&format!("remote.origin.{key}")).unwrap();
+        std::process::Command::new(&program).output().unwrap();
     }
     for (key, value) in programs::SWITCHES {
         assert_eq!(config.get_string(key).unwrap(), *value, "{key}");
@@ -112,6 +122,11 @@ fn every_place_of_the_list_is_set_and_each_program_leaves_its_marker() {
     ran.sort();
     let mut expected: Vec<String> = programs::PROGRAMS.iter().map(|k| k.to_string()).collect();
     expected.extend(programs::HOOKS.iter().map(|h| format!("hook-{h}")));
+    expected.extend(
+        programs::REMOTE_PROGRAMS
+            .iter()
+            .map(|(key, _)| format!("remote.origin.{key}")),
+    );
     expected.sort();
     assert_eq!(
         ran, expected,

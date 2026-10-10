@@ -35,8 +35,8 @@ pub const HOOKS: &[&str] = &[
 
 /// The configuration keys whose value is a program `git` runs when it reads, diffs, filters,
 /// merges, signs, edits a message, or asks for a credential; the drivers are those of the
-/// attribute `evil`, which [`ATTRIBUTES`] gives every path. Fetching and pushing, which Ocelli
-/// does not do, name more.
+/// attribute `evil`, which [`ATTRIBUTES`] gives every path. A fetch and a push run more, which a
+/// remote names: [`REMOTE_PROGRAMS`].
 pub const PROGRAMS: &[&str] = &[
     "core.fsmonitor",
     "core.pager",
@@ -56,6 +56,14 @@ pub const PROGRAMS: &[&str] = &[
     "gpg.ssh.program",
     "gpg.x509.program",
     "credential.helper",
+];
+
+/// The keys under `remote.<name>` whose value is the program a fetch or a push over the local
+/// transport starts on the remote's side. Each script stands in for the program it replaces and
+/// then runs it, so that a fetch or a push by `git` goes through and runs the hooks after it.
+pub const REMOTE_PROGRAMS: &[(&str, &str)] = &[
+    ("uploadpack", "upload-pack"),
+    ("receivepack", "receive-pack"),
 ];
 
 /// The switches that make `git` run a program it would otherwise leave alone.
@@ -81,9 +89,10 @@ impl Markers {
     }
 }
 
-/// Names a program everywhere [`HOOKS`], [`PROGRAMS`], [`SWITCHES`], and [`ATTRIBUTES`] say, in
-/// the repository at `repo`, with the scripts in `tools`, a directory outside it. Set only once
-/// the repository is built, so that building it with `git` runs none of them.
+/// Names a program everywhere [`HOOKS`], [`PROGRAMS`], [`SWITCHES`], and [`ATTRIBUTES`] say, and
+/// [`REMOTE_PROGRAMS`] for each remote the repository has, in the repository at `repo`, with the
+/// scripts in `tools`, a directory outside it. Set only once the repository is built, so that
+/// building it with `git` runs none of them.
 pub fn set_everywhere(repo: &Path, tools: &Path) -> Markers {
     use std::os::unix::fs::PermissionsExt;
     let markers = tools.join("markers");
@@ -109,6 +118,18 @@ pub fn set_everywhere(repo: &Path, tools: &Path) -> Markers {
         let path = tools.join(key);
         script(&path, key);
         config.set_str(key, path.to_str().unwrap()).unwrap();
+    }
+    let remotes = git2::Repository::open(repo).unwrap().remotes().unwrap();
+    for remote in remotes.iter().flatten() {
+        for (key, program) in REMOTE_PROGRAMS {
+            let key = format!("remote.{remote}.{key}");
+            let path = tools.join(&key);
+            script(&path, &key);
+            let mut body = std::fs::read_to_string(&path).unwrap();
+            body.push_str(&format!("exec git {program} \"$@\"\n"));
+            std::fs::write(&path, body).unwrap();
+            config.set_str(&key, path.to_str().unwrap()).unwrap();
+        }
     }
     for (key, value) in SWITCHES {
         config.set_str(key, value).unwrap();
