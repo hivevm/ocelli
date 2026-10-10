@@ -111,7 +111,7 @@ pub(crate) fn merge(
     let head = repo.head()?.peel_to_commit()?;
     let result = repo.merge_commits(&head, &theirs, None)?;
     nothing_untracked_in_the_way(repo, &files_written(&head.tree()?, &result)?)?;
-    crate::workdir::merge(repo, &annotated, &result)?.map_err(in_the_way)?;
+    crate::workdir::merge(repo, &annotated, &result, their_name)?.map_err(in_the_way)?;
     // libgit2 prepared its own subject; git's goes first, its list of conflicts kept.
     let prepared = repo.path().join("MERGE_MSG");
     let rest: String = std::fs::read_to_string(&prepared)

@@ -6,10 +6,9 @@
 use crate::checkout::named;
 use crate::guard::{NO_IDENTITY, bytes_to_path, nothing_in_progress};
 use anyhow::{Context, Result, bail};
-use git2::build::CheckoutBuilder;
 use git2::{
-    ErrorCode, ObjectType, Oid, Repository, StashApplyOptions, StashFlags, Status, StatusOptions,
-    TreeWalkMode, TreeWalkResult,
+    ErrorCode, ObjectType, Oid, Repository, StashFlags, Status, StatusOptions, TreeWalkMode,
+    TreeWalkResult,
 };
 use std::path::{Path, PathBuf};
 
@@ -272,12 +271,7 @@ fn check_applies(repo: &Repository, index: usize, commit: &str) -> Result<()> {
 pub(crate) fn apply(repo: &mut Repository, index: usize, commit: &str, drop: bool) -> Result<()> {
     stash_as_shown(repo, index, commit)?;
     check_applies(repo, index, commit)?;
-    // A second guard behind the check: an ignored file is never overwritten.
-    let mut checkout = CheckoutBuilder::new();
-    checkout.overwrite_ignored(false);
-    let mut options = StashApplyOptions::new();
-    options.checkout_options(checkout);
-    crate::workdir::stash_apply(repo, index, Oid::from_str(commit)?, &mut options)?;
+    crate::workdir::stash_apply(repo, index, Oid::from_str(commit)?)?;
     if drop {
         // Applied by now: a stash pushed meanwhile moves the entry, which then stays.
         stash_as_shown(repo, index, commit).context("the stash is applied but not dropped")?;

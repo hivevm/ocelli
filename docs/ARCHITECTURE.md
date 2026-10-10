@@ -30,9 +30,9 @@ than anywhere else, and none beats one that has stopped being true.
 Ocelli reads repositories on the local file system through git2, and writes to them through git2
 only what the developer asks for, a tag, a stash, the index, a commit, a branch, a merge, a
 rebase, a cherry-pick, a revert, a reset, and the resolution of their conflicts
-([ADR-0033](adr/0033-writes-what-git-writes.md)). It reaches a remote only when
-the developer fetches, pulls, or pushes, through libgit2's own transports with the credentials of
-the developer's own setup
+([ADR-0033](adr/0033-writes-what-git-writes.md)).
+It reaches a remote only when the developer fetches, pulls, or pushes, through libgit2's own
+transports with the credentials of the developer's own setup
 ([ADR-0035](adr/0035-remotes-through-libgit2-transports.md)),
 and makes no other network request but Gravatar avatars in the desktop application, off until the
 developer turns them on ([ADR-0023](adr/0023-no-egress-hardened-webview.md)). The web interface runs
@@ -91,8 +91,9 @@ golden path and the test pattern an agent copies from are named here.
   `stash.rs`, each checked against the state it names before anything changes by the checks of
   `guard.rs`, the index and the working directory written through `checkout.rs`, every libgit2
   call that writes the working directory made in `workdir.rs` behind one guard against a link in
-  the way, a malformed tree a hostile remote delivered, a conflict libgit2 would write under
-  another name, or a name the file system cannot hold, and a message
+  the way, a malformed tree a hostile remote delivered, or a name the file system cannot hold,
+  and giving a conflict's sides the path-safe labels `git` writes, so libgit2 writes a side
+  beside its path, and a message
   cleaned up by `message.rs` as `git` cleans it up, and returns the commit a write made; a
   commit or an annotated tag is refused where the configuration asks for a signature. A path a
   caller gives, to stage, unstage, resolve, or read a diff, is refused before git2 sees it unless
@@ -100,16 +101,17 @@ golden path and the test pattern an agent copies from are named here.
   path only through `git::index_entry`, since git2's `Index::get_path` panics on some; a write any
   string of which holds a NUL is refused before git2 sees it, and a reference name is checked
   only through `guard::valid_ref_name`, since git2 unwraps both into C strings. Each write
-  does what `git` does for the same command, and where it departs, the one ADR of the writer
-  lists why ([ADR-0033](adr/0033-writes-what-git-writes.md)). A fetch, a pull, which then
-  fast-forwards the checked-out branch, and a push, never by force and where `push.default` sends
-  it, live in `remote.rs` and reach the remote through libgit2's own transports with the SSH agent
-  and the credential helper of the developer's global and system configuration, a helper asked
-  only for a remote named by its domain over HTTPS, and with libgit2's server timeouts set once
-  for the process, the git adapter's one `unsafe` block; a push learns what the remote took from
-  the remote-tracking branch libgit2 moves, or, where it moves none, from the remote's branch
-  fetched again from the address pushed to into a scratch reference under `refs/ocelli/`, which
-  no load and no digest of the refs counts
+  does what `git` does for the same command, and where it departs, the writer's ADRs list why
+  ([ADR-0033](adr/0033-writes-what-git-writes.md), and
+  [ADR-0040](adr/0040-conflict-labels-path-safe.md) for a conflict's labels).
+  A fetch, a pull, which then fast-forwards the checked-out branch, and a push, never by force
+  and where `push.default` sends it, live in `remote.rs` and reach the remote through libgit2's
+  own transports with the SSH agent and the credential helper of the developer's global and
+  system configuration, a helper asked only for a remote named by its domain over HTTPS, and
+  with libgit2's server timeouts set once for the process, the git adapter's one `unsafe`
+  block; a push learns what the remote took from the remote-tracking branch libgit2 moves, or,
+  where it moves none, from the remote's branch fetched again from the address pushed to into a
+  scratch reference under `refs/ocelli/`, which no load and no digest of the refs counts
   ([ADR-0035](adr/0035-remotes-through-libgit2-transports.md)).
   The refs name the default remote; for the remote server's turns, `refs.rs` also reads a
   repository's resolved common directory (`common_dir`) and a digest of where its refs point

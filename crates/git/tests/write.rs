@@ -2418,7 +2418,7 @@ fn a_conflict_libgit2_writes_through_a_link_or_beside_its_path_is_refused() {
     refused(
         d,
         &merge,
-        "c~HEAD is a link where libgit2 would write a side",
+        "c~HEAD is in the way of a side of the conflict on c",
     );
     kept(&outside);
 
@@ -2781,19 +2781,301 @@ fn a_committed_link_a_write_turns_into_a_directory_is_replaced_not_written_throu
 fn names_one_where_case_is_not_told_apart_are_refused_where_the_repository_says_so() {
     let scratch = with_file("ignorecase");
     let d = &scratch.0;
-    git(d, &["switch", "--quiet", "-c", "side"]);
-    write_file(d, "a", "lower\n");
-    write_file(d, "A", "upper\n");
-    let side = commit_all(d, "a and A");
-    git(d, &["switch", "--quiet", "main"]);
-    git(d, &["config", "core.ignorecase", "true"]);
+    let head = git(d, &["rev-parse", "HEAD"]);
+    // The tree is built by hand: a working tree on a case-insensitive file system, APFS on macOS
+    // among them, cannot hold both `a` and `A`, so `git add` would stage only one of them.
+    let lower = git_fed(d, &["hash-object", "-w", "--stdin"], b"lower\n");
+    let upper = git_fed(d, &["hash-object", "-w", "--stdin"], b"upper\n");
+    let f = entry_id(d, &head, "f");
+    let tree = raw_tree(
+        d,
+        &[
+            ("100644", "A", &upper),
+            ("100644", "a", &lower),
+            ("100644", "f", &f),
+        ],
+    );
+    let side = git(d, &["commit-tree", &tree, "-p", &head, "-m", "a and A"]);
+    git(d, &["branch", "side", &side]);
     let switch = Write::SwitchBranch {
         name: "side".into(),
         tip: side.clone(),
     };
+    git(d, &["config", "core.ignorecase", "true"]);
     refused(d, &switch, "one name where case is not told apart");
-    // Where case is told apart, both are written.
+
+    // Where the file system tells case apart and the repository does not fold it, both are
+    // written. On a file system that does not, the guard folds regardless, so the write stays
+    // refused; and the two could not both land anyway.
     git(d, &["config", "core.ignorecase", "false"]);
-    GitWriter.write(d, &switch).unwrap();
-    assert_eq!(std::fs::read_to_string(d.join("A")).unwrap(), "upper\n");
+    let probe = scratch.0.join("probe-CF");
+    std::fs::write(&probe, "x").unwrap();
+    let case_sensitive = !scratch.0.join("probe-cf").exists();
+    std::fs::remove_file(&probe).unwrap();
+    if case_sensitive && cfg!(not(any(windows, target_os = "macos"))) {
+        GitWriter.write(d, &switch).unwrap();
+        assert_eq!(std::fs::read_to_string(d.join("A")).unwrap(), "upper\n");
+        assert_eq!(std::fs::read_to_string(d.join("a")).unwrap(), "lower\n");
+    } else {
+        refused(d, &switch, "one name where case is not told apart");
+    }
+}
+
+#[test]
+// Verifies: ADR-0033, ADR-0040, ADR-0039, Q-6
+fn a_conflict_side_is_written_under_the_commit_id_not_its_subject() {
+    // libgit2 names the side of a rename collision `<path>~<label>`, and left to itself takes
+    // the label from the commit subject, which can hold `/` and `..`: a crafted subject would
+    // write a new file anywhere writable. The label is the abbreviated commit id instead, as
+    // `git` writes it without the subject (ADR-0040).
+    let (scratch, outside) = beside_outside("label-traversal");
+    let d = &scratch.0;
+    write_file(d, "a", &"alpha line\n".repeat(20));
+    write_file(d, "b", &"beta line\n".repeat(20));
+    commit_all(d, "a and b");
+    git(d, &["switch", "--quiet", "-c", "side"]);
+    git(d, &["mv", "b", "c"]);
+    // The subject is a path that climbs out of the repository into the directory beside it.
+    let traversal = format!(
+        "../{}/pwned",
+        outside.0.file_name().unwrap().to_str().unwrap()
+    );
+    git(d, &["commit", "--quiet", "-m", &traversal]);
+    let side = git(d, &["rev-parse", "HEAD"]);
+    let short = git(d, &["rev-parse", "--short", "HEAD"]);
+    git(d, &["switch", "--quiet", "main"]);
+    git(d, &["mv", "a", "c"]);
+    let main = commit_all(d, "a to c");
+    GitWriter
+        .write(
+            d,
+            &Write::CherryPick {
+                branch: "main".into(),
+                tip: main,
+                commit: side,
+            },
+        )
+        .unwrap();
+    // Nothing climbed out, and the side stands beside its path, under the commit's id.
+    assert!(!outside.0.join("pwned").exists(), "written outside");
+    assert_eq!(
+        std::fs::read_dir(&outside.0).unwrap().count(),
+        1,
+        "only the secret is outside"
+    );
+    assert!(
+        d.join(format!("c~{short}")).exists(),
+        "the side under the id"
+    );
+    assert!(d.join("c~HEAD").exists(), "ours under HEAD");
+}
+
+#[test]
+// Verifies: ADR-0033, ADR-0039
+fn a_rebase_replaying_a_root_commit_applies_it_without_a_false_refusal() {
+    // A root commit has no parent: libgit2's step merges the empty tree, HEAD and the commit,
+    // which the guard reads the same way, rather than a plain diff that would miss a conflict.
+    let (scratch, outside) = beside_outside("root-rebase");
+    let d = &scratch.0;
+    write_file(d, "keep", "base\n");
+    commit_all(d, "base-main");
+    let main = git(d, &["rev-parse", "HEAD"]);
+    git(d, &["switch", "--quiet", "--orphan", "other"]);
+    link(&outside.0, &d.join("a"));
+    git(d, &["add", "a"]);
+    git(d, &["commit", "--quiet", "-m", "root link a"]);
+    let other = git(d, &["rev-parse", "HEAD"]);
+    GitWriter
+        .write(
+            d,
+            &Write::Rebase {
+                branch: "other".into(),
+                tip: other,
+                onto: main,
+            },
+        )
+        .unwrap();
+    assert_eq!(git(d, &["status", "--porcelain"]), "", "applied cleanly");
+    assert_eq!(
+        std::fs::read_to_string(outside.0.join("f")).unwrap(),
+        "SECRET\n",
+        "nothing written through the committed link",
+    );
+    assert!(
+        d.join("a")
+            .symlink_metadata()
+            .unwrap()
+            .file_type()
+            .is_symlink(),
+        "the commit's own link is written as a link",
+    );
+}
+
+#[test]
+// Verifies: ADR-0033, ADR-0040, Q-6
+fn a_merge_writing_a_conflict_through_a_lock_link_is_refused() {
+    // libgit2 creates `<path>.lock` exclusively to write a conflicted file's merged content: a
+    // link there is not followed, but stops the merge half done, so it is refused first.
+    let (scratch, outside) = beside_outside("lock-link");
+    let d = &scratch.0;
+    write_file(d, "x", "base\n");
+    commit_all(d, "x base");
+    git(d, &["switch", "--quiet", "-c", "side"]);
+    write_file(d, "x", "side\n");
+    let side = commit_all(d, "x side");
+    git(d, &["switch", "--quiet", "main"]);
+    write_file(d, "x", "main\n");
+    let main = commit_all(d, "x main");
+    link(&outside.0.join("planted"), &d.join("x.lock"));
+    let merge = Write::Merge {
+        branch: "main".into(),
+        tip: main,
+        commit: side,
+        name: None,
+    };
+    refused(
+        d,
+        &merge,
+        "x.lock is in the way of a side of the conflict on x",
+    );
+    kept(&outside);
+}
+
+#[test]
+// Verifies: ADR-0033, ADR-0040
+fn a_rebase_labels_a_stopped_step_head_and_its_own_commit() {
+    // libgit2 reads a rebase's labels again at each step, after the call that opened it
+    // returned: the options must outlive the rebase, or the markers hold freed memory. Each step
+    // is labelled `HEAD` and its own abbreviated commit, as `git` writes them.
+    let scratch = with_file("rebase-markers");
+    let d = &scratch.0;
+    git(d, &["switch", "--quiet", "-c", "side"]);
+    write_file(d, "f", "side\n");
+    let side = commit_all(d, "side");
+    git(d, &["switch", "--quiet", "main"]);
+    write_file(d, "f", "main\n");
+    let main = commit_all(d, "main");
+    let short = git(d, &["rev-parse", "--short", &main]);
+    let stopped = GitWriter
+        .write(
+            d,
+            &Write::Rebase {
+                branch: "main".into(),
+                tip: main,
+                onto: side,
+            },
+        )
+        .unwrap();
+    assert_eq!(stopped, None, "the rebase stopped on f");
+    let f = std::fs::read_to_string(d.join("f")).unwrap();
+    assert!(f.contains("<<<<<<< HEAD\n"), "{f:?}");
+    assert!(f.contains(&format!(">>>>>>> {short}\n")), "{f:?}");
+}
+
+/// A repository beside a directory outside it where `main` and `side` each rename another file
+/// to `c`, so that a merge of `side` writes each side of the collision beside `c`, under `c~`
+/// and a label: (repository, outside, main, side).
+fn rename_collision(name: &str) -> (Scratch, Scratch, String, String) {
+    let (scratch, outside) = beside_outside(name);
+    let d = &scratch.0;
+    write_file(d, "a", &"alpha line\n".repeat(20));
+    write_file(d, "b", &"beta line\n".repeat(20));
+    commit_all(d, "a and b");
+    git(d, &["switch", "--quiet", "-c", "side"]);
+    git(d, &["mv", "b", "c"]);
+    let side = commit_all(d, "b to c");
+    git(d, &["switch", "--quiet", "main"]);
+    git(d, &["mv", "a", "c"]);
+    let main = commit_all(d, "a to c");
+    (scratch, outside, main, side)
+}
+
+#[test]
+// Verifies: ADR-0033, ADR-0040, ADR-0039, Q-6
+fn a_link_beside_a_conflict_is_found_as_the_file_system_folds_its_name() {
+    // Where case is not told apart, `C~HEAD` is the `c~HEAD` libgit2 writes a side of `c` to.
+    let (scratch, outside, main, side) = rename_collision("folded-sibling");
+    let d = &scratch.0;
+    git(d, &["config", "core.ignorecase", "true"]);
+    link(&outside.0.join("planted"), &d.join("C~HEAD"));
+    let merge = Write::Merge {
+        branch: "main".into(),
+        tip: main,
+        commit: side,
+        name: None,
+    };
+    refused(
+        d,
+        &merge,
+        "C~HEAD is in the way of a side of the conflict on c",
+    );
+    kept(&outside);
+}
+
+#[test]
+// Verifies: ADR-0033, ADR-0040, Q-6
+fn anything_at_a_conflicted_files_lock_refuses_the_write_before_it_stops_half_done() {
+    // libgit2 creates `<path>.lock` exclusively to write the merged side: a file already there
+    // fails it with the merge half done, so a plain file there refuses the write too.
+    let scratch = with_file("lock-file");
+    let d = &scratch.0;
+    write_file(d, "x", "base\n");
+    commit_all(d, "x base");
+    git(d, &["switch", "--quiet", "-c", "side"]);
+    write_file(d, "x", "side\n");
+    let side = commit_all(d, "x side");
+    git(d, &["switch", "--quiet", "main"]);
+    write_file(d, "x", "main\n");
+    let main = commit_all(d, "x main");
+    write_file(d, "x.lock", "another program's\n");
+    let merge = Write::Merge {
+        branch: "main".into(),
+        tip: main,
+        commit: side,
+        name: None,
+    };
+    refused(
+        d,
+        &merge,
+        "x.lock is in the way of a side of the conflict on x",
+    );
+}
+
+#[test]
+// Verifies: ADR-0033, ADR-0040, G-5
+fn a_criss_cross_merge_with_two_merge_bases_merges_as_git_merges_it() {
+    // Two branches each merged into the other leave two merge bases; the writer reads every one,
+    // and merges the tips as `git` does.
+    let scratch = with_file("criss-cross");
+    let d = &scratch.0;
+    git(d, &["switch", "--quiet", "-c", "side"]);
+    write_file(d, "s", "side\n");
+    let side_one = commit_all(d, "side one");
+    git(d, &["switch", "--quiet", "main"]);
+    write_file(d, "m", "main\n");
+    let main_one = commit_all(d, "main one");
+    git(d, &["merge", "--quiet", "--no-edit", &side_one]);
+    git(d, &["switch", "--quiet", "side"]);
+    git(d, &["merge", "--quiet", "--no-edit", &main_one]);
+    write_file(d, "s2", "side two\n");
+    commit_all(d, "side two");
+    git(d, &["switch", "--quiet", "main"]);
+    write_file(d, "m2", "main two\n");
+    commit_all(d, "main two");
+    let bases = git(d, &["merge-base", "--all", "main", "side"]);
+    assert_eq!(bases.lines().count(), 2, "a criss-cross: {bases}");
+    let other = twin(&scratch, "criss-cross-git");
+    let merge = Write::Merge {
+        branch: "main".into(),
+        tip: git(d, &["rev-parse", "main"]),
+        commit: git(d, &["rev-parse", "side"]),
+        name: Some("side".into()),
+    };
+    GitWriter.write(d, &merge).unwrap();
+    git(&other.0, &["merge", "--quiet", "--no-edit", "side"]);
+    assert_eq!(
+        git(d, &["rev-parse", "HEAD^{tree}"]),
+        git(&other.0, &["rev-parse", "HEAD^{tree}"]),
+        "the merge's tree is git's"
+    );
 }
