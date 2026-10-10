@@ -1,6 +1,8 @@
 # Ocelli — View and Edit Git Repositories
 
-[![Checks](https://github.com/mbrigl/git-viewer/actions/workflows/checks.yml/badge.svg)](https://github.com/mbrigl/git-viewer/actions/workflows/checks.yml)
+[![Checks](https://github.com/hivevm/ocelli/actions/workflows/checks.yml/badge.svg)](https://github.com/hivevm/ocelli/actions/workflows/checks.yml)
+[![Release](https://img.shields.io/github/v/release/hivevm/ocelli?include_prereleases&sort=semver)](https://github.com/hivevm/ocelli/releases)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
 **Ocelli** is named after the three simple eyes on top of a bee's head, with which it reads
 light and the horizon at a glance. Ocelli gives a Git repository the same: a commit graph that
@@ -20,6 +22,11 @@ Git history is a directed acyclic graph, but the usual tools flatten it into a l
 ASCII art that becomes unreadable once several branches run in parallel. Ocelli draws that graph
 properly: time runs downwards, each branch keeps its own lane, and merges are drawn as unambiguous
 orthogonal edges, on the desktop and in the terminal.
+
+![Ocelli desktop application: sidebar, commit graph, and commit detail](docs/screenshots/desktop.png)
+
+![ocelli-cli in the terminal: the same layout drawn with box-drawing characters](docs/screenshots/cli.png)
+
 ```
  ● abc1234   main   Fix login bug                    Alice      2024-01-12 14:30
  ●─┐ def567         Merge feature/oauth into main    Bob        2024-01-11 09:15
@@ -271,9 +278,9 @@ folder is reopened in the container.
 
 ## Coding Agents
 
-This Dev Container preinstalls the **Claude Code** and **Mistral Vibe** VS Code extensions (see
+This Dev Container preinstalls the **Claude Code** VS Code extension (see
 [`.devcontainer/devcontainer.json`](.devcontainer/devcontainer.json)); other agents (OpenAI Codex,
-Cursor, OpenCode, GitHub Copilot) work too once you add them.
+Cursor, OpenCode, GitHub Copilot, Mistral Vibe) work too once you add them.
 
 The rules every agent follows live in [`AGENTS.md`](AGENTS.md); that there is exactly one such file
 is decided in [ADR-0001](docs/adr/0001-agent-governance-model.md). An agent that cannot read it
