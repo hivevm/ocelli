@@ -21,7 +21,7 @@ mod browser;
 #[path = "../../git/tests/support/mod.rs"]
 mod support;
 
-use browser::{Pair, Tab, Tree, open_and_load, writing_on};
+use browser::{Pair, Tab, Tree, open_and_load, rev, writing_on};
 use git2::ConfigLevel;
 use ocelli_core::port::Write;
 use serde_json::{Value, json};
@@ -58,11 +58,6 @@ fn developer() {
             unsafe { git2::opts::set_search_path(level, &global) }.unwrap();
         }
     });
-}
-
-/// The commit `name` names in `dir`.
-fn rev(dir: &Path, name: &str) -> String {
-    git(dir, &["rev-parse", &format!("{name}^{{commit}}")])
 }
 
 /// Commits a change to `file` in `dir` with `git`.

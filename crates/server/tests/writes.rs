@@ -11,12 +11,15 @@
 #![cfg(unix)]
 
 mod browser;
+#[path = "../../git/tests/shown/mod.rs"]
+mod shown;
 #[path = "../../git/tests/support/mod.rs"]
 mod support;
 
-use browser::Pair;
+use browser::{Pair, rev, three_commits, with_changes};
 use ocelli_core::port::{Conflict, Operation, ResetMode, Take, Write};
-use serde_json::Value;
+use serde_json::{Value, json};
+use shown::{stage_in, unstage_in};
 use std::path::Path;
 use support::{git, write_file};
 
@@ -58,9 +61,58 @@ fn history(root: &Path) {
     git(root, &["commit", "--quiet", "-am", "three"]);
 }
 
-/// The commit `name` names in `dir`.
-fn rev(dir: &Path, name: &str) -> String {
-    git(dir, &["rev-parse", &format!("{name}^{{commit}}")])
+#[tokio::test]
+// Verifies: ADR-0037, ADR-0033, G-8, G-4
+async fn with_allow_writes_staging_unstaging_and_committing_leave_the_repository_as_the_desktop_does()
+ {
+    let mut pair = Pair::new("staging", |root| {
+        three_commits(root);
+        with_changes(root);
+    })
+    .await;
+    let head = rev(&pair.root, "HEAD");
+    // Each write as the web interface makes it from what it shows now.
+    let writes: [fn(&Path) -> Write; 3] = [
+        |root| stage_in(root, "f"),
+        |root| stage_in(root, "new"),
+        |root| unstage_in(root, "new"),
+    ];
+    for write in writes {
+        assert_eq!(pair.alike(write, false).await, Ok(Value::Null));
+    }
+    let commit = move |_: &Path| Write::Commit {
+        message: "from the browser".into(),
+        head: Some(head.clone()),
+    };
+    let (here, there) = pair.answers(commit, false).await;
+    // Each side's commit answers the commit it made.
+    assert_eq!(here, Ok(json!(rev(&pair.root, "HEAD"))));
+    assert_eq!(there, Ok(json!(rev(&pair.other, "HEAD"))));
+    let there = there.unwrap().as_str().unwrap().to_string();
+    // As the user the server runs as, with the identity the repository's configuration names.
+    assert_eq!(
+        git(&pair.root, &["log", "-1", "--format=%an <%ae>"]),
+        "Ada <ada@example.invalid>"
+    );
+    // The load after the write selects the commit it made, as the desktop's does (ADR-0033).
+    let here = here.unwrap();
+    pair.tab.events.clear();
+    let reload = json!({ "path": ".", "select": here });
+    assert_eq!(pair.tab.invoke("open_repo", reload).await, Ok(Value::Null));
+    let grew = pair
+        .tab
+        .until("history-grew", |p| !p["select"].is_null())
+        .await;
+    assert_eq!(
+        grew["select"],
+        pair.desktop.reload(&pair.other, &there).await
+    );
+    let selected = pair
+        .tab
+        .invoke("select_row", json!({ "row": grew["select"] }))
+        .await
+        .unwrap();
+    assert_eq!(selected["node"]["sha"], here);
 }
 
 #[tokio::test]
