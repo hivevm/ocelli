@@ -19,6 +19,13 @@ to invent.
 - **Commit graph** — the commits of a repository drawn as nodes, each joined by an edge to its
   parents, with every branch and tag shown.
   _Avoid:_ tree, history graph, log graph.
+- **Connection token** — the random secret the remote server prints at each start, in a URL,
+  which a browser's first request exchanges for a session cookie.
+  _Avoid:_ password, API key.
+- **Confined** — said of the git adapter once the remote server has bound the process to its
+  server root: every open takes the folder it is given, never searching upwards, and nothing of
+  the repository may lie outside the root.
+  _Avoid:_ sandboxed, jailed.
 - **Conflict** — a file the index holds in more than one stage after an operation in progress
   stopped on it; resolved by taking ours, taking theirs, or as the developer edited it.
   _Avoid:_ clash, collision.
@@ -48,6 +55,9 @@ to invent.
   branch, offered on a commit of the commit graph (G-5); one stopped on a conflict is an operation
   in progress.
   _Avoid:_ action.
+- **Host** — what serves the web interface its commands and events: the desktop host or the
+  remote server; a `Host` is one window's or tab's share of it.
+  _Avoid:_ backend.
 - **Lane** — the column of the commit graph in which a branch is drawn.
   _Avoid:_ column, rail.
 - **Lane colour** — the colour a lane is drawn in, taken from one theme-independent list so a
@@ -87,6 +97,10 @@ to invent.
 - **Remote server** — the part of Ocelli that runs on the machine holding a repository and serves
   the web interface to the developer's browser, as VS Code's remote development does.
   _Avoid:_ backend, daemon, agent.
+- **Server root** — the folder the remote server is started with; a browser opens only the
+  repositories whose files all lie below it, and reads nothing outside it, nor writes there, a
+  remote on the machine included.
+  _Avoid:_ workspace, base directory.
 - **Stash node** — the node of the commit graph that stands for one entry of the stash, joined to
   the commit it was made on, and carrying its place `n` of `stash@{n}`.
   _Avoid:_ stash commit, stash entry node.
@@ -100,6 +114,9 @@ to invent.
   after it whether it was written or refused, and a fetch, a pull's fetch included, can be stopped
   while it runs.
   _Avoid:_ sync, network write, a write that takes long.
+- **Turn** — a repository's turn to be written to by one of the remote server's tabs; a write of
+  another tab to it waits until it is given back.
+  _Avoid:_ lock, mutex.
 - **Upstream** — the remote branch a local branch follows, which a pull fetches and fast-forwards
   to and a push sends to; set where the branch tracks one.
   _Avoid:_ tracking branch (that is the local branch), remote counterpart.

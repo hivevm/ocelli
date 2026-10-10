@@ -24,7 +24,9 @@ use ocelli_core::port::{RepositoryWriter, ResetMode, Write};
 use ocelli_git::GitWriter;
 use std::path::Path;
 use std::process::Command;
-use support::{Scratch, Snapshot, git, git_output, snapshot, snapshots_as_twins, write_file};
+use support::{
+    Origin, Scratch, Snapshot, git, git_output, snapshot, snapshots_as_twins, write_file,
+};
 
 /// Copies the directory `from`, a repository and the linked working tree beside it where there
 /// is one, to `to`, and points the two at each other again.
@@ -911,6 +913,7 @@ fn run_state(root: &Path, origin: &Path, base: &Base, index: usize) -> Verdicts 
     copy(origin, &dir);
     make(&dir.join("repo"));
     let before = snapshot(&dir.join("repo"));
+    let parted = Origin::of(&dir.join("repo"));
     let shown = shown(base, &dir.join("repo"));
     let mut verdicts = Verdicts {
         failures: Vec::new(),
@@ -933,6 +936,7 @@ fn run_state(root: &Path, origin: &Path, base: &Base, index: usize) -> Verdicts 
         let alike = snapshots_as_twins(
             (&git_repo, by_git.clone()),
             (&ocelli_repo, by_ocelli.clone()),
+            &parted,
         );
         let outcome = Outcome {
             before: before.clone(),

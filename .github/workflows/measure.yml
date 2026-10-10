@@ -84,5 +84,10 @@ jobs:
           persist-credentials: false
       - name: Set up the pinned Rust toolchain
         run: rustup show active-toolchain
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+      - name: Build the web interface the remote server's tests serve
+        run: |
+          bun install --frozen-lockfile
+          bun run --cwd src-web build
       - name: Change each guard and expect the suite to fail
         run: bash scripts/measure-mutants.sh

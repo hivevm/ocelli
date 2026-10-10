@@ -12,20 +12,24 @@
 //! A single unreadable ref must not blank the whole panel, so each loader skips
 //! entries it cannot resolve instead of failing the read. Only opening the
 //! repository itself is fatal, and that fails the history load as well.
+//!
+//! For the remote server's turns it also reads which repository a folder belongs to, by its
+//! common directory, and a digest of where its refs point (ADR-0037).
 
 use anyhow::Result;
-use git2::{BranchType, ObjectType, Repository, RepositoryState};
+use git2::{BranchType, ObjectType, Repository, RepositoryOpenFlags, RepositoryState};
 use ocelli_core::model::{
     Conflict, InProgress, LocalBranch, Operation, ParentKind, ParentRepo, Remote, RemoteBranch,
     RepoRefs, Submodule, SubmoduleState, Tag, Worktree,
 };
-use std::path::Path;
+use std::ffi::OsStr;
+use std::path::{Path, PathBuf};
 
 /// The tip of the main line (ADR-0032): the commit of the local branch `origin/HEAD` names, else
 /// of `main`, else of `master`, else the checked-out commit; none where `HEAD` does not resolve
 /// either. A remote branch alone does not make a main line.
 pub fn load_main_tip(repo_path: &Path) -> Result<Option<String>> {
-    let repo = Repository::discover(repo_path)?;
+    let repo = crate::confine::open(repo_path)?;
     let local = |name: &str| {
         repo.find_branch(name, BranchType::Local)
             .ok()
@@ -56,7 +60,7 @@ pub fn load_main_tip(repo_path: &Path) -> Result<Option<String>> {
 
 /// Loads every ref category the sidebar shows, in one pass over the repository.
 pub fn load_repo_refs(repo_path: &Path) -> Result<RepoRefs> {
-    let repo = Repository::discover(repo_path)?;
+    let repo = crate::confine::open(repo_path)?;
     let remote_names = remote_names(&repo);
 
     Ok(RepoRefs {
@@ -326,7 +330,9 @@ fn load_worktrees(repo: &Repository) -> Vec<Worktree> {
             Err(_) => (None, String::new()),
         };
 
-        let path = worktree.path().to_path_buf();
+        let Some(path) = crate::guard::worktree_path(repo, name, &worktree) else {
+            continue;
+        };
         let is_current = current_workdir
             .as_deref()
             .is_some_and(|current| same_dir(current, &path));
@@ -364,16 +370,12 @@ fn submodule_state(pinned: Option<&str>, checked_out: Option<&str>) -> Submodule
 /// repository's, so none of them is a commit the graph could reveal — the path
 /// is what the sidebar acts on (ADR-0027).
 fn load_submodules(repo: &Repository) -> Vec<Submodule> {
-    let Ok(submodules) = repo.submodules() else {
-        return Vec::new();
-    };
     let Some(workdir) = repo.workdir() else {
         return Vec::new();
     };
 
     let mut out = Vec::new();
-    for submodule in submodules {
-        let path = submodule.path().to_path_buf();
+    for (submodule, path) in crate::guard::submodules(repo) {
         let name = submodule
             .name()
             .map(str::to_string)
@@ -381,7 +383,18 @@ fn load_submodules(repo: &Repository) -> Vec<Submodule> {
 
         // `workdir_id` is only set once the submodule has a working copy; an
         // absent one is exactly what "uninitialized" means.
-        let checked_out = submodule.workdir_id().map(|oid| oid.to_string());
+        // Confined, a submodule is opened only where it lies below the root (ADR-0039); one
+        // that reaches out of it reads as one without a working copy, a row without its switch.
+        let full = workdir.join(&path);
+        let readable = match crate::confine::root_of(&full) {
+            Ok(None) => true,
+            Ok(Some(root)) => crate::confine::lies_below(&full, &root),
+            Err(()) => false,
+        };
+        let checked_out = readable
+            .then(|| submodule.workdir_id())
+            .flatten()
+            .map(|oid| oid.to_string());
         let pinned = submodule.head_id().map(|oid| oid.to_string());
         let state = submodule_state(pinned.as_deref(), checked_out.as_deref());
 
@@ -430,14 +443,37 @@ fn find_parent(repo: &Repository) -> Option<ParentRepo> {
 
     let workdir = repo.workdir()?;
     let above = workdir.parent()?;
-    let candidate = Repository::discover(above).ok()?;
+    let candidate = match crate::confine::root_of(workdir).ok()? {
+        None => Repository::discover(above).ok()?,
+        // Confined, the search upwards stops at the root, and a superproject that reaches out of
+        // it is none (ADR-0039).
+        Some(root) => {
+            let root = root.as_path();
+            // The folders above, links resolved, walked up to the root.
+            let above = above.canonicalize().ok()?;
+            let found = above
+                .ancestors()
+                .take_while(|dir| crate::confine::below(dir, root))
+                .find_map(|dir| {
+                    Repository::open_ext(
+                        dir,
+                        git2::RepositoryOpenFlags::NO_SEARCH,
+                        std::iter::empty::<&std::ffi::OsStr>(),
+                    )
+                    .ok()
+                })?;
+            let found_workdir = found.workdir()?.to_path_buf();
+            if !crate::confine::lies_below(&found_workdir, root) {
+                return None;
+            }
+            found
+        }
+    };
     let candidate_workdir = candidate.workdir()?.to_path_buf();
 
-    let configures_us = candidate
-        .submodules()
-        .ok()?
+    let configures_us = crate::guard::submodules(&candidate)
         .iter()
-        .any(|submodule| same_dir(&candidate_workdir.join(submodule.path()), workdir));
+        .any(|(_, path)| same_dir(&candidate_workdir.join(path), workdir));
 
     configures_us.then(|| ParentRepo {
         kind: ParentKind::Superproject,
@@ -526,6 +562,58 @@ pub(crate) fn conflicts_of(index: &git2::Index) -> Vec<Conflict> {
         .collect();
     out.sort_by(|a, b| a.path.cmp(&b.path));
     out
+}
+
+/// The common directory of the repository at `path`, opened without searching upwards, resolved,
+/// links included: one for a working directory and every worktree that belongs to it, which the
+/// remote server orders its tabs' writes by (ADR-0037). `None` where no repository opens there or
+/// its common directory does not resolve.
+pub fn common_dir(path: &Path) -> Option<PathBuf> {
+    let repo = Repository::open_ext(
+        path,
+        RepositoryOpenFlags::NO_SEARCH,
+        std::iter::empty::<&OsStr>(),
+    )
+    .ok()?;
+    repo.commondir().canonicalize().ok()
+}
+
+/// A digest of where `HEAD` and every ref of the repository at `path` point, opened without
+/// searching upwards: the remote server compares the digest taken before a write with the one after, to
+/// tell its other tabs on the repository to load again where a refused write moved a ref, as a
+/// pull's fetch does before its fast-forward is refused (ADR-0037). `None` where no repository
+/// opens there or its refs cannot be listed.
+pub fn refs_digest(path: &Path) -> Option<u64> {
+    use std::hash::{Hash, Hasher};
+    let repo = Repository::open_ext(
+        path,
+        RepositoryOpenFlags::NO_SEARCH,
+        std::iter::empty::<&OsStr>(),
+    )
+    .ok()?;
+    let mut digest = std::collections::hash_map::DefaultHasher::new();
+    let mut each = |reference: &git2::Reference| {
+        reference.name_bytes().hash(&mut digest);
+        reference
+            .target()
+            .map(|oid| oid.as_bytes().to_vec())
+            .hash(&mut digest);
+        reference.symbolic_target_bytes().hash(&mut digest);
+    };
+    if let Ok(head) = repo.find_reference("HEAD") {
+        each(&head);
+    }
+    for reference in repo.references().ok()? {
+        let reference = reference.ok()?;
+        // Ocelli's own scratch references come and go with a push's read-back, moving nothing.
+        if !reference
+            .name_bytes()
+            .starts_with(crate::remote::OWN_REFS.as_bytes())
+        {
+            each(&reference);
+        }
+    }
+    Some(digest.finish())
 }
 
 #[cfg(test)]

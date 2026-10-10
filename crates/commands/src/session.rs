@@ -1,4 +1,5 @@
-//! The history of the repository open in the desktop application, kept in the host (ADR-0031).
+//! The history of the repository a host of the web interface holds open, kept in the host
+//! (ADR-0031).
 //! A load lays its chunks out on a thread of its own and appends them here; the web interface
 //! reads the window of rows it draws, searches, and selects through commands, so it never holds
 //! more than the rows on screen. Every load is a generation: a chunk of an older generation is

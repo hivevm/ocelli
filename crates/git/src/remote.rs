@@ -18,8 +18,9 @@ pub(crate) fn fetch(
     let mut remote = repo
         .find_remote(name)
         .with_context(|| format!("there is no remote named '{name}' any more"))?;
-    let url = remote.url().unwrap_or_default().to_string();
-    let transfer = Transfer::new("Fetching", name, progress);
+    let url = address(remote.url_bytes(), name)?;
+    crate::confine::remote_within_root(repo.path(), name, &url)?;
+    let transfer = Transfer::new("Fetching", name, &url, progress)?;
     let mut options = git2::FetchOptions::new();
     options.remote_callbacks(transfer.callbacks());
     let fetched = remote.fetch(&[] as &[&str], Some(&mut options), None);
@@ -42,19 +43,55 @@ struct Transfer<'p> {
     /// The `known_hosts` that revoked the server's key, where one did: libssh2 replaces the
     /// message of a refusal with its own, so the reason is kept here.
     revoked: std::cell::RefCell<Option<String>>,
+    /// Whether the server may be an SSH one, whose host key is checked.
+    checks_host_key: bool,
+    /// The last of what the server sent on its side band, hook output among it, as it came.
+    told: std::cell::RefCell<Vec<u8>>,
 }
 
+/// The most of the side band a transfer keeps, the end of it.
+const TOLD_KEPT: usize = 4096;
+
 impl<'p> Transfer<'p> {
-    fn new(doing: &'static str, name: &str, progress: &'p mut dyn FnMut(&str) -> bool) -> Self {
+    /// A transfer with the remote `name` at `url`. git2 unwraps the host it hands the
+    /// certificate check as UTF-8, and libgit2 percent-decodes the host of an `ssh://` address,
+    /// though not of one written as scp writes it: an `ssh://` address whose host decodes to
+    /// bytes that are not UTF-8 is refused. An http or https server, whose redirect could name
+    /// any host, is not given the check, which has nothing to add there; SSH has no redirect.
+    fn new(
+        doing: &'static str,
+        name: &str,
+        url: &str,
+        progress: &'p mut dyn FnMut(&str) -> bool,
+    ) -> Result<Self> {
+        let lower = url.to_ascii_lowercase();
+        let checks_host_key = !lower.starts_with("https://") && !lower.starts_with("http://");
+        if checks_host_key && !ssh_host_decodes_to_utf8(url) {
+            bail!(
+                "the host in the address of {name} decodes to bytes that are not UTF-8, which \
+                 Ocelli does not take: use git"
+            );
+        }
         set_server_timeouts();
-        Self {
+        Ok(Self {
             doing,
             name: name.to_string(),
             progress: std::cell::RefCell::new(progress),
             cancelled: std::cell::Cell::new(false),
             tried: Default::default(),
             revoked: Default::default(),
-        }
+            checks_host_key,
+            told: Default::default(),
+        })
+    }
+
+    /// The last lines the server sent on its side band, read lossily, escape sequences, control
+    /// characters, and invisible formatting characters taken out, at most a few and a few
+    /// hundred characters; none where it sent nothing.
+    fn told(&self) -> Option<String> {
+        let told = self.told.borrow();
+        let kept = cleaned(&String::from_utf8_lossy(&told));
+        (!kept.is_empty()).then_some(kept)
     }
 
     /// Tells the developer how far the transfer has come; false once they stopped it.
@@ -75,21 +112,18 @@ impl<'p> Transfer<'p> {
         });
         // libgit2 checks an SSH host key against the developer's known_hosts after this; a key
         // that a revoked line lists, which libssh2 does not read, is refused first (ADR-0035).
-        callbacks.certificate_check(|cert, host| {
-            if let Some(key) = cert.as_hostkey().and_then(|k| k.hostkey()) {
-                let files = known_hosts_files();
-                if let Some(file) = files.iter().find(|(_, text)| revoked_in(text, key)) {
-                    *self.revoked.borrow_mut() = Some(file.0.clone());
-                    return Err(git2::Error::new(
-                        ErrorCode::Certificate,
-                        git2::ErrorClass::Ssh,
-                        format!("{host}'s host key is revoked in {}", file.0),
-                    ));
-                }
-            }
-            Ok(git2::CertificateCheckStatus::CertificatePassthrough)
+        if self.checks_host_key {
+            self.check_host_key(&mut callbacks);
+        }
+        // git2 hands the side band over as bytes, unread.
+        callbacks.sideband_progress(|text| {
+            let mut told = self.told.borrow_mut();
+            told.extend_from_slice(text);
+            let over = told.len().saturating_sub(TOLD_KEPT);
+            told.drain(..over);
+            drop(told);
+            self.go_on("the server is preparing")
         });
-        callbacks.sideband_progress(|_| self.go_on("the server is preparing"));
         callbacks.transfer_progress(|stats| {
             self.go_on(&format!(
                 "{} of {} objects",
@@ -105,6 +139,29 @@ impl<'p> Transfer<'p> {
             ));
         });
         callbacks
+    }
+
+    /// Refuses an SSH host key that a revoked line of the developer's `known_hosts` lists.
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "only for an address whose host libgit2 decodes to UTF-8, and never for an http \
+                  server, whose redirect could name any host"
+    )]
+    fn check_host_key<'s>(&'s self, callbacks: &mut git2::RemoteCallbacks<'s>) {
+        callbacks.certificate_check(|cert, host| {
+            if let Some(key) = cert.as_hostkey().and_then(|k| k.hostkey()) {
+                let files = known_hosts_files();
+                if let Some(file) = files.iter().find(|(_, text)| revoked_in(text, key)) {
+                    *self.revoked.borrow_mut() = Some(file.0.clone());
+                    return Err(git2::Error::new(
+                        ErrorCode::Certificate,
+                        git2::ErrorClass::Ssh,
+                        format!("{host}'s host key is revoked in {}", file.0),
+                    ));
+                }
+            }
+            Ok(git2::CertificateCheckStatus::CertificatePassthrough)
+        });
     }
 
     /// What a failed transfer tells the developer.
@@ -138,16 +195,20 @@ impl<'p> Transfer<'p> {
             _ if e.code() == ErrorCode::Certificate || e.class() == git2::ErrorClass::Ssl => {
                 anyhow::anyhow!(
                     "{name}'s server could not be verified against the system's certificates: {}",
-                    e.message()
+                    cleaned(e.message())
                 )
             }
-            ErrorCode::Auth => anyhow::anyhow!("{name} refused the credentials: {}", e.message()),
+            ErrorCode::Auth => {
+                anyhow::anyhow!("{name} refused the credentials: {}", cleaned(e.message()))
+            }
             ErrorCode::NotFastForward => {
                 anyhow::anyhow!(
                     "{name} has commits the branch does not: the remote is ahead, so pull first"
                 )
             }
-            _ => e.into(),
+            // libgit2 passes on what a remote sends as an error, `remote error: …` or
+            // `report-status: Error reported: …`, in its message.
+            _ => anyhow::anyhow!("{}", cleaned(e.message())),
         }
     }
 }
@@ -198,12 +259,11 @@ pub(crate) fn pull(
     // lock: a commit made while the fetch ran is neither lost nor checked out over, and a lock
     // another program holds refuses the pull before the working directory moves.
     let mut transaction = repo.transaction()?;
-    transaction
-        .lock_ref(&refname)
+    crate::guard::lock_ref(&mut transaction, &refname)
         .with_context(|| format!("'{name}' is locked by another program: try again later"))?;
     branch_as_shown(repo, name, tip)?;
     check_out(repo, &target)?;
-    transaction.set_target(&refname, theirs, None, "pull: Fast-forward")?;
+    crate::guard::set_target(&mut transaction, &refname, theirs, "pull: Fast-forward")?;
     transaction.commit()?;
     Ok(())
 }
@@ -226,35 +286,222 @@ pub(crate) fn push(
     let mut remote = repo
         .find_remote(&remote_name)
         .with_context(|| format!("there is no remote named '{remote_name}' any more"))?;
-    let url = remote
-        .pushurl()
-        .or(remote.url())
-        .unwrap_or_default()
-        .to_string();
-    let transfer = Transfer::new("Pushing", &remote_name, progress);
-    let refused = std::cell::RefCell::new(None);
+    let url = address(
+        remote.pushurl_bytes().unwrap_or(remote.url_bytes()),
+        &remote_name,
+    )?;
+    crate::confine::remote_within_root(repo.path(), &remote_name, &url)?;
+    // libgit2 hands the reason a remote gives for refusing an update to the
+    // push_update_reference callback, where git2 unwraps it as UTF-8, and a release build aborts
+    // on the panic. What the remote took is told instead by update_tips, which libgit2 calls only
+    // for an update the remote reported taken, where a fetch refspec maps it to a
+    // remote-tracking branch; where it is not called, the remote's branch is read again.
+    let sent = Oid::from_str(tip)?;
+    // git2 unwraps the name update_tips is given as UTF-8: one a fetch refspec of the remote maps
+    // the destination, itself UTF-8, to, which is UTF-8 where every refspec is.
+    let names_utf8 = remote.refspecs().all(|refspec| refspec.str().is_some());
+    let transfer = Transfer::new("Pushing", &remote_name, &url, progress)?;
+    let taken = std::cell::Cell::new(false);
+    // Where the remote's branch stood before the push, as libgit2 negotiated it: the one update
+    // sent, its source the remote's commit, zero for a branch the remote does not have.
+    let before = std::cell::Cell::new(None);
     let mut callbacks = transfer.callbacks();
-    callbacks.push_update_reference(|_, status| {
-        if let Some(why) = status {
-            *refused.borrow_mut() = Some(why.to_string());
+    callbacks.push_negotiation(|updates| {
+        if let [update] = updates {
+            before.set(Some(update.src()));
         }
         Ok(())
     });
+    if names_utf8 {
+        #[expect(
+            clippy::disallowed_methods,
+            reason = "registered only where every refspec of the remote, and so every name \
+                      libgit2 maps the destination to, is UTF-8"
+        )]
+        callbacks.update_tips(|_, _, to| {
+            // libgit2 calls it only for the one update sent, and only where the remote took it.
+            taken.set(taken.get() || to == sent);
+            true
+        });
+    }
     let mut options = git2::PushOptions::new();
     options.remote_callbacks(callbacks);
     // No `+`: a push that is not a fast-forward is the remote's to refuse.
     let pushed = remote.push(&[format!("{refname}:{destination}")], Some(&mut options));
     drop(options);
     pushed.map_err(|e| transfer.refusal(e, &url, "pushing to"))?;
-    if let Some(why) = refused.into_inner() {
-        bail!("{remote_name} refused '{name}' ({why}): the remote is ahead, so pull first");
+    let told = transfer.told();
+    drop(transfer);
+    if !taken.get() {
+        let now = read_back(repo, &remote_name, &url, &destination, progress)?;
+        // A branch where it stood before was not moved: the remote refused the update. One that
+        // stands elsewhere may have been moved by another push since, which this one cannot
+        // tell from a refusal.
+        let before = before.get().map(|oid| (!oid.is_zero()).then_some(oid));
+        match now {
+            Some(now) if now == sent => {}
+            now if Some(now) == before => match told {
+                Some(told) => {
+                    bail!("{remote_name} refused the update; the remote said: {told}")
+                }
+                None => bail!("{remote_name} refused the update"),
+            },
+            Some(_) => bail!(
+                "{remote_name} did not confirm the update: its branch now points at another commit"
+            ),
+            None => bail!("{remote_name} did not confirm the update: it has no such branch now"),
+        }
     }
     if first {
-        repo.find_branch(name, BranchType::Local)?
-            .set_upstream(Some(&format!("{remote_name}/{name}")))
+        set_upstream(repo, name, &remote_name, &destination)
             .with_context(|| format!("'{name}' was pushed, but its upstream could not be set"))?;
     }
     Ok(())
+}
+
+/// Sets the upstream of the branch `name` to `destination` on `remote`, as `git push -u` sets it,
+/// whether or not a remote-tracking branch follows it. git2 locks no configuration across two
+/// keys: the merge key is written first, which names no upstream on its own, and put back as it
+/// was, or taken out where there was none, should the remote not follow, so that a failure
+/// leaves no half an upstream and keeps a merge key the developer had.
+fn set_upstream(repo: &Repository, name: &str, remote: &str, destination: &str) -> Result<()> {
+    let mut config = repo.config()?.open_level(git2::ConfigLevel::Local)?;
+    let merge = format!("branch.{name}.merge");
+    let had = config.snapshot()?.get_string(&merge).ok();
+    config.set_str(&merge, destination)?;
+    if let Err(e) = config.set_str(&format!("branch.{name}.remote"), remote) {
+        let _ = match had {
+            Some(had) => config.set_str(&merge, &had),
+            None => config.remove(&merge),
+        };
+        return Err(e.into());
+    }
+    Ok(())
+}
+
+/// Where Ocelli keeps the references it makes for itself, which no load shows.
+pub(crate) const OWN_REFS: &str = "refs/ocelli/";
+
+/// How long a scratch reference of a read-back is kept before another read-back takes it for
+/// one a process that ended left behind: far longer than the server timeouts let one last.
+const SCRATCH_KEPT_SECS: u64 = 3600;
+
+/// `url` as libgit2 spells the address of a remote it makes from it: on Windows a UNC path,
+/// `\\server\share\…`, with forward slashes, as core git writes it; any other as it stands.
+fn as_libgit2_makes_it(url: &str, windows: bool) -> String {
+    let unc = url.starts_with("\\\\")
+        && url[2..]
+            .chars()
+            .next()
+            .is_some_and(|c| c.is_ascii_alphanumeric());
+    if windows && unc {
+        url.replace('\\', "/")
+    } else {
+        url.to_string()
+    }
+}
+
+/// A scratch reference for one read-back, named for this process, the time it is made at, a
+/// count, and a random nonce, so that neither another read-back, another Ocelli process, nor a
+/// name anyone could guess ahead uses it.
+fn scratch_ref() -> (String, u64) {
+    use std::hash::{BuildHasher, Hasher};
+    static COUNT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| d.as_secs());
+    let count = COUNT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    // The standard library seeds each `RandomState` from the system's randomness.
+    let nonce = std::collections::hash_map::RandomState::new()
+        .build_hasher()
+        .finish();
+    let name = format!(
+        "{OWN_REFS}pushed-{}-{now}-{count}-{nonce:016x}",
+        std::process::id()
+    );
+    (name, now)
+}
+
+/// Removes the scratch references of read-backs older than [`SCRATCH_KEPT_SECS`], which a
+/// process that ended mid-way left behind; only names of the scratch form are touched.
+fn remove_stale_scratch(repo: &Repository, now: u64) {
+    let Ok(references) = repo.references_glob(&format!("{OWN_REFS}pushed-*")) else {
+        return;
+    };
+    for mut reference in references.flatten() {
+        let made = reference
+            .name()
+            .and_then(|n| n.strip_prefix(&format!("{OWN_REFS}pushed-")))
+            .and_then(|rest| rest.split('-').nth(1))
+            .and_then(|secs| secs.parse::<u64>().ok());
+        if made.is_some_and(|made| now.saturating_sub(made) > SCRATCH_KEPT_SECS) {
+            let _ = reference.delete();
+        }
+    }
+}
+
+/// The commit the remote named `name`, pushed to at `url`, holds at `destination` now, none
+/// where it has no such branch, read by fetching that one branch into a scratch reference of
+/// this read-back's own, which is gone again after.
+///
+/// The fetch goes to `url` and nowhere else: libgit2 rewrites an address it is given with
+/// `url.<base>.insteadOf` once more, so the read-back takes the first of the remote's push
+/// address as configured, its address as configured, and `url` itself whose rewriting is `url`,
+/// spelled as libgit2 spells a remote it makes ([`as_libgit2_makes_it`]), and is refused where
+/// none is.
+fn read_back(
+    repo: &Repository,
+    name: &str,
+    url: &str,
+    destination: &str,
+    progress: &mut dyn FnMut(&str) -> bool,
+) -> Result<Option<Oid>> {
+    let config = repo.config()?.snapshot()?;
+    let configured = [
+        config.get_string(&format!("remote.{name}.pushurl")).ok(),
+        config.get_string(&format!("remote.{name}.url")).ok(),
+        Some(url.to_string()),
+    ];
+    let mut remote = configured
+        .into_iter()
+        .flatten()
+        .filter_map(|address| repo.remote_anonymous(&address).ok())
+        .find(|remote| remote.url_bytes() == as_libgit2_makes_it(url, cfg!(windows)).as_bytes())
+        .with_context(|| {
+            format!(
+                "the push to {name} was sent, but whether it took it cannot be read: \
+                 url.<base>.insteadOf would lead the read elsewhere"
+            )
+        })?;
+    let (scratch, now) = scratch_ref();
+    remove_stale_scratch(repo, now);
+    let transfer = Transfer::new("Checking", name, url, progress)?;
+    let mut options = git2::FetchOptions::new();
+    options
+        .remote_callbacks(transfer.callbacks())
+        .download_tags(git2::AutotagOption::None)
+        .update_fetchhead(false);
+    let fetched = remote.fetch(
+        &[format!("+{destination}:{scratch}")],
+        Some(&mut options),
+        None,
+    );
+    drop(options);
+    let read = repo.find_reference(&scratch).ok().and_then(|r| r.target());
+    if let Ok(mut reference) = repo.find_reference(&scratch) {
+        reference.delete().with_context(|| {
+            format!(
+                "the push to {name} was sent and read back, but the reference {scratch} it was \
+                 read into could not be removed: delete it with git"
+            )
+        })?;
+    }
+    fetched
+        .map_err(|e| transfer.refusal(e, url, "checking"))
+        .with_context(|| {
+            format!("the push to {name} was sent, but whether it took it could not be read")
+        })?;
+    Ok(read)
 }
 
 /// Where a push of the branch `name` goes, as `git push` decides with `push.default` and the
@@ -392,12 +639,10 @@ fn vouched_elsewhere(user: &str, system: &str, host: &str) -> Option<&'static st
     None
 }
 
-/// The host an SSH address names: `ssh://[user@]host[:port]/path` or `[user@]host:path`.
+/// The host an SSH address names: `<scheme>://[user@]host[:port]/path`, any scheme [`ssh_url`]
+/// reads, or `[user@]host:path`.
 fn ssh_host(url: &str) -> &str {
-    let rest = url
-        .strip_prefix("ssh://")
-        .or_else(|| url.strip_prefix("git+ssh://"))
-        .unwrap_or(url);
+    let rest = ssh_url(url).unwrap_or(url);
     let authority = rest.split('/').next().unwrap_or_default();
     let host = authority.rsplit('@').next().unwrap_or_default();
     host.split(':').next().unwrap_or_default()
@@ -421,9 +666,174 @@ fn decode_base64(text: &str) -> Option<Vec<u8>> {
     Some(out)
 }
 
-/// Whether `url` reaches its remote over SSH: `ssh://`, or the scp-like `host:path`.
+/// `text` without its ANSI escape sequences: a control sequence (`ESC [` up to its final byte),
+/// an operating system command (`ESC ]` up to BEL or `ESC \`), and any other escape with the one
+/// character after it.
+fn without_escapes(text: &str) -> String {
+    let mut out = String::new();
+    let mut chars = text.chars().peekable();
+    while let Some(c) = chars.next() {
+        if c != '\u{1b}' {
+            out.push(c);
+            continue;
+        }
+        match chars.next() {
+            Some('[') => {
+                for c in chars.by_ref() {
+                    if ('\u{40}'..='\u{7e}').contains(&c) {
+                        break;
+                    }
+                }
+            }
+            Some(']') => {
+                while let Some(c) = chars.next() {
+                    if c == '\u{7}' || c == '\u{1b}' && chars.next_if_eq(&'\\').is_some() {
+                        break;
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    out
+}
+
+/// Whether `c` is shown as written: no control character, none of Unicode's default ignorable
+/// code points, which render as nothing and can reorder or hide text (the bidirectional
+/// controls, the zero-width characters, the variation selectors, the tag characters, the Hangul
+/// fillers among them), and no interlinear annotation or line and paragraph separator.
+fn shown(c: char) -> bool {
+    !c.is_control()
+        && !matches!(
+            c,
+            '\u{ad}'
+                | '\u{34f}'
+                | '\u{61c}'
+                | '\u{115f}'..='\u{1160}'
+                | '\u{17b4}'..='\u{17b5}'
+                | '\u{180b}'..='\u{180f}'
+                | '\u{200b}'..='\u{200f}'
+                | '\u{2028}'..='\u{202e}'
+                | '\u{2060}'..='\u{206f}'
+                | '\u{3164}'
+                | '\u{fe00}'..='\u{fe0f}'
+                | '\u{feff}'
+                | '\u{ffa0}'
+                | '\u{fff0}'..='\u{fffb}'
+                | '\u{1bca0}'..='\u{1bca3}'
+                | '\u{1d173}'..='\u{1d17a}'
+                | '\u{e0000}'..='\u{e0fff}'
+        )
+}
+
+/// Text a remote sent, as Ocelli shows it: read lossily before, ANSI escape sequences, control
+/// characters, and characters not [`shown`] taken out, its last five lines that hold anything
+/// joined by ` / `, and at most 400 characters of them.
+fn cleaned(text: &str) -> String {
+    let lines: Vec<String> = without_escapes(text)
+        .split(['\n', '\r', '\u{2028}', '\u{2029}'])
+        .map(|line| line.chars().filter(|&c| shown(c)).collect::<String>())
+        .map(|line| line.trim().to_string())
+        .filter(|line| !line.is_empty())
+        .collect();
+    let last = lines[lines.len().saturating_sub(5)..].join(" / ");
+    let mut chars = last.chars();
+    let kept: String = chars.by_ref().take(400).collect();
+    if chars.next().is_some() {
+        format!("{kept}…")
+    } else {
+        kept
+    }
+}
+
+/// Whether a helper git2's credential helper would run for `url` is `!` with nothing after it:
+/// git2 splits such a helper into no program at all and unwraps the first, where `sh` cannot
+/// start, and a release build aborts on the panic. The keys are the ones git2 reads, in its
+/// order: `credential.<url>.helper`, `credential.<scheme>://<domain>.helper` as the `url` crate
+/// reads the address, and `credential.helper`, each its last value.
+fn helper_runs_nothing(config: &git2::Config, url: &str) -> bool {
+    let mut keys = vec![format!("credential.{url}.helper")];
+    if let Ok(parsed) = url::Url::parse(url)
+        && let Some(url::Host::Domain(host)) = parsed.host()
+    {
+        keys.push(format!("credential.{}://{host}.helper", parsed.scheme()));
+    }
+    keys.push("credential.helper".to_string());
+    keys.iter().any(|key| {
+        config.get_string(key).is_ok_and(|helper| {
+            helper
+                .strip_prefix('!')
+                .is_some_and(|rest| rest.trim().is_empty())
+        })
+    })
+}
+
+/// Whether the host of an address libgit2 hands to SSH as `scheme://`, as it percent-decodes
+/// it, is UTF-8. libgit2 takes the host after the last `@` of the authority, and decodes no
+/// address scp writes, nor a user name into a host; any other address passes.
+fn ssh_host_decodes_to_utf8(url: &str) -> bool {
+    let Some(rest) = ssh_url(url) else {
+        return true;
+    };
+    // Its authority runs to the first `/`, a `?` or `#` before it included.
+    let authority = rest.split('/').next().unwrap_or_default();
+    let host = authority
+        .rsplit_once('@')
+        .map_or(authority, |(_, host)| host);
+    let mut bytes = Vec::new();
+    let mut rest = host.as_bytes();
+    while let Some((&first, after)) = rest.split_first() {
+        let decoded = (first == b'%')
+            .then(|| after.get(..2))
+            .flatten()
+            .and_then(|hex| u8::from_str_radix(std::str::from_utf8(hex).ok()?, 16).ok());
+        match decoded {
+            Some(byte) => {
+                bytes.push(byte);
+                rest = &after[2..];
+            }
+            None => {
+                bytes.push(first);
+                rest = after;
+            }
+        }
+    }
+    std::str::from_utf8(&bytes).is_ok()
+}
+
+/// The address of the remote `name` as its configuration spells it, refused where it is not
+/// UTF-8: libgit2 would connect to the address as it stands while every check here read another.
+fn address(bytes: &[u8], name: &str) -> Result<String> {
+    match std::str::from_utf8(bytes) {
+        Ok(url) => Ok(url.to_string()),
+        Err(_) => bail!("the address of {name} is not UTF-8, which Ocelli does not take: use git"),
+    }
+}
+
+/// The scheme of `url`, lowercased, and what follows its `://`, where libgit2 reads it as an
+/// address by its scheme: one of letters, digits, `+`, `-`, and `.` only. None for any other
+/// address, one scp writes or a path.
+fn scheme_of(url: &str) -> Option<(String, &str)> {
+    let (scheme, rest) = url.split_once("://")?;
+    let is_scheme = !scheme.is_empty()
+        && scheme
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '+' | '-' | '.'));
+    is_scheme.then(|| (scheme.to_ascii_lowercase(), rest))
+}
+
+/// What follows the `://` of `url` where libgit2 hands it to SSH by its scheme: every scheme but
+/// http, https, git, and file.
+fn ssh_url(url: &str) -> Option<&str> {
+    scheme_of(url)
+        .filter(|(scheme, _)| !matches!(scheme.as_str(), "http" | "https" | "git" | "file"))
+        .map(|(_, rest)| rest)
+}
+
+/// Whether `url` reaches its remote over SSH: by its scheme as [`ssh_url`] reads it, or the
+/// scp-like `host:path`.
 fn is_ssh(url: &str) -> bool {
-    url.starts_with("ssh://") || url.starts_with("git+ssh://") || !url.contains("://")
+    scheme_of(url).is_none() || ssh_url(url).is_some()
 }
 
 /// The ways to authenticate, each tried once: the SSH agent, then the credential helper of the
@@ -475,7 +885,14 @@ impl Tried {
             if let Err(why) = helper_may_answer_for(url) {
                 return refuse(why);
             }
-            return git2::Cred::credential_helper(&developers_config()?, url, user);
+            let config = developers_config()?;
+            if helper_runs_nothing(&config, url) {
+                return refuse(
+                    "a credential.helper of your configuration is '!' with nothing after it, \
+                     which Ocelli does not run",
+                );
+            }
+            return git2::Cred::credential_helper(&config, url, user);
         }
         refuse(
             "neither the SSH agent nor a credential helper of your configuration gave credentials \
@@ -532,6 +949,65 @@ fn helper_may_answer_for(address: &str) -> std::result::Result<(), &'static str>
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "a test writes and removes a configuration file of its own"
+    )]
+    // Verifies: ADR-0035
+    fn a_credential_helper_that_runs_nothing_is_found_where_git2_would_run_it() {
+        let file = std::env::temp_dir().join(format!("ocelli-helper-{}", std::process::id()));
+        let url = "https://e.org/r.git";
+        let runs_nothing = |text: &str| {
+            std::fs::write(&file, text).unwrap();
+            let found = super::helper_runs_nothing(&git2::Config::open(&file).unwrap(), url);
+            let _ = std::fs::remove_file(&file);
+            found
+        };
+        assert!(runs_nothing("[credential]\n\thelper = \"! \"\n"));
+        assert!(runs_nothing(
+            "[credential \"https://e.org\"]\n\thelper = !\n"
+        ));
+        assert!(runs_nothing(
+            "[credential \"https://e.org/r.git\"]\n\thelper = !\n"
+        ));
+        // The last value is the one read.
+        assert!(!runs_nothing(
+            "[credential]\n\thelper = !\n\thelper = store\n"
+        ));
+        // Another host's helper is not run for this one.
+        assert!(!runs_nothing(
+            "[credential \"https://other.org\"]\n\thelper = !\n"
+        ));
+        assert!(!runs_nothing("[credential]\n\thelper = !cat\n"));
+        assert!(!runs_nothing("[credential]\n\thelper\n"));
+    }
+
+    #[test]
+    // Verifies: ADR-0035
+    fn the_host_of_an_ssh_address_is_read_decoded_as_libgit2_reads_it() {
+        use super::ssh_host_decodes_to_utf8 as utf8;
+        assert!(utf8("ssh://git@example.org/r.git"));
+        assert!(utf8("ssh://git@ex%41mple.org/r.git"));
+        assert!(!utf8("ssh://git@ex%ffmple.org/r.git"));
+        assert!(!utf8("SSH+GIT://h%c3/r"));
+        // A user name is no host. An IPv6 address with a zone passes here; libgit2 refuses it as
+        // a malformed host before decoding anything, `%` being none of the characters it takes
+        // between the brackets. Scp-like addresses and local paths are decoded by no one.
+        assert!(utf8("ssh://us%ffer@example.org/r.git"));
+        assert!(utf8("ssh://[fe80::1%25eth0]/r.git"));
+        assert!(utf8("git@ex%ffmple.org:r.git"));
+        assert!(utf8("C:\\repos\\a%ff"));
+        assert!(utf8("ssh://h/pa%ffth"));
+        // The authority runs to the first `/`, and every scheme but http, https, git, and file
+        // goes to SSH.
+        assert!(!utf8("ssh://h?%ff.x/r"));
+        assert!(!utf8("ssh://h#%ff.x/r"));
+        assert!(!utf8("foo://h%ff.x:22/r"));
+        assert!(utf8("https://h%ff.x/r"));
+        assert!(utf8("fi le://h%ff/r"));
+    }
+
     #[test]
     // Verifies: ADR-0035
     fn each_way_to_authenticate_is_tried_once_and_in_turn() {
@@ -703,8 +1179,64 @@ mod tests {
             ("ssh://git@git.example.org:2222/r.git", "git.example.org"),
             ("git@git.example.org:r.git", "git.example.org"),
             ("git.example.org:r.git", "git.example.org"),
+            ("SSH+GIT://u@git.example.org:22/r", "git.example.org"),
+            ("foo://git.example.org/r", "git.example.org"),
         ] {
             assert_eq!(ssh_host(url), host, "{url}");
         }
+    }
+
+    #[test]
+    // Verifies: ADR-0035
+    fn every_scheme_libgit2_hands_to_ssh_is_ssh_here_too() {
+        for ssh in [
+            "SSH://h/r",
+            "foo://h/r",
+            "ssh+git://h/r",
+            "h:r",
+            "/srv/r.git",
+        ] {
+            assert!(super::is_ssh(ssh), "{ssh}");
+        }
+        for other in ["HTTPS://h/r", "http://h/r", "git://h/r", "FILE:///r"] {
+            assert!(!super::is_ssh(other), "{other}");
+        }
+    }
+
+    #[test]
+    // Verifies: ADR-0035
+    fn a_unc_path_is_spelled_as_libgit2_spells_a_remote_it_makes() {
+        use super::as_libgit2_makes_it as made;
+        assert_eq!(
+            made("\\\\server\\share\\r.git", true),
+            "//server/share/r.git"
+        );
+        assert_eq!(
+            made("\\\\server\\share\\r.git", false),
+            "\\\\server\\share\\r.git"
+        );
+        assert_eq!(made("C:\\r.git", true), "C:\\r.git");
+        assert_eq!(made("\\\\?\\C:\\r.git", true), "\\\\?\\C:\\r.git");
+        assert_eq!(made("ssh://h/r", true), "ssh://h/r");
+    }
+
+    #[test]
+    // Verifies: ADR-0035
+    fn what_a_remote_says_loses_escapes_and_every_invisible_character() {
+        use super::cleaned;
+        assert_eq!(
+            cleaned("a\u{1b}[1;31mb\u{1b}]0;t\u{7}c\u{1b}]0;t\u{1b}\\d"),
+            "abcd"
+        );
+        let invisible = "\u{ad}\u{34f}\u{61c}\u{115f}\u{1160}\u{200b}\u{202e}\u{2066}\u{3164}\
+                         \u{fe0f}\u{feff}\u{ffa0}\u{1d173}\u{e0041}\u{e0100}";
+        assert_eq!(cleaned(&format!("x{invisible}y")), "xy");
+        assert_eq!(cleaned("one\u{2028}two\r\nthree"), "one / two / three");
+        assert_eq!(cleaned("1\n2\n3\n4\n5\n6\n"), "2 / 3 / 4 / 5 / 6");
+        assert_eq!(cleaned(&"z".repeat(500)).chars().count(), 401);
+        assert_eq!(
+            cleaned("remote error: caf\u{e9}"),
+            "remote error: caf\u{e9}"
+        );
     }
 }

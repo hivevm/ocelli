@@ -10,13 +10,16 @@
 )]
 #![cfg(unix)]
 
+mod shown;
 mod support;
 use ocelli_core::port::{RepositoryReader, RepositoryWriter, Write};
 use ocelli_git::GitWriter;
+use shown::{kinds_of_write, stage_in, unstage_in};
 use std::collections::BTreeSet;
 use std::path::Path;
 use support::{
-    Scratch, git, git_command, head_of, refused, refused_reporting, snapshot, write_file,
+    Origin, Scratch, as_twins, assert_twins_alike, git, git_command, head_of, refused,
+    refused_reporting, snapshot, twin, write_file,
 };
 
 mod programs;
@@ -62,6 +65,80 @@ fn the_snapshot_sees_every_part_a_write_can_change() {
     sees("a sequencer", &|| {
         write_file(d, ".git/sequencer/todo", "pick x\n");
     });
+}
+
+/// `git` in `dir` with `args`, its commits made at the second `at`.
+fn git_at(dir: &Path, at: u32, args: &[&str]) {
+    let date = format!("{at} +0000");
+    let out = git_command(dir)
+        .env("GIT_AUTHOR_DATE", &date)
+        .env("GIT_COMMITTER_DATE", &date)
+        .args(args)
+        .output()
+        .unwrap();
+    assert!(out.status.success(), "{out:?}");
+}
+
+#[test]
+fn twins_read_alike_where_one_makes_at_the_time_of_the_other_what_the_other_made_before() {
+    let scratch = with_file("same-second");
+    let origin = Origin::of(&scratch.0);
+    let other = twin(&scratch, "same-second-twin");
+    // The stash `git` makes in `dir` at the second `at`, of `f` changed to `content`.
+    let stash_at = |dir: &Path, at: u32, content: &str, message: &[&str]| {
+        write_file(dir, "f", content);
+        git_at(dir, at, &[&["stash", "push", "--quiet"], message].concat());
+    };
+    // Each side stashes twice, the twin a second later: the index commit of this side's second
+    // stash is the one of the twin's first, which the twin holds, where the twin's second stash
+    // has an index commit of its own, alike but for its time.
+    for (dir, start) in [(&scratch.0, 1_700_000_000), (&other.0, 1_700_000_001)] {
+        stash_at(dir, start, "changed\n", &["-m", "first"]);
+        git(dir, &["stash", "apply", "--quiet"]);
+        stash_at(dir, start + 1, "changed\n", &[]);
+    }
+    assert_twins_alike(&scratch.0, &other.0, &origin, "stashed a second apart");
+    // A stash of another change still differs, made at the same second or not.
+    stash_at(&scratch.0, 1_700_000_003, "one\n", &[]);
+    stash_at(&other.0, 1_700_000_003, "two\n", &[]);
+    let (ours, theirs) = as_twins(&scratch.0, &other.0, &origin);
+    assert_ne!(ours, theirs);
+}
+
+#[test]
+fn twins_differ_where_one_rewrote_a_commit_they_parted_with_alike_but_for_its_time() {
+    let scratch = with_file("amended");
+    let origin = Origin::of(&scratch.0);
+    let other = twin(&scratch, "amended-twin");
+    git_at(
+        &scratch.0,
+        1_900_000_000,
+        &["commit", "--quiet", "--amend", "--no-edit"],
+    );
+    let (ours, theirs) = as_twins(&scratch.0, &other.0, &origin);
+    assert_ne!(ours, theirs);
+}
+
+#[test]
+fn twins_differ_where_one_swapped_branches_on_commits_they_parted_with_alike_but_for_their_time() {
+    let scratch = with_file("swapped");
+    let d = &scratch.0;
+    for (branch, at) in [("p", 1_700_000_000), ("q", 1_700_000_001)] {
+        git(d, &["switch", "--quiet", "-c", branch, "main"]);
+        git_at(
+            d,
+            at,
+            &["commit", "--quiet", "--allow-empty", "-m", "alike"],
+        );
+    }
+    git(d, &["switch", "--quiet", "main"]);
+    let origin = Origin::of(d);
+    let other = twin(&scratch, "swapped-twin");
+    let (p, q) = (git(d, &["rev-parse", "p"]), git(d, &["rev-parse", "q"]));
+    git(d, &["branch", "--quiet", "--force", "p", &q]);
+    git(d, &["branch", "--quiet", "--force", "q", &p]);
+    let (ours, theirs) = as_twins(d, &other.0, &origin);
+    assert_ne!(ours, theirs);
 }
 
 /// A repository with two commits on main, its identity in its own configuration, and the SHAs.
@@ -356,22 +433,6 @@ fn kind_of(write: &Write) -> String {
         .as_str()
         .unwrap()
         .to_string()
-}
-
-/// Every kind of `Write` the core takes, as serde lists them in its refusal of a kind it does not
-/// know: the one list a test can read without repeating it, and longer with each new write.
-fn kinds_of_write() -> Vec<String> {
-    let Err(refusal) = serde_json::from_str::<Write>(r#"{"kind":"?"}"#) else {
-        panic!("a kind the core does not know is refused");
-    };
-    let refusal = refusal.to_string();
-    let (_, expected) = refusal
-        .split_once("expected one of ")
-        .unwrap_or_else(|| panic!("the refusal lists the kinds: {refusal}"));
-    expected
-        .split(", ")
-        .map(|kind| kind.split('`').nth(1).unwrap().to_string())
-        .collect()
 }
 
 /// The `kinds` of write not among those `performed`.
@@ -869,39 +930,6 @@ fn each_stash_node_carries_its_place_in_the_stash() {
     assert_eq!(places, expected);
 }
 
-/// The content of `path` in the working directory and in the index, read with git2, which runs
-/// none of the programs the repository names, as the git binary would.
-fn shown_in(dir: &Path, path: &str) -> (Option<String>, Option<String>) {
-    let workdir = dir.join(path).symlink_metadata().is_ok().then(|| {
-        git2::Oid::hash_file(git2::ObjectType::Blob, dir.join(path))
-            .unwrap()
-            .to_string()
-    });
-    let index = git2::Repository::open(dir)
-        .unwrap()
-        .index()
-        .unwrap()
-        .get_path(Path::new(path), 0)
-        .map(|e| e.id.to_string());
-    (workdir, index)
-}
-
-/// Staging `path` as shown now.
-fn stage_in(dir: &Path, path: &str) -> Write {
-    Write::StageFile {
-        path: path.to_string(),
-        shown: shown_in(dir, path).0,
-    }
-}
-
-/// Unstaging `path` as shown now.
-fn unstage_in(dir: &Path, path: &str) -> Write {
-    Write::UnstageFile {
-        path: path.to_string(),
-        shown: shown_in(dir, path).1,
-    }
-}
-
 fn commit_on(head: &str, message: &str) -> Write {
     Write::Commit {
         message: message.to_string(),
@@ -911,6 +939,74 @@ fn commit_on(head: &str, message: &str) -> Write {
 
 fn staged_names(dir: &Path) -> String {
     git(dir, &["diff", "--cached", "--name-status"])
+}
+
+/// The paths a caller may send that name no file of the working directory: each made git2 panic
+/// where it read the index, or leads into the repository's own files.
+const NO_FILE: &[&str] = &[
+    "",
+    ".",
+    "./f",
+    "../x",
+    "dir/../f",
+    "/abs",
+    "f\0g",
+    ".git/config",
+    ".GIT/config",
+    ".git/HEAD",
+];
+
+#[test]
+// Verifies: ADR-0033, ADR-0039
+fn a_path_that_names_no_file_of_the_working_directory_is_refused_by_every_write_and_read() {
+    use ocelli_core::model::Conflict;
+    use ocelli_core::port::Take;
+    let scratch = with_file("no-file");
+    let d = &scratch.0;
+    write_file(d, "f", "changed\n");
+    let head = git(d, &["rev-parse", "HEAD"]);
+    for path in NO_FILE {
+        let read_why = "names no file of the working directory";
+        // A write refuses a NUL in any string it is given first, before it reads the path; the
+        // read takes the path's own guard.
+        let why = if path.contains('\0') {
+            "holds a NUL character"
+        } else {
+            read_why
+        };
+        for shown in [None, Some(head.clone())] {
+            let stage = Write::StageFile {
+                path: path.to_string(),
+                shown: shown.clone(),
+            };
+            refused(d, &stage, why);
+            let unstage = Write::UnstageFile {
+                path: path.to_string(),
+                shown,
+            };
+            refused(d, &unstage, why);
+        }
+        let resolve = Write::Resolve {
+            path: path.to_string(),
+            conflict: Conflict {
+                path: path.to_string(),
+                ancestor: None,
+                ours: None,
+                theirs: None,
+            },
+            take: Take::AsEdited,
+        };
+        refused(d, &resolve, why);
+        for sha in [head.as_str(), ocelli_core::model::WORKDIR_SHA] {
+            let read = ocelli_git::GitReader.load_file_diff(d, sha, path);
+            assert!(
+                read.is_err_and(|e| e.to_string().contains(read_why)),
+                "{path:?} at {sha}"
+            );
+        }
+    }
+    // A file of the working directory is taken.
+    GitWriter.write(d, &stage_in(d, "f")).unwrap();
 }
 
 #[test]

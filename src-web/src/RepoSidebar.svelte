@@ -10,6 +10,7 @@
   // (ADR-0027) — switching is a full reload, so those rows say where they lead.
   import { anyLeaf, countLeaves, filterByName, groupByFolder } from './refTree.ts';
   import type { RefFolder } from './refTree.ts';
+  import { parentBlocked, submoduleBlocked, worktreeBlocked } from './repoSwitch.ts';
   import type { RepoRefs } from './types.ts';
 
   interface Props {
@@ -111,7 +112,7 @@
         title: w.path,
         icon: ICON_TREE,
         openPath: w.path,
-        blocked: w.isCurrent ? 'the working tree you are viewing' : undefined,
+        blocked: worktreeBlocked(w),
       }),
     ),
   );
@@ -128,15 +129,14 @@
           .join(' — '),
         icon: ICON_SUBMODULE,
         openPath: sub.workdir,
-        blocked:
-          sub.state === 'uninitialized'
-            ? 'not initialized — no working copy to open'
-            : undefined,
+        blocked: submoduleBlocked(sub),
       }),
     ),
   );
 
   const parent = $derived(repoRefs?.parent ?? null);
+  // A parent outside the remote server's root shows without its switch, saying why (ADR-0039).
+  const parentReason = $derived(parent ? parentBlocked(parent) : undefined);
 
   const tags = $derived(
     (repoRefs?.tags ?? []).map(t => entry(t.name, t.sha, t.shortSha, { icon: ICON_TAG })),
@@ -356,7 +356,8 @@
         <button
           class="rail-btn"
           onclick={() => onOpenRepo(parent.path)}
-          title="Back to {parent.name}"
+          disabled={parentReason !== undefined}
+          title={parentReason ? `${parent.name} — ${parentReason}` : `Back to ${parent.name}`}
           aria-label="Back to {parent.name}"
         >
           <svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
@@ -385,10 +386,12 @@
     {#if parent}
       <button
         class="row parent"
+        class:unreachable={parentReason !== undefined}
+        disabled={parentReason !== undefined}
         onclick={() => onOpenRepo(parent.path)}
-        title="{parent.path} — open the {parent.kind === 'superproject'
-          ? 'superproject'
-          : 'main working tree'}"
+        title={parentReason
+          ? `${parent.name} — ${parentReason}`
+          : `${parent.path} — open the ${parent.kind === 'superproject' ? 'superproject' : 'main working tree'}`}
       >
         <svg class="glyph" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
           <path d={ICON_UP} />

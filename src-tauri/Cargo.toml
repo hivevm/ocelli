@@ -19,14 +19,12 @@ tauri-build = { version = "2", features = [] }
 tauri = { version = "2", features = ["devtools"] }
 tauri-plugin-dialog = "2"
 serde = { version = "1", features = ["derive"] }
-serde_json = "1"
-tokio = { version = "1", features = ["full"] }
 chrono = "0.4"
 anyhow = "1"
 
 
+ocelli-commands.workspace = true
 ocelli-core.workspace = true
-ocelli-git.workspace = true
 
 [lints]
 workspace = true

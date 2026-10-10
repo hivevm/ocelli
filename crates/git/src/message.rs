@@ -87,11 +87,15 @@ pub(crate) fn stripped(repo: &Repository, message: &str) -> Result<String> {
 /// it is `auto`, which `git tag` does not adjust.
 fn comment_string(repo: &Repository) -> Result<String> {
     let config = repo.config()?.snapshot()?;
-    let mut comment = None;
+    let mut comment = Ok(None);
     config
         .entries(Some("core\\.comment(char|string)"))?
-        .for_each(|entry| comment = entry.value().map(str::to_string))?;
-    Ok(comment
+        .for_each(|entry| {
+            if comment.is_ok() {
+                comment = crate::guard::config_value(entry).map(|v| v.map(str::to_string));
+            }
+        })?;
+    Ok(comment?
         .filter(|c| !c.is_empty() && c != "auto")
         .unwrap_or_else(|| "#".to_string()))
 }

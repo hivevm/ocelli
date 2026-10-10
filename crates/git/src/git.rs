@@ -38,7 +38,7 @@ pub fn load_chunks(
     // and gain little from the cache.
     git2::opts::enable_caching(false);
     // 1. Open repo (walks up to find .git, supports bare repos)
-    let repo = Repository::discover(repo_path)?;
+    let repo = crate::confine::open(repo_path)?;
 
     // 2. Collect all refs and map peeled SHA -> Vec<String> ref names
     let mut refs_by_sha: HashMap<String, Vec<String>> = HashMap::new();
@@ -49,8 +49,9 @@ pub fn load_chunks(
         let name = reference.name().unwrap_or("").to_string();
 
         // refs/stash is handled separately (see load_stashes) so the stash's
-        // internal index/untracked parent commits never leak into the graph.
-        if name == "refs/stash" {
+        // internal index/untracked parent commits never leak into the graph; Ocelli's own
+        // scratch references are no developer's.
+        if name == "refs/stash" || name.starts_with(crate::remote::OWN_REFS) {
             continue;
         }
         let pretty = pretty_ref_name(&name);
@@ -148,10 +149,10 @@ fn with_synthetic_nodes(
     repo_path: &Path,
     commits: &mut Vec<CommitData>,
 ) -> Result<Vec<CommitData>> {
-    let mut repo = Repository::discover(repo_path)?;
+    let repo = crate::confine::open(repo_path)?;
     // Stash entries, each a node hanging off its base commit.
     let walked = commits.len();
-    load_stashes(&mut repo, commits);
+    load_stashes(&repo, commits);
 
     // A synthetic "uncommitted changes" node when the worktree is dirty.
     // Its timestamp is "now", so the temporal sort places it at row 0.
@@ -182,16 +183,9 @@ fn fit_first_chunk(commits: &mut Vec<CommitData>, walked: usize) -> Vec<CommitDa
 /// Collects stash entries via the stash reflog and appends one node per stash.
 /// Only the first parent (the base commit the stash was created on) is kept, so
 /// the internal index/untracked parent commits stay out of the graph.
-fn load_stashes(repo: &mut Repository, commits: &mut Vec<CommitData>) {
-    // stash_foreach hands us (index, message, oid); we only collect here because
-    // the &mut borrow forbids touching the repo inside the callback.
-    let mut entries: Vec<(usize, String, git2::Oid)> = Vec::new();
-    let _ = repo.stash_foreach(|index, message, oid| {
-        entries.push((index, message.to_string(), *oid));
-        true
-    });
-
-    for (index, message, oid) in entries {
+fn load_stashes(repo: &Repository, commits: &mut Vec<CommitData>) {
+    let entries = crate::guard::stashes(repo).unwrap_or_default();
+    for (index, (message, oid)) in entries.into_iter().enumerate() {
         let Ok(commit) = repo.find_commit(oid) else {
             continue;
         };
@@ -225,8 +219,16 @@ fn working_dir_node(repo: &Repository) -> Option<CommitData> {
         return None;
     }
 
-    // Author the node with the repo's configured identity, when available.
-    let (name, email) = match repo.signature() {
+    // Author the node with the repo's configured identity, when available. Confined to a server
+    // root, it is not read: the configuration libgit2 reads, the developer's global one and the
+    // files a repository's own one includes, lies outside what ADR-0039 confines, and the
+    // identity is the one value of it the node would show.
+    let signature = if crate::confine::confined() {
+        Err(git2::Error::from_str("not read under confinement"))
+    } else {
+        repo.signature()
+    };
+    let (name, email) = match signature {
         Ok(sig) => (
             sig.name().unwrap_or("").to_string(),
             sig.email().unwrap_or("").to_string(),
@@ -284,7 +286,7 @@ pub(crate) const WORKTREE: Status = Status::WT_NEW
 /// Loads the changed files for a single commit SHA.
 /// The synthetic [`WORKDIR_SHA`] yields the uncommitted working-directory diff.
 pub fn load_commit_files(repo_path: &Path, sha: &str) -> Result<Vec<FileChange>> {
-    let repo = Repository::discover(repo_path)?;
+    let repo = crate::confine::open(repo_path)?;
 
     let mut opts = DiffOptions::new();
     opts.ignore_whitespace(false);
@@ -317,17 +319,12 @@ pub fn load_commit_files(repo_path: &Path, sha: &str) -> Result<Vec<FileChange>>
                 git2::Delta::Copied => FileStatus::Copied,
                 _ => FileStatus::Unknown,
             };
-            let path = delta
-                .new_file()
-                .path()
-                .or_else(|| delta.old_file().path())
+            let path = crate::guard::diff_path(&delta.new_file())
+                .or_else(|| crate::guard::diff_path(&delta.old_file()))
                 .map(|p| p.to_string_lossy().into_owned())
                 .unwrap_or_default();
             let old_path = if delta.status() == git2::Delta::Renamed {
-                delta
-                    .old_file()
-                    .path()
-                    .map(|p| p.to_string_lossy().into_owned())
+                crate::guard::diff_path(&delta.old_file()).map(|p| p.to_string_lossy().into_owned())
             } else {
                 None
             };
@@ -350,10 +347,8 @@ pub fn load_commit_files(repo_path: &Path, sha: &str) -> Result<Vec<FileChange>>
             None,
             None,
             Some(&mut |delta, _hunk, line| {
-                let key = delta
-                    .new_file()
-                    .path()
-                    .or_else(|| delta.old_file().path())
+                let key = crate::guard::diff_path(&delta.new_file())
+                    .or_else(|| crate::guard::diff_path(&delta.old_file()))
                     .map(|p| p.to_string_lossy().into_owned())
                     .unwrap_or_default();
                 if let Some(f) = files_ref
@@ -386,16 +381,63 @@ pub fn load_commit_files(repo_path: &Path, sha: &str) -> Result<Vec<FileChange>>
 pub(crate) fn shown(repo: &Repository, path: &str) -> Shown {
     let workdir = repo
         .workdir()
-        .map(|root| root.join(path))
-        .filter(|file| file.symlink_metadata().is_ok())
-        .and_then(|file| git2::Oid::hash_file(git2::ObjectType::Blob, file).ok())
+        .and_then(|root| working_blob(root, path))
         .map(|oid| oid.to_string());
     let index = repo
         .index()
         .ok()
-        .and_then(|index| index.get_path(Path::new(path), 0))
+        .and_then(|index| index_entry(&index, path, 0))
         .map(|entry| entry.id.to_string());
     Shown { workdir, index }
+}
+
+/// The entry of `index` at `path` and `stage`. git2's `Index::get_path` panics on a path it does
+/// not take as one of the repository's, an empty, absolute, or `.`/`..`-led one or one holding a
+/// NUL; such a path, whether a caller gave it or a repository holds it, has no entry.
+pub(crate) fn index_entry(index: &git2::Index, path: &str, stage: i32) -> Option<git2::IndexEntry> {
+    let taken = !path.is_empty()
+        && !path.contains('\0')
+        && Path::new(path)
+            .components()
+            .all(|part| matches!(part, std::path::Component::Normal(_)));
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "the path is one git2 takes as a repository's, which it does not panic on"
+    )]
+    let entry = taken.then(|| index.get_path(Path::new(path), stage));
+    entry.flatten()
+}
+
+/// The blob id `git` gives `path` in the working directory `root`, as `git` reads it: a link as
+/// its target's text, never the file it names, and nothing for a path that passes through a
+/// linked folder, which `git` sees as the link it is and Ocelli never reads through (ADR-0039);
+/// nothing for a path that is not there.
+fn working_blob(root: &Path, path: &str) -> Option<git2::Oid> {
+    let relative = Path::new(path);
+    let mut at = root.to_path_buf();
+    let mut parts = relative.components().peekable();
+    while let Some(part) = parts.next() {
+        if !matches!(part, std::path::Component::Normal(_)) {
+            return None;
+        }
+        at.push(part);
+        let meta = at.symlink_metadata().ok()?;
+        if parts.peek().is_some() {
+            if !meta.is_dir() {
+                return None;
+            }
+        } else if meta.file_type().is_symlink() {
+            let target = std::fs::read_link(&at).ok()?;
+            return git2::Oid::hash_object(
+                git2::ObjectType::Blob,
+                target.to_string_lossy().as_bytes(),
+            )
+            .ok();
+        } else if !meta.is_file() {
+            return None;
+        }
+    }
+    git2::Oid::hash_file(git2::ObjectType::Blob, &at).ok()
 }
 
 /// How much of `path`'s uncommitted change the index holds.
@@ -410,13 +452,14 @@ fn staged(repo: &Repository, path: &str) -> Staged {
 
 /// Returns the unified diff of a single file in a commit as a Vec of DiffLine.
 pub fn load_file_diff(repo_path: &Path, sha: &str, file_path: &str) -> Result<Vec<DiffLine>> {
-    let repo = Repository::discover(repo_path)?;
+    crate::guard::repository_path(file_path)?;
+    let repo = crate::confine::open(repo_path)?;
 
     let mut opts = DiffOptions::new();
     // The path as written, never a pattern that takes other files with it.
     #[expect(
         clippy::disallowed_methods,
-        reason = "the pattern matching is turned off"
+        reason = "the pattern matching is turned off, and the path passed guard::repository_path"
     )]
     opts.pathspec(file_path).disable_pathspec_match(true);
     opts.context_lines(3);

@@ -24,6 +24,8 @@ const FRONT_ENDS: &[&str] = &[
     "ocelli-cli",
     "ocelli",
     "ocelli-measure",
+    "ocelli-commands",
+    "ocelli-server",
 ];
 
 /// What the layout module must not use (ADR-0010).
@@ -156,7 +158,15 @@ fn every_crate_takes_the_workspace_lints_that_deny_unsafe_code() {
         workspace.contains("[workspace.lints.rust]\nunsafe_code = \"deny\""),
         "the workspace denies unsafe code"
     );
-    for member in ["core", "git", "measure", "tui", "../src-tauri"] {
+    for member in [
+        "commands",
+        "core",
+        "git",
+        "measure",
+        "server",
+        "tui",
+        "../src-tauri",
+    ] {
         let manifest = read(&format!("../{member}/Cargo.toml"));
         assert!(
             manifest.contains("[lints]\nworkspace = true"),
@@ -225,7 +235,8 @@ fn commands_on_the_main_thread(source: &str) -> Vec<String> {
                 .to_string();
             let off_main =
                 attribute.contains("async") || rest.split('{').next()?.contains("async fn");
-            let reads = ["session", "GitReader", "GitWriter"]
+            // The shared `Host` holds the session and calls the git adapter (ADR-0037).
+            let reads = ["session", "GitReader", "GitWriter", ".host."]
                 .iter()
                 .any(|uses| rest.contains(uses));
             (reads && !off_main).then_some(name)
@@ -246,8 +257,12 @@ fn the_command_scan_sees_a_command_on_the_main_thread() {
     let source = "#[tauri::command]\npub fn read(state: State) -> W { state.session.window(0, 1) }\n\
                   #[tauri::command(async)]\npub fn fine(state: State) { state.session.x() }\n\
                   #[tauri::command]\npub async fn also(state: State) { GitReader.x() }\n\
-                  #[tauri::command]\npub fn write(state: State) { GitWriter.write() }\n";
-    assert_eq!(commands_on_the_main_thread(source), ["read", "write"]);
+                  #[tauri::command]\npub fn write(state: State) { GitWriter.write() }\n\
+                  #[tauri::command]\npub fn rows(state: State) { state.host.rows_of(s) }\n";
+    assert_eq!(
+        commands_on_the_main_thread(source),
+        ["read", "write", "rows"]
+    );
 }
 
 /// The workspace's members, as the root manifest lists them.
@@ -294,7 +309,14 @@ fn every_front_end_writes_through_the_cores_confirmation_rule() {
     let mut front_ends = Vec::new();
     for member in members(&read("../../Cargo.toml")) {
         let manifest = fs::read_to_string(root.join(&member).join("Cargo.toml")).unwrap();
-        if member == "crates/git" || !dependencies(&manifest).contains(&"ocelli-git".into()) {
+        // A host reaches the git adapter itself or through the commands both hosts share
+        // (ADR-0037).
+        let deps = dependencies(&manifest);
+        if member == "crates/git"
+            || !["ocelli-git", "ocelli-commands"]
+                .iter()
+                .any(|d| deps.contains(&d.to_string()))
+        {
             continue;
         }
         for (path, source) in sources(&root.join(&member).join("src")) {
@@ -304,12 +326,12 @@ fn every_front_end_writes_through_the_cores_confirmation_rule() {
         front_ends.push(member);
     }
     assert!(
-        ["src-tauri", "crates/tui"]
+        ["src-tauri", "crates/commands", "crates/tui"]
             .iter()
             .all(|f| front_ends.iter().any(|m| m == f)),
-        "both front ends are scanned: {front_ends:?}"
+        "every front end is scanned: {front_ends:?}"
     );
-    for writer in ["../../src-tauri/src/commands.rs", "../tui/src/loader.rs"] {
+    for writer in ["../commands/src/lib.rs", "../tui/src/loader.rs"] {
         assert!(
             read(writer).contains("port::perform(&GitWriter"),
             "{writer} writes at all"
@@ -350,4 +372,37 @@ fn git2_reaches_remotes_through_its_own_https_and_ssh_transports_only() {
         !git2.contains("vendored"),
         "the transports link the system's libraries: {git2}"
     );
+}
+
+/// What a source of the git adapter names that would give a transfer a proxy: libgit2 uses none
+/// unless its options are handed one (ADR-0035).
+fn proxies_named(source: &str) -> Vec<&'static str> {
+    ["ProxyOptions", "proxy_options", "auto_proxy", "http.proxy"]
+        .into_iter()
+        .filter(|name| shipped(source).contains(name))
+        .collect()
+}
+
+#[test]
+// Verifies: ADR-0035
+fn no_transfer_of_the_git_adapter_is_given_a_proxy() {
+    let src = Path::new(env!("CARGO_MANIFEST_DIR")).join("../git/src");
+    let named: Vec<String> = sources(&src)
+        .iter()
+        .flat_map(|(path, source)| {
+            proxies_named(source)
+                .into_iter()
+                .map(move |name| format!("{}: {name}", path.display()))
+        })
+        .collect();
+    assert!(named.is_empty(), "a transfer is given a proxy: {named:?}");
+}
+
+#[test]
+// Verifies: ADR-0035
+fn the_proxy_scan_sees_proxy_options() {
+    let given = "fn f(o: &mut FetchOptions) { let mut p = git2::ProxyOptions::new(); \
+                 p.auto(); o.proxy_options(p); }";
+    assert_eq!(proxies_named(given), ["ProxyOptions", "proxy_options"]);
+    assert!(proxies_named("fn g() {}").is_empty());
 }

@@ -1,6 +1,5 @@
 <script lang="ts">
-  import { invoke } from '@tauri-apps/api/core';
-  import { listen } from '@tauri-apps/api/event';
+  import { invoke, listen, remote } from './host.ts';
   import { onMount } from 'svelte';
   import GraphCanvas, { EMPTY_GRAPH_WIDTH, REFS_WIDTH, graphAreaWidth } from './GraphCanvas.svelte';
   import DiffViewer from './DiffViewer.svelte';
@@ -16,9 +15,11 @@
   import { Newest } from './hostAnswers.ts';
   import { actionLabel, confirmedWrite, type Outcome, type Write } from './writes.ts';
   import StashDialog from './StashDialog.svelte';
+  import FolderDialog from './FolderDialog.svelte';
+  import { avatarsOn } from './avatars.ts';
   import type {
     NodeJson, FileChange, DiffLine, RepoRefs, Growth, RowWindow, Relative, Selected, Found,
-    LoadedRefs, Offered, Transfer, Transfers,
+    LoadedRefs, Offered, Transfer, Transfers, RepoWritten,
   } from './types.ts';
   import { applyTheme, storedTheme, type Theme } from './theme/palette.ts';
 
@@ -35,7 +36,7 @@
 
   // ── Avatars — opt-in, default off (ADR-0023) ─────────────────────────────
   const storedAvatars = typeof localStorage !== 'undefined' ? localStorage.getItem('avatars') : null;
-  let showAvatars = $state(storedAvatars === 'on');
+  let showAvatars = $state(avatarsOn(storedAvatars));
 
   $effect(() => {
     try { localStorage.setItem('avatars', showAvatars ? 'on' : 'off'); } catch { /* ignore */ }
@@ -90,6 +91,8 @@
   let notice = $state<string | null>(null);
   // Whether the dialog that describes a new stash is open.
   let stashing = $state(false);
+  /** The remote server's folder listing is open, in place of the desktop's folder dialog. */
+  let choosingFolder = $state(false);
   // Whether a transfer to or from a remote runs, and whether the toolbar's button can cancel it,
   // as the core decides (ADR-0035).
   let fetching = $state(false);
@@ -289,7 +292,7 @@
     }
   }
 
-  // ── Tauri event listeners ──────────────────────────────────────────────────
+  // ── Host event listeners ───────────────────────────────────────────────────
   onMount(() => {
     const unlisten = Promise.all([
       listen<Growth>('history-grew', (e) => onGrowth(e.payload)),
@@ -305,6 +308,11 @@
       }),
       listen<string>('set-status',     (e) => { status = e.payload; }),
       listen<string>('write-progress', (e) => { if (fetching) status = e.payload; }),
+      // Another tab of the remote server wrote to this repository: it is loaded again, as after
+      // a write of this tab, and the status bar says why (ADR-0037).
+      listen<RepoWritten>('repo-written', (e) => {
+        void reloadAfterWrite(null).then(() => { notice = e.payload; });
+      }),
       listen<string>('commit-files', (e) => {
         try {
           changedFiles = typeof e.payload === 'string' ? JSON.parse(e.payload) : e.payload;
@@ -330,6 +338,10 @@
   // ── Actions ────────────────────────────────────────────────────────────────
   async function browseRepo(): Promise<void> {
     notice = null;
+    if (remote) {
+      choosingFolder = true;
+      return;
+    }
     status = 'Selecting repository…';
     await invoke('browse_repo').catch((e: unknown) => { status = 'Error: ' + e; });
   }
@@ -609,6 +621,10 @@
     />
   </div><!-- end #top-pane -->
 </div><!-- end #main -->
+
+{#if choosingFolder}
+  <FolderDialog onOpen={(path) => void openRepoPath(path)} onClose={() => (choosingFolder = false)} />
+{/if}
 
 {#if stashing}
   <StashDialog onStash={performWrite} onClose={() => (stashing = false)} />

@@ -4,7 +4,7 @@
 use crate::guard::nothing_in_progress;
 use anyhow::{Result, bail};
 use git2::build::CheckoutBuilder;
-use git2::{CheckoutNotificationType, Commit, ErrorCode, Repository};
+use git2::{Commit, ErrorCode, Repository};
 use std::path::Path;
 
 /// Checks `target`'s tree out over the checked-out one, the uncommitted changes carried along,
@@ -16,8 +16,8 @@ pub(crate) fn check_out(repo: &Repository, target: &Commit) -> Result<()> {
     let goal = target.tree()?;
     let paths = |diff: git2::Diff| -> Vec<String> {
         diff.deltas()
-            .flat_map(|d| [d.old_file().path(), d.new_file().path()])
-            .flatten()
+            .flat_map(|d| [d.old_file(), d.new_file()])
+            .filter_map(|f| crate::guard::diff_path(&f))
             .map(|p| p.display().to_string())
             .collect()
     };
@@ -47,7 +47,6 @@ pub(crate) fn check_out(repo: &Repository, target: &Commit) -> Result<()> {
         .cloned()
         .collect();
     nothing_untracked_in_the_way(repo, &written)?;
-    let mut in_the_way = Vec::new();
     let mut checkout = CheckoutBuilder::new();
     // Only the paths the target changes: a file deleted in the working directory comes back
     // where the target changes it, and stays deleted where it does not, as `git switch` does.
@@ -55,24 +54,19 @@ pub(crate) fn check_out(repo: &Repository, target: &Commit) -> Result<()> {
     for path in &changed {
         #[expect(
             clippy::disallowed_methods,
-            reason = "the pattern matching is turned off"
+            reason = "the pattern matching is turned off, and a path libgit2 read holds no NUL"
         )]
         checkout.path(path.as_str());
     }
-    checkout
-        .recreate_missing(true)
-        .notify_on(CheckoutNotificationType::CONFLICT)
-        .notify(|_, path, _, _, _| {
-            if let Some(path) = path {
-                in_the_way.push(path.display().to_string());
-            }
-            true
-        });
+    checkout.recreate_missing(true);
     let checked_out = repo.checkout_tree(target.as_object(), Some(&mut checkout));
     drop(checkout);
     match checked_out {
         Err(e) if e.code() == ErrorCode::Conflict => {
-            in_the_way.sort();
+            let in_the_way = changed_in_the_working_directory(repo, &changed)?;
+            if in_the_way.is_empty() {
+                bail!("uncommitted changes are in the way: commit or stash them first");
+            }
             bail!(
                 "uncommitted changes to {} are in the way: commit or stash them first",
                 in_the_way.join(", ")
@@ -81,6 +75,28 @@ pub(crate) fn check_out(repo: &Repository, target: &Commit) -> Result<()> {
         result => result?,
     }
     Ok(())
+}
+
+/// Which of `paths` the working directory changes or holds untracked, by name, sorted: what a
+/// checkout libgit2 refused for a conflict found in its way. libgit2 would name them to a
+/// notify callback, but git2 unwraps the path it hands that as UTF-8 on Windows, where a
+/// release build aborts on the panic.
+fn changed_in_the_working_directory(repo: &Repository, paths: &[String]) -> Result<Vec<String>> {
+    let mut options = git2::StatusOptions::new();
+    options
+        .include_untracked(true)
+        .recurse_untracked_dirs(true)
+        .exclude_submodules(true);
+    let mut found: Vec<String> = repo
+        .statuses(Some(&mut options))?
+        .iter()
+        .filter(|e| e.status() != git2::Status::CURRENT && !e.status().is_ignored())
+        .map(|e| String::from_utf8_lossy(e.path_bytes()).into_owned())
+        .filter(|p| paths.contains(p))
+        .collect();
+    found.sort();
+    found.dedup();
+    Ok(found)
 }
 
 /// Refuses where a write would put a file at one of `files`, the paths its result holds a file at
@@ -93,7 +109,7 @@ pub(crate) fn nothing_untracked_in_the_way(repo: &Repository, files: &[String]) 
         return Ok(());
     };
     let index = repo.index()?;
-    let tracked = |p: &str| index.get_path(Path::new(p), 0).is_some();
+    let tracked = |p: &str| crate::git::index_entry(&index, p, 0).is_some();
     for path in files {
         let dir = root.join(path);
         if dir.symlink_metadata().is_ok_and(|m| m.is_dir()) {

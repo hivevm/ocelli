@@ -85,7 +85,7 @@ pub(crate) fn resolve(
                     let mut checkout = CheckoutBuilder::new();
                     #[expect(
                         clippy::disallowed_methods,
-                        reason = "the pattern matching is turned off"
+                        reason = "the pattern matching is turned off, and the path is a conflict libgit2 read"
                     )]
                     checkout.force().disable_pathspec_match(true).path(path);
                     if let Err(e) = repo.checkout_index(Some(&mut index), Some(&mut checkout)) {
@@ -236,7 +236,9 @@ pub(crate) fn abort(repo: &Repository, operation: Operation, head: &str) -> Resu
     let mut touched: Vec<String> = repo
         .diff_tree_to_index(Some(&tree), Some(&index), None)?
         .deltas()
-        .filter_map(|d| d.new_file().path().or(d.old_file().path()))
+        .filter_map(|d| {
+            crate::guard::diff_path(&d.new_file()).or(crate::guard::diff_path(&d.old_file()))
+        })
         .map(|p| p.to_string_lossy().into_owned())
         .collect();
     let conflicted: Vec<String> = conflicts_of(&index).into_iter().map(|c| c.path).collect();
@@ -281,7 +283,7 @@ pub(crate) fn abort(repo: &Repository, operation: Operation, head: &str) -> Resu
         // there, unchanged; it is removed before the checkout, which would write through a link.
         let own_parents = std::cell::RefCell::new(Vec::new());
         let its_own = |dir: &str| {
-            let own = index.get_path(Path::new(dir), 0).is_some()
+            let own = crate::git::index_entry(&index, dir, 0).is_some()
                 && !changed.contains_key(dir)
                 && root.join(dir).symlink_metadata().is_ok_and(|m| !m.is_dir());
             if own {
@@ -304,7 +306,7 @@ pub(crate) fn abort(repo: &Repository, operation: Operation, head: &str) -> Resu
                     .join(path)
                     .symlink_metadata()
                     .is_ok_and(|m| !m.is_dir())
-                && index.get_path(Path::new(path), 0).is_some()
+                && crate::git::index_entry(&index, path, 0).is_some()
                 && !changed.contains_key(path.as_str())
             {
                 own_parents.push(path.clone());
@@ -333,7 +335,7 @@ pub(crate) fn abort(repo: &Repository, operation: Operation, head: &str) -> Resu
         for path in &touched {
             #[expect(
                 clippy::disallowed_methods,
-                reason = "the pattern matching is turned off"
+                reason = "the pattern matching is turned off, and a path libgit2 read holds no NUL"
             )]
             checkout.path(path.as_str());
         }

@@ -12,6 +12,26 @@ an ADR. What the golden path already shows needs none. Few entries that hold bea
 skimmed. The design revision drops what prevented nothing
 ([`AGENTS.md` §5](../AGENTS.md#5-quality-bar--definition-of-done)).
 
+- **A path and a name are the file system's to spell, on every system CI runs on.** On Windows
+  libgit2 writes a path with forward slashes and without the `\\?\` prefix `canonicalize` adds,
+  and APFS refuses a name that is not UTF-8; a path is compared with another only after both are
+  resolved the same way, and a fixture that needs such a name is made where the file system
+  takes it, the assertion holding either way. The local checks run on Linux alone.
+- **A string a caller gives reaches git2 only past a guard that refuses what git2 would panic on.**
+  git2 unwraps some conversions into a C string or a repository path, and a release build aborts
+  on a panic, every tab of the remote server with it. A write's strings pass `guard::no_nul`, a
+  path `guard::repository_path`; a git2 method that panics on a string a caller, a repository,
+  or a remote holds, on any system CI runs on, is disallowed in the git adapter's `clippy.toml`
+  outside its guarded wrapper. `crates/git/tests/git2_unwraps.txt` audits every place the locked
+  git2 panics, against the libgit2 its libgit2-sys holds, and an upgrade of either fails until
+  the changed places are audited again. A diff's path, which git2 would unwrap as UTF-8 on
+  Windows, is read in bytes, lossily on Windows alone; on Windows, too, a submodule or working
+  tree whose path libgit2 reads from a file that is not UTF-8 is left out, while elsewhere every
+  one is listed as configured. libgit2 reads those files again after the check: one another
+  program changes in between is not caught.
+- **What a connection starts ends with it, and every wait on shared state is bounded.** A task,
+  a wait for a turn, or a transfer a closed tab started is aborted, given up, or stopped; past a
+  bound a request is refused at once.
 - **A test looks only for what it started.** A process or a file it checks for carries its own
   run's mark, its scratch directory or its process group: a machine-wide search sees another
   session's run.
@@ -91,7 +111,12 @@ skimmed. The design revision drops what prevented nothing
   cannot keep.** A second click on a write that has not answered yet writes twice, or is refused
   for a state the first one changed; a Cancel on a push, which libgit2 cannot stop once its
   objects are sent, tells the developer that nothing was pushed when it was.
-- **What a repository's configuration chooses is untrusted wherever it is passed on.** A remote's
+- **What a repository's configuration or layout chooses is untrusted wherever it is passed on.**
+  A check that a repository stays inside a boundary names each thing libgit2 reads or follows on
+  its own, as the pinned libgit2 parses it (a `.git` file, `commondir`, `core.worktree`,
+  alternates and how a line ends, a link anywhere in the git directory, a submodule's git
+  directory, a search upwards, a remote's address that libgit2's local transport opens), and its
+  tests build each one as a way out. A remote's
   address and the user name in it are checked for what the receiving side reads as structure, a
   line break for a credential helper, before they reach it, as CVE-2020-5260 showed; where two
   parsers read one value, as git2 and libgit2 read an address, it goes on only where both read

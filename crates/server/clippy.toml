@@ -1,0 +1,7 @@
+# The remote server compares a path with its root only once both are resolved the same way
+# (ADR-0039, docs/CONVENTIONS.md). A method listed here is used only under
+# `#[expect(clippy::disallowed_methods, reason = "…")]`, the reason saying why it is safe where it
+# stands.
+disallowed-methods = [
+    { path = "std::path::Path::starts_with", reason = "compares a path as it stands: decide it with ocelli_git::confine::below, which resolves both sides first" },
+]
