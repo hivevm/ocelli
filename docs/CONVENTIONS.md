@@ -36,21 +36,27 @@ skimmed. The design revision drops what prevented nothing
   writes through a link where it expects a directory, and through one at a file's place the index
   does not hold as a link; it opens a conflicted path to write a side there, and writes a side of
   a conflict between a file and a directory, or between two renames, under the path with `~` and
-  a label, opening it through a link that points nowhere; a name the file system cannot hold
-  stops it half done; and it does not check that a tree a hostile remote delivered is well
-  formed. Before each such call, which the git adapter's `clippy.toml` allows nowhere else, every
-  path the call can change, as the difference between what it writes and what is there, is looked
-  at, and every tree the call reads along such a path: a link at a path the write changes or at a
-  directory above one, a link at a conflicted path or beside it under its name and `~`, a conflict
-  between a file and a directory, a tree that names one entry twice or two entries one name where
-  the file system or `core.ignorecase` does not tell them apart, a name that is not UTF-8 on
-  Windows or macOS, or one longer than a file system takes refuses the write before anything
-  changes. A link is passed only where the checked-out commit and the index both hold it as a
-  link and the write replaces it; a link the developer only staged is never trusted, and a check
-  of the guard's own that would look past a link leaves the link to the guard. A second program
-  that swaps a directory for a link, or a file for a hard link to one outside, between the look
-  and the write is not caught: a local attacker racing the write, which the threat model leaves
-  out.
+  a label, which for a cherry-pick, a revert, or a rebase it takes from the commit's subject, one
+  that can hold `/` and `..` and write a side anywhere writable; it creates `<path>.lock`
+  exclusively to write a merged side, so anything already there stops it half done; a name the
+  file system cannot hold stops it half done too; and it does not check that a tree a hostile
+  remote delivered is well formed. So each call that can write a conflict is given its labels,
+  `HEAD` and the side's as `git` writes them, each refused unless it is path-safe
+  ([ADR-0033](adr/0033-writes-what-git-writes.md),
+  [ADR-0040](adr/0040-conflict-labels-path-safe.md)). Before each such
+  call, which the git adapter's `clippy.toml` allows nowhere else, every path the call can change,
+  as the difference between what it writes and what is there, is looked at, and every tree the
+  call reads along such a path: a link at a path the write changes or at a directory above one, a
+  link at a conflicted path or beside it under its name and `~`, anything at its `.lock`, a
+  conflict between a file and a directory, a tree that names one entry twice or two entries one
+  name where the file system or `core.ignorecase` does not tell them apart, a suffixed side's
+  name, label included, that is not UTF-8 on Windows or macOS or longer than a file system takes,
+  refuses the write before anything changes. A link is passed only where the checked-out commit
+  and the index both hold it as a link and the write replaces it; a link the developer only staged
+  is never trusted, and a check of the guard's own that would look past a link leaves the link to
+  the guard. Another program that swaps a directory for a link, or a file for a hard link to one
+  outside, between the look and the write is not caught: a local attacker racing the write, which
+  the threat model leaves out.
 - **What a connection starts ends with it, and every wait on shared state is bounded.** A task,
   a wait for a turn, or a transfer a closed tab started is aborted, given up, or stopped; past a
   bound a request is refused at once.
@@ -118,11 +124,13 @@ skimmed. The design revision drops what prevented nothing
   own shows one commit's result on another.
 - **A write's tests read what `git` does off `git` run on the same input, never recalled.** A
   write does what `git` does for the same command, refusing first where `git` would or a listed
-  departure decides ([ADR-0033](adr/0033-writes-what-git-writes.md)); libgit2 reads none of
-  the index, the operation in progress, or the configuration keys `git` weighs for the caller,
-  so each is a state its tests set up. A departure is tested against `git` doing otherwise. A
-  refusal's test compares everything the write can change before and after: `HEAD`, the refs,
-  the index, the working directory's status with ignored files, the configuration, the stash,
+  departure decides
+  ([ADR-0033](adr/0033-writes-what-git-writes.md)); libgit2 reads
+  none of the index, the operation in progress, or the configuration keys `git` weighs for the
+  caller, so each is a state its tests set up. A departure is tested against `git` doing
+  otherwise. A refusal's test compares everything the write can change before and after:
+  `HEAD`, the refs, the index, the working directory's status with ignored files, the
+  configuration, the stash,
   and an operation in progress, the one snapshot `refused` in `crates/git/tests/support/mod.rs`
   takes. `clippy.toml` of the git adapter refuses the methods that take a path as a pattern or
   write the working directory past libgit2's checkout, and a call that stays says why. `git`'s
