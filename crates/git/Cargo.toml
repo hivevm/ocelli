@@ -13,6 +13,11 @@ git2 = { version = "0.20", default-features = false, features = ["https", "ssh"]
 # The parser git2's credential helper reads a remote's address with, checked against libgit2's.
 url = "2"
 
+# macOS ships no OpenSSL, and libssh2 needs one: build it in rather than link the build
+# machine's (ADR-0041).
+[target.'cfg(target_os = "macos")'.dependencies]
+openssl-sys = { version = "0.9", features = ["vendored"] }
+
 [dev-dependencies]
 serde = "1"
 serde_json = "1"
