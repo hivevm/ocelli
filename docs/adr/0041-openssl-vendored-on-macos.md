@@ -1,6 +1,6 @@
 # ADR-0041: On macOS, Ocelli builds OpenSSL into its binaries and links no library outside the system
 
-- **Status:** 🟡 proposed
+- **Status:** 🟢 accepted
 - **Date:** 2026-10-10
 - **Deciders:** Markus Brigl
 - **Applies to:** the OpenSSL that `crates/git/Cargo.toml` links on macOS, `Cargo.lock`, and the macOS linkage check of the `build` job in `.github/workflows/checks.yml`
