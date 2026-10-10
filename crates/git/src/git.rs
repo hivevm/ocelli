@@ -49,8 +49,9 @@ pub fn load_chunks(
         let name = reference.name().unwrap_or("").to_string();
 
         // refs/stash is handled separately (see load_stashes) so the stash's
-        // internal index/untracked parent commits never leak into the graph.
-        if name == "refs/stash" {
+        // internal index/untracked parent commits never leak into the graph; Ocelli's own
+        // scratch references are no developer's.
+        if name == "refs/stash" || name.starts_with(crate::remote::OWN_REFS) {
             continue;
         }
         let pretty = pretty_ref_name(&name);
@@ -148,10 +149,10 @@ fn with_synthetic_nodes(
     repo_path: &Path,
     commits: &mut Vec<CommitData>,
 ) -> Result<Vec<CommitData>> {
-    let mut repo = crate::confine::open(repo_path)?;
+    let repo = crate::confine::open(repo_path)?;
     // Stash entries, each a node hanging off its base commit.
     let walked = commits.len();
-    load_stashes(&mut repo, commits);
+    load_stashes(&repo, commits);
 
     // A synthetic "uncommitted changes" node when the worktree is dirty.
     // Its timestamp is "now", so the temporal sort places it at row 0.
@@ -182,16 +183,9 @@ fn fit_first_chunk(commits: &mut Vec<CommitData>, walked: usize) -> Vec<CommitDa
 /// Collects stash entries via the stash reflog and appends one node per stash.
 /// Only the first parent (the base commit the stash was created on) is kept, so
 /// the internal index/untracked parent commits stay out of the graph.
-fn load_stashes(repo: &mut Repository, commits: &mut Vec<CommitData>) {
-    // stash_foreach hands us (index, message, oid); we only collect here because
-    // the &mut borrow forbids touching the repo inside the callback.
-    let mut entries: Vec<(usize, String, git2::Oid)> = Vec::new();
-    let _ = repo.stash_foreach(|index, message, oid| {
-        entries.push((index, message.to_string(), *oid));
-        true
-    });
-
-    for (index, message, oid) in entries {
+fn load_stashes(repo: &Repository, commits: &mut Vec<CommitData>) {
+    let entries = crate::guard::stashes(repo).unwrap_or_default();
+    for (index, (message, oid)) in entries.into_iter().enumerate() {
         let Ok(commit) = repo.find_commit(oid) else {
             continue;
         };
@@ -325,17 +319,12 @@ pub fn load_commit_files(repo_path: &Path, sha: &str) -> Result<Vec<FileChange>>
                 git2::Delta::Copied => FileStatus::Copied,
                 _ => FileStatus::Unknown,
             };
-            let path = delta
-                .new_file()
-                .path()
-                .or_else(|| delta.old_file().path())
+            let path = crate::guard::diff_path(&delta.new_file())
+                .or_else(|| crate::guard::diff_path(&delta.old_file()))
                 .map(|p| p.to_string_lossy().into_owned())
                 .unwrap_or_default();
             let old_path = if delta.status() == git2::Delta::Renamed {
-                delta
-                    .old_file()
-                    .path()
-                    .map(|p| p.to_string_lossy().into_owned())
+                crate::guard::diff_path(&delta.old_file()).map(|p| p.to_string_lossy().into_owned())
             } else {
                 None
             };
@@ -358,10 +347,8 @@ pub fn load_commit_files(repo_path: &Path, sha: &str) -> Result<Vec<FileChange>>
             None,
             None,
             Some(&mut |delta, _hunk, line| {
-                let key = delta
-                    .new_file()
-                    .path()
-                    .or_else(|| delta.old_file().path())
+                let key = crate::guard::diff_path(&delta.new_file())
+                    .or_else(|| crate::guard::diff_path(&delta.old_file()))
                     .map(|p| p.to_string_lossy().into_owned())
                     .unwrap_or_default();
                 if let Some(f) = files_ref
@@ -472,7 +459,7 @@ pub fn load_file_diff(repo_path: &Path, sha: &str, file_path: &str) -> Result<Ve
     // The path as written, never a pattern that takes other files with it.
     #[expect(
         clippy::disallowed_methods,
-        reason = "the pattern matching is turned off"
+        reason = "the pattern matching is turned off, and the path passed guard::repository_path"
     )]
     opts.pathspec(file_path).disable_pathspec_match(true);
     opts.context_lines(3);

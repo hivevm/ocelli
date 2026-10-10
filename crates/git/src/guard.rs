@@ -1,12 +1,16 @@
 //! What a write checks before it changes anything: that the repository still holds what the
 //! developer saw, that nothing is in progress that the write would mix with, that an identity
 //! is configured and no signature is asked for (ADR-0033). Each check is written once here, for
-//! the local writes, the transfers, and the operations alike.
+//! the local writes, the transfers, and the operations alike, with the wrappers through which
+//! alone a git2 method that would panic on a string is called (`clippy.toml`).
 
 use crate::refs::operation_of;
 use anyhow::{Context, Result, bail};
-use git2::{BranchType, Reference, Repository, RepositoryState};
+use git2::{
+    BranchType, ConfigEntry, ErrorCode, Oid, Reference, Repository, RepositoryState, Transaction,
+};
 use ocelli_core::port::{Conflict, Write};
+use std::path::PathBuf;
 
 /// The refusal where no identity is configured to write with.
 pub(crate) const NO_IDENTITY: &str =
@@ -146,6 +150,201 @@ pub(crate) fn refname_of(branch: &git2::Branch) -> Result<String> {
 )]
 pub(crate) fn valid_ref_name(refname: &str) -> bool {
     !refname.contains('\0') && Reference::is_valid_name(refname)
+}
+
+/// Refuses a string holding a NUL, which git2 would panic on, naming it as `what`.
+fn nul_free(value: &str, what: &str) -> Result<()> {
+    if value.contains('\0') {
+        bail!("the {what} holds a NUL character, which git does not take");
+    }
+    Ok(())
+}
+
+/// Locks `refname` in `transaction`. git2's `Transaction::lock_ref` panics on a NUL: it is
+/// called only here, after the NUL is refused.
+#[expect(
+    clippy::disallowed_methods,
+    reason = "the one call, a name with a NUL refused before git2 sees it"
+)]
+pub(crate) fn lock_ref(transaction: &mut Transaction, refname: &str) -> Result<()> {
+    nul_free(refname, "reference name")?;
+    Ok(transaction.lock_ref(refname)?)
+}
+
+/// Points the locked `refname` of `transaction` at `target`, logged with `message`. git2's
+/// `Transaction::set_target` panics on a NUL: it is called only here, after the NUL is refused.
+#[expect(
+    clippy::disallowed_methods,
+    reason = "the one call, a name or message with a NUL refused before git2 sees it"
+)]
+pub(crate) fn set_target(
+    transaction: &mut Transaction,
+    refname: &str,
+    target: Oid,
+    message: &str,
+) -> Result<()> {
+    nul_free(refname, "reference name")?;
+    nul_free(message, "reflog message")?;
+    Ok(transaction.set_target(refname, target, None, message)?)
+}
+
+/// The stashes, newest first, each with its message and commit, read from the stash's reflog as
+/// libgit2's `git_stash_foreach` reads them. git2's `Repository::stash_foreach` panics on a
+/// message that is not UTF-8, which a repository may hold: a message is read here lossily.
+pub(crate) fn stashes(repo: &Repository) -> Result<Vec<(String, Oid)>> {
+    match repo.find_reference("refs/stash") {
+        Err(e) if e.code() == ErrorCode::NotFound => return Ok(Vec::new()),
+        found => found?,
+    };
+    Ok(repo
+        .reflog("refs/stash")?
+        .iter()
+        .map(|entry| {
+            let message = entry.message_bytes().unwrap_or_default();
+            (
+                String::from_utf8_lossy(message).into_owned(),
+                entry.id_new(),
+            )
+        })
+        .collect())
+}
+
+/// The value of a configuration entry, none where it is not UTF-8, refused for a key written
+/// without one, as `git` refuses it for a key that takes a string. git2's `ConfigEntry::value`
+/// panics on such a key, which a repository's configuration may hold.
+#[expect(
+    clippy::disallowed_methods,
+    reason = "the one call, a key without a value refused before git2 is asked"
+)]
+pub(crate) fn config_value<'e>(entry: &'e ConfigEntry) -> Result<Option<&'e str>> {
+    if !entry.has_value() {
+        let key = String::from_utf8_lossy(entry.name_bytes());
+        bail!("missing value for '{key}' in the configuration, which git refuses too");
+    }
+    Ok(entry.value())
+}
+
+/// The path of the file `file` of a diff names. git2's `DiffFile::path` unwraps it as UTF-8 on
+/// Windows, where a tree may hold a name that is not: there it is read lossily, a name Windows
+/// could not hold anyway, and elsewhere as the bytes it is.
+pub(crate) fn diff_path(file: &git2::DiffFile) -> Option<PathBuf> {
+    file.path_bytes().map(bytes_to_path)
+}
+
+/// The path the bytes `bytes` spell, lossily where a path is UTF-16, on Windows.
+fn bytes_to_path(bytes: &[u8]) -> PathBuf {
+    #[cfg(unix)]
+    {
+        use std::os::unix::ffi::OsStrExt;
+        PathBuf::from(std::ffi::OsStr::from_bytes(bytes))
+    }
+    #[cfg(not(unix))]
+    {
+        PathBuf::from(String::from_utf8_lossy(bytes).into_owned())
+    }
+}
+
+/// The submodules of `repo` with their paths, as configured. On Windows, where git2's
+/// `Submodule::path` unwraps the path as UTF-8 and has no form in bytes, none where a path
+/// libgit2 could give one is not UTF-8. libgit2 reads its sources again after the check: a
+/// file another program changes between the two is not seen by it.
+pub(crate) fn submodules(repo: &Repository) -> Vec<(git2::Submodule<'_>, PathBuf)> {
+    #[cfg(windows)]
+    if !submodule_paths_are_utf8(repo) {
+        return Vec::new();
+    }
+    let Ok(submodules) = repo.submodules() else {
+        return Vec::new();
+    };
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "git2 reads the path in bytes but on Windows, where every path libgit2 takes a \
+                  submodule's from is UTF-8, as checked above"
+    )]
+    submodules
+        .into_iter()
+        .map(|submodule| {
+            let path = submodule.path().to_path_buf();
+            (submodule, path)
+        })
+        .collect()
+}
+
+/// Whether every place libgit2 takes a submodule's path from holds UTF-8 there: the names and
+/// paths of the submodules in `.gitmodules` and in the repository's configuration, and the
+/// path of every submodule entry of the index and of the checked-out commit.
+#[cfg(windows)]
+#[expect(
+    clippy::disallowed_methods,
+    reason = "a value is asked for only once the entry is known to hold one"
+)]
+fn submodule_paths_are_utf8(repo: &Repository) -> bool {
+    let config_utf8 = |config: Result<git2::Config, git2::Error>| {
+        let Ok(config) = config.and_then(|mut c| c.snapshot()) else {
+            return false;
+        };
+        let Ok(entries) = config.entries(Some("^submodule\\.")) else {
+            return false;
+        };
+        let mut utf8 = true;
+        let walked = entries.for_each(|entry| {
+            utf8 &= entry.name().is_some() && (!entry.has_value() || entry.value().is_some());
+        });
+        walked.is_ok() && utf8
+    };
+    let gitmodules = repo
+        .workdir()
+        .map(|w| w.join(".gitmodules"))
+        .filter(|p| p.exists());
+    if gitmodules.is_some_and(|p| !config_utf8(git2::Config::open(&p))) {
+        return false;
+    }
+    if !config_utf8(repo.config()) {
+        return false;
+    }
+    const GITLINK: u32 = 0o160000;
+    if let Ok(index) = repo.index()
+        && index
+            .iter()
+            .any(|e| e.mode == GITLINK && std::str::from_utf8(&e.path).is_err())
+    {
+        return false;
+    }
+    let Ok(head) = repo.head().and_then(|h| h.peel_to_tree()) else {
+        return true;
+    };
+    let mut utf8 = true;
+    let walked = head.walk(git2::TreeWalkMode::PreOrder, |_, entry| {
+        if entry.filemode() as u32 == GITLINK && std::str::from_utf8(entry.name_bytes()).is_err() {
+            utf8 = false;
+        }
+        git2::TreeWalkResult::Ok
+    });
+    walked.is_ok() && utf8
+}
+
+/// The path of the working tree `worktree`, named `name`. On Windows, where git2's
+/// `Worktree::path` unwraps it as UTF-8 and has no form in bytes, none where the file libgit2
+/// read it from is not UTF-8; the file is read again here, after libgit2 read it, so one another
+/// program changes between the two is not seen as libgit2 saw it.
+pub(crate) fn worktree_path(
+    repo: &Repository,
+    name: &str,
+    worktree: &git2::Worktree,
+) -> Option<PathBuf> {
+    #[cfg(windows)]
+    {
+        let link = repo.commondir().join("worktrees").join(name).join("gitdir");
+        std::str::from_utf8(&std::fs::read(link).ok()?).ok()?;
+    }
+    #[cfg(not(windows))]
+    let _ = (repo, name);
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "git2 reads the path in bytes but on Windows, where the file libgit2 reads it \
+                  from, below a directory it resolved, is UTF-8, as checked above"
+    )]
+    Some(worktree.path().to_path_buf())
 }
 
 /// Every string a caller gives in `write`, by the field's name: names, ids, messages, paths, a
@@ -310,7 +509,7 @@ pub(crate) fn valid_branch_name(name: &str) -> Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use super::{repository_path, valid_ref_name};
+    use super::{lock_ref, repository_path, set_target, valid_ref_name};
 
     #[test]
     // Verifies: ADR-0033
@@ -320,6 +519,35 @@ mod tests {
             assert!(!valid_ref_name(name), "{name:?}");
         }
         assert!(!valid_ref_name("refs/heads/a..b"));
+    }
+
+    /// A scratch directory of this process, removed when it goes, a failed test's too.
+    struct Scratch(std::path::PathBuf);
+
+    impl Drop for Scratch {
+        #[expect(
+            clippy::disallowed_methods,
+            reason = "a test removes the repository it made"
+        )]
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
+    }
+
+    #[test]
+    // Verifies: ADR-0033
+    fn a_transaction_refuses_a_nul_before_git2_sees_it() {
+        let scratch =
+            Scratch(std::env::temp_dir().join(format!("ocelli-guard-nul-{}", std::process::id())));
+        let repo = git2::Repository::init(&scratch.0).unwrap();
+        let mut transaction = repo.transaction().unwrap();
+        let held = lock_ref(&mut transaction, "refs/heads/a\0b").unwrap_err();
+        assert!(held.to_string().contains("NUL"), "{held}");
+        let id = git2::Oid::zero();
+        for (name, message) in [("refs/heads/a\0b", "m"), ("refs/heads/a", "m\0")] {
+            let set = set_target(&mut transaction, name, id, message).unwrap_err();
+            assert!(set.to_string().contains("NUL"), "{set}");
+        }
     }
 
     #[test]

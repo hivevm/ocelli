@@ -20,8 +20,15 @@ skimmed. The design revision drops what prevented nothing
 - **A string a caller gives reaches git2 only past a guard that refuses what git2 would panic on.**
   git2 unwraps some conversions into a C string or a repository path, and a release build aborts
   on a panic, every tab of the remote server with it. A write's strings pass `guard::no_nul`, a
-  path `guard::repository_path`; a git2 method known to unwrap is disallowed in the git adapter's
-  `clippy.toml` outside its guarded wrapper.
+  path `guard::repository_path`; a git2 method that panics on a string a caller, a repository,
+  or a remote holds, on any system CI runs on, is disallowed in the git adapter's `clippy.toml`
+  outside its guarded wrapper. `crates/git/tests/git2_unwraps.txt` audits every place the locked
+  git2 panics, against the libgit2 its libgit2-sys holds, and an upgrade of either fails until
+  the changed places are audited again. A diff's path, which git2 would unwrap as UTF-8 on
+  Windows, is read in bytes, lossily on Windows alone; on Windows, too, a submodule or working
+  tree whose path libgit2 reads from a file that is not UTF-8 is left out, while elsewhere every
+  one is listed as configured. libgit2 reads those files again after the check: one another
+  program changes in between is not caught.
 - **What a connection starts ends with it, and every wait on shared state is bounded.** A task,
   a wait for a turn, or a transfer a closed tab started is aborted, given up, or stopped; past a
   bound a request is refused at once.

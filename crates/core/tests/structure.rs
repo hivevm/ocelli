@@ -373,3 +373,36 @@ fn git2_reaches_remotes_through_its_own_https_and_ssh_transports_only() {
         "the transports link the system's libraries: {git2}"
     );
 }
+
+/// What a source of the git adapter names that would give a transfer a proxy: libgit2 uses none
+/// unless its options are handed one (ADR-0035).
+fn proxies_named(source: &str) -> Vec<&'static str> {
+    ["ProxyOptions", "proxy_options", "auto_proxy", "http.proxy"]
+        .into_iter()
+        .filter(|name| shipped(source).contains(name))
+        .collect()
+}
+
+#[test]
+// Verifies: ADR-0035
+fn no_transfer_of_the_git_adapter_is_given_a_proxy() {
+    let src = Path::new(env!("CARGO_MANIFEST_DIR")).join("../git/src");
+    let named: Vec<String> = sources(&src)
+        .iter()
+        .flat_map(|(path, source)| {
+            proxies_named(source)
+                .into_iter()
+                .map(move |name| format!("{}: {name}", path.display()))
+        })
+        .collect();
+    assert!(named.is_empty(), "a transfer is given a proxy: {named:?}");
+}
+
+#[test]
+// Verifies: ADR-0035
+fn the_proxy_scan_sees_proxy_options() {
+    let given = "fn f(o: &mut FetchOptions) { let mut p = git2::ProxyOptions::new(); \
+                 p.auto(); o.proxy_options(p); }";
+    assert_eq!(proxies_named(given), ["ProxyOptions", "proxy_options"]);
+    assert!(proxies_named("fn g() {}").is_empty());
+}

@@ -140,7 +140,7 @@ fn dest_suppressed(repo: &Repository, name: &str) -> Result<bool> {
     if let Ok(mut entries) = config.multivar("merge.suppressDest", None) {
         while let Some(entry) = entries.next() {
             seen = true;
-            match entry?.value() {
+            match crate::guard::config_value(entry?)? {
                 Some("") | None => patterns.clear(),
                 Some(p) => patterns.push(p.to_string()),
             }
@@ -165,12 +165,11 @@ fn fast_forward(
     message: &str,
 ) -> Result<()> {
     let mut transaction = repo.transaction()?;
-    transaction
-        .lock_ref(refname)
+    crate::guard::lock_ref(&mut transaction, refname)
         .with_context(|| format!("'{name}' is locked by another program: try again later"))?;
     branch_as_shown(repo, name, tip)?;
     check_out(repo, target)?;
-    transaction.set_target(refname, target.id(), None, message)?;
+    crate::guard::set_target(&mut transaction, refname, target.id(), message)?;
     transaction.commit()?;
     Ok(())
 }

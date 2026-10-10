@@ -121,14 +121,10 @@ fn stash_keeps_everything(repo: &Repository, untracked: bool) -> Result<()> {
 }
 
 /// Refuses unless the stash at `index` is still the entry the developer saw, by its commit.
-fn stash_as_shown(repo: &mut Repository, index: usize, commit: &str) -> Result<()> {
-    let mut found = None;
-    repo.stash_foreach(|i, _, oid| {
-        if i == index {
-            found = Some(oid.to_string());
-        }
-        true
-    })?;
+fn stash_as_shown(repo: &Repository, index: usize, commit: &str) -> Result<()> {
+    let found = crate::guard::stashes(repo)?
+        .get(index)
+        .map(|(_, oid)| oid.to_string());
     if found.as_deref() != Some(commit) {
         bail!(
             "stash@{{{index}}} is no longer the stash shown: reload to see the stashes as they are"
@@ -172,8 +168,8 @@ fn check_applies(repo: &Repository, index: usize, commit: &str) -> Result<()> {
         .deltas()
     {
         for file in [delta.old_file(), delta.new_file()] {
-            if let Some(path) = file.path() {
-                written.push(path.to_path_buf());
+            if let Some(path) = crate::guard::diff_path(&file) {
+                written.push(path);
             }
         }
     }
