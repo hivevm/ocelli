@@ -103,12 +103,15 @@ golden path and the test pattern an agent copies from are named here.
   it, live in `remote.rs` and reach the remote through libgit2's own transports with the SSH agent
   and the credential helper of the developer's global and system configuration, a helper asked
   only for a remote named by its domain over HTTPS, and with libgit2's server timeouts set once
-  for the process, the git adapter's one `unsafe` block
-  ([ADR-0035](adr/0035-remotes-through-libgit2-transports.md)). The refs
-  name the default remote; for the remote server's turns, `refs.rs` also reads a repository's
-  resolved common directory (`common_dir`) and a digest of where its refs point (`refs_digest`).
-  Neither `GitReader` nor `GitWriter` starts a program a repository
-  names, a hook included (Q-4). `confine.rs` decides for the remote server whether a repository
+  for the process, the git adapter's one `unsafe` block; a push learns what the remote took from
+  the remote-tracking branch libgit2 moves, or, where it moves none, from the remote's branch
+  fetched again from the address pushed to into a scratch reference under `refs/ocelli/`, which
+  no load and no digest of the refs counts
+  ([ADR-0035](adr/0035-remotes-through-libgit2-transports.md)).
+  The refs name the default remote; for the remote server's turns, `refs.rs` also reads a
+  repository's resolved common directory (`common_dir`) and a digest of where its refs point
+  (`refs_digest`). Neither `GitReader` nor `GitWriter` starts a program a repository names, a
+  hook included (Q-4). `confine.rs` decides for the remote server whether a repository
   opened without searching upwards lies wholly below its server root: its git, common, and
   working directories and every object store its alternates borrow, read as libgit2 reads them,
   with no link anywhere inside its git and common directories, a walk bounded by a count of

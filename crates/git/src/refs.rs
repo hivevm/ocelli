@@ -330,7 +330,9 @@ fn load_worktrees(repo: &Repository) -> Vec<Worktree> {
             Err(_) => (None, String::new()),
         };
 
-        let path = worktree.path().to_path_buf();
+        let Some(path) = crate::guard::worktree_path(repo, name, &worktree) else {
+            continue;
+        };
         let is_current = current_workdir
             .as_deref()
             .is_some_and(|current| same_dir(current, &path));
@@ -368,16 +370,12 @@ fn submodule_state(pinned: Option<&str>, checked_out: Option<&str>) -> Submodule
 /// repository's, so none of them is a commit the graph could reveal — the path
 /// is what the sidebar acts on (ADR-0027).
 fn load_submodules(repo: &Repository) -> Vec<Submodule> {
-    let Ok(submodules) = repo.submodules() else {
-        return Vec::new();
-    };
     let Some(workdir) = repo.workdir() else {
         return Vec::new();
     };
 
     let mut out = Vec::new();
-    for submodule in submodules {
-        let path = submodule.path().to_path_buf();
+    for (submodule, path) in crate::guard::submodules(repo) {
         let name = submodule
             .name()
             .map(str::to_string)
@@ -473,11 +471,9 @@ fn find_parent(repo: &Repository) -> Option<ParentRepo> {
     };
     let candidate_workdir = candidate.workdir()?.to_path_buf();
 
-    let configures_us = candidate
-        .submodules()
-        .ok()?
+    let configures_us = crate::guard::submodules(&candidate)
         .iter()
-        .any(|submodule| same_dir(&candidate_workdir.join(submodule.path()), workdir));
+        .any(|(_, path)| same_dir(&candidate_workdir.join(path), workdir));
 
     configures_us.then(|| ParentRepo {
         kind: ParentKind::Superproject,
@@ -608,7 +604,14 @@ pub fn refs_digest(path: &Path) -> Option<u64> {
         each(&head);
     }
     for reference in repo.references().ok()? {
-        each(&reference.ok()?);
+        let reference = reference.ok()?;
+        // Ocelli's own scratch references come and go with a push's read-back, moving nothing.
+        if !reference
+            .name_bytes()
+            .starts_with(crate::remote::OWN_REFS.as_bytes())
+        {
+            each(&reference);
+        }
     }
     Some(digest.finish())
 }
