@@ -1,8 +1,9 @@
 //! Resolving a stopped operation's conflicts file by file, and continuing or aborting the
 //! operation, whoever started it, running no program the repository names (ADR-0033).
 
-use crate::checkout::entry_as_in;
+use crate::checkout::{entry_as_in, named};
 use crate::git::WORKTREE;
+use crate::guard::{bytes_to_path, exact_path};
 use crate::message::Made;
 use crate::operations::{
     UNAPPLIED, commit_in_progress, committer, rebase_dir, run_rebase, set_orig_head,
@@ -15,7 +16,7 @@ use git2::{
 };
 use ocelli_core::model::{Conflict, Operation};
 use ocelli_core::port::Take;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 /// Whether a line is one of the markers `git` writes into a conflicted file.
 fn is_marker(line: &str) -> bool {
@@ -36,6 +37,7 @@ pub(crate) fn resolve(
     expected: &Conflict,
     take: Take,
 ) -> Result<()> {
+    crate::guard::named_exactly(repo, path)?;
     let mut index = repo.index()?;
     if conflicts_of(&index).iter().find(|c| c.path == path) != Some(expected) {
         bail!("{path} no longer conflicts as it was shown: reload to see it as it is");
@@ -44,7 +46,7 @@ pub(crate) fn resolve(
         .workdir()
         .context("a bare repository has no working directory")?;
     let file = root.join(path);
-    within(root, path, &|_| false)?;
+    within(root, Path::new(path), &|_| false)?;
     // A link is looked at, never followed: what it points to may lie outside the repository.
     let there = file.symlink_metadata().ok();
     match take {
@@ -88,7 +90,9 @@ pub(crate) fn resolve(
                         reason = "the pattern matching is turned off, and the path is a conflict libgit2 read"
                     )]
                     checkout.force().disable_pathspec_match(true).path(path);
-                    if let Err(e) = repo.checkout_index(Some(&mut index), Some(&mut checkout)) {
+                    let written = crate::workdir::checkout_index(repo, &mut index, &mut checkout)
+                        .and_then(|w| w.map_err(anyhow::Error::from));
+                    if let Err(e) = written {
                         // The file could not be written: the conflict stays as it was.
                         let mut index = repo.index()?;
                         index.remove_path(Path::new(path))?;
@@ -96,7 +100,7 @@ pub(crate) fn resolve(
                             index.add(staged)?;
                         }
                         index.write()?;
-                        return Err(e.into());
+                        return Err(e);
                     }
                 }
                 None => {
@@ -132,22 +136,27 @@ pub(crate) fn resolve(
 /// Refuses a `path` of the working directory below a link or a file, other than one `its_own`
 /// says the operation put there: writing it would follow the link, out of the repository
 /// perhaps, or fail half done.
-fn within(root: &Path, path: &str, its_own: &dyn Fn(&str) -> bool) -> Result<()> {
-    let mut dir = root.to_path_buf();
-    let parts: Vec<&str> = path.split('/').collect();
-    for (i, part) in parts[..parts.len().saturating_sub(1)].iter().enumerate() {
-        dir.push(part);
-        if its_own(&parts[..=i].join("/")) {
+fn within(root: &Path, path: &Path, its_own: &dyn Fn(&Path) -> bool) -> Result<()> {
+    let mut above: Vec<&Path> = path
+        .ancestors()
+        .skip(1)
+        .filter(|a| !a.as_os_str().is_empty())
+        .collect();
+    above.reverse();
+    for dir in above {
+        if its_own(dir) {
             continue;
         }
-        match dir.symlink_metadata() {
+        match root.join(dir).symlink_metadata() {
             Ok(m) if m.file_type().is_symlink() => bail!(
-                "{} is a link where {path} needs a directory: move it out of the way first",
-                dir.strip_prefix(root).unwrap_or(&dir).display()
+                "{} is a link where {} needs a directory: move it out of the way first",
+                named(dir),
+                named(path)
             ),
             Ok(m) if !m.is_dir() => bail!(
-                "{} is a file where {path} needs a directory: move it out of the way first",
-                dir.strip_prefix(root).unwrap_or(&dir).display()
+                "{} is a file where {} needs a directory: move it out of the way first",
+                named(dir),
+                named(path)
             ),
             Ok(_) => {}
             Err(_) => break,
@@ -198,9 +207,9 @@ pub(crate) fn continue_stopped(
                      in its way: abort the rebase, which puts the branch back as it was"
                 );
             }
-            let mut rebase = repo.open_rebase(None)?;
+            let mut rebase = crate::workdir::Rebase::open(repo)?;
             // A step resolved to nothing is dropped, as `git rebase --continue` drops it.
-            match rebase.commit(None, &me, None) {
+            match rebase.commit(&me) {
                 Ok(_) => {}
                 Err(e) if e.code() == ErrorCode::Applied => {}
                 Err(e) => return Err(e.into()),
@@ -233,15 +242,20 @@ pub(crate) fn abort(repo: &Repository, operation: Operation, head: &str) -> Resu
     let head = repo.head()?.peel_to_commit()?;
     let tree = head.tree()?;
     let index = repo.index()?;
-    let mut touched: Vec<String> = repo
+    // Each path in the bytes libgit2 read, as it takes it back, a name that is not UTF-8 among
+    // them, which Windows and macOS cannot hold and refuse.
+    let mut touched = repo
         .diff_tree_to_index(Some(&tree), Some(&index), None)?
         .deltas()
-        .filter_map(|d| {
-            crate::guard::diff_path(&d.new_file()).or(crate::guard::diff_path(&d.old_file()))
-        })
-        .map(|p| p.to_string_lossy().into_owned())
-        .collect();
-    let conflicted: Vec<String> = conflicts_of(&index).into_iter().map(|c| c.path).collect();
+        .filter_map(|d| d.new_file().path_bytes().or(d.old_file().path_bytes()))
+        .map(exact_path)
+        .collect::<Result<Vec<PathBuf>>>()?;
+    let conflicted = index
+        .conflicts()?
+        .flatten()
+        .filter_map(|c| c.our.or(c.their).or(c.ancestor))
+        .map(|e| exact_path(&e.path))
+        .collect::<Result<Vec<PathBuf>>>()?;
     let root = repo
         .workdir()
         .context("a bare repository has no working directory")?;
@@ -253,24 +267,27 @@ pub(crate) fn abort(repo: &Repository, operation: Operation, head: &str) -> Resu
         .include_ignored(false)
         // A submodule's own checkout is its own: an abort moves only the commit it is pinned at.
         .exclude_submodules(true);
-    let changed: std::collections::HashMap<String, Status> = repo
+    let changed: std::collections::HashMap<PathBuf, Status> = repo
         .statuses(Some(&mut options))?
         .iter()
-        .filter_map(|e| e.path().map(|p| (p.to_string(), e.status())))
+        .map(|e| (bytes_to_path(e.path_bytes()), e.status()))
         .filter(|(_, s)| s.intersects(WORKTREE))
         .collect();
     // A file the operation brought in cleanly or removed, which the developer changed or made
     // since, stays, as `git <operation> --abort` refuses rather than lose it.
-    let below = |dir: &str| {
-        let dir = format!("{dir}/");
-        changed.keys().any(|p| p.starts_with(&dir))
+    let below = |dir: &Path| {
+        let dir = [dir.as_os_str().as_encoded_bytes(), b"/"].concat();
+        changed
+            .keys()
+            .any(|p| p.as_os_str().as_encoded_bytes().starts_with(&dir))
     };
     // A conflicted file stands to be lost, but not a directory the developer made in its place.
     for path in touched.iter().chain(&conflicted) {
         if (!conflicted.contains(path) && changed.contains_key(path)) || below(path) {
             bail!(
-                "{path} was changed after the {} stopped: commit, move, or undo that change \
+                "{} was changed after the {} stopped: commit, move, or undo that change \
                  before aborting",
+                named(path),
                 operation.name()
             );
         }
@@ -282,12 +299,12 @@ pub(crate) fn abort(repo: &Repository, operation: Operation, head: &str) -> Resu
         // A file or a link in a directory's place is let be only where the operation put it
         // there, unchanged; it is removed before the checkout, which would write through a link.
         let own_parents = std::cell::RefCell::new(Vec::new());
-        let its_own = |dir: &str| {
+        let its_own = |dir: &Path| {
             let own = crate::git::index_entry(&index, dir, 0).is_some()
                 && !changed.contains_key(dir)
                 && root.join(dir).symlink_metadata().is_ok_and(|m| !m.is_dir());
             if own {
-                own_parents.borrow_mut().push(dir.to_string());
+                own_parents.borrow_mut().push(dir.to_path_buf());
             }
             own
         };
@@ -299,7 +316,7 @@ pub(crate) fn abort(repo: &Repository, operation: Operation, head: &str) -> Resu
         // libgit2 would meet it where it makes the submodule's directory.
         for path in &touched {
             let gitlink = tree
-                .get_path(Path::new(path))
+                .get_path(path)
                 .is_ok_and(|e| e.kind() == Some(git2::ObjectType::Commit));
             if gitlink
                 && root
@@ -307,7 +324,7 @@ pub(crate) fn abort(repo: &Repository, operation: Operation, head: &str) -> Resu
                     .symlink_metadata()
                     .is_ok_and(|m| !m.is_dir())
                 && crate::git::index_entry(&index, path, 0).is_some()
-                && !changed.contains_key(path.as_str())
+                && !changed.contains_key(path)
             {
                 own_parents.push(path.clone());
             }
@@ -320,8 +337,7 @@ pub(crate) fn abort(repo: &Repository, operation: Operation, head: &str) -> Resu
         // Each path as the checked-out commit has it, in the index, taken literally.
         let mut index = repo.index()?;
         for path in &touched {
-            let at = Path::new(path);
-            index.conflict_remove(at).or_else(not_found)?;
+            index.conflict_remove(path).or_else(not_found)?;
             entry_as_in(&mut index, &tree, path)?;
         }
         index.write()?;
@@ -335,9 +351,10 @@ pub(crate) fn abort(repo: &Repository, operation: Operation, head: &str) -> Resu
         for path in &touched {
             #[expect(
                 clippy::disallowed_methods,
-                reason = "the pattern matching is turned off, and a path libgit2 read holds no NUL"
+                reason = "the pattern matching is turned off, and a path libgit2 read holds no NUL \
+                          and is UTF-8 on Windows, where git2 would unwrap it as such"
             )]
-            checkout.path(path.as_str());
+            checkout.path(path.as_path());
         }
         // Each moved aside, into the repository's own directory, and back should the abort fail.
         let aside = |i: usize| repo.path().join(format!("ocelli-aside-{i}"));
@@ -357,9 +374,8 @@ pub(crate) fn abort(repo: &Repository, operation: Operation, head: &str) -> Resu
             moved += 1;
         }
         if done.is_ok() {
-            done = repo
-                .checkout_head(Some(&mut checkout))
-                .map_err(anyhow::Error::from);
+            done = crate::workdir::checkout_head(repo, &mut checkout)
+                .and_then(|c| c.map_err(anyhow::Error::from));
         }
         if done.is_ok() {
             for i in 0..moved {
@@ -422,7 +438,7 @@ fn started_by_git(repo: &Repository) -> bool {
 /// Aborts a rebase as `git rebase --abort` does, from the files `git` and libgit2 both write:
 /// the branch it rebased, `head-name`, checked out again at `orig-head`, where it stood before,
 /// and the rebase's state removed.
-fn abort_rebase(repo: &Repository) -> Result<()> {
+pub(crate) fn abort_rebase(repo: &Repository) -> Result<()> {
     let dir = rebase_dir(repo).context("the rebase keeps no state to abort from")?;
     let read = |name: &str| -> Result<String> {
         Ok(std::fs::read_to_string(dir.join(name))
@@ -432,7 +448,7 @@ fn abort_rebase(repo: &Repository) -> Result<()> {
     };
     let before = repo.find_commit(Oid::from_str(&read("orig-head")?)?)?;
     let branch = read("head-name")?;
-    repo.reset(before.as_object(), ResetType::Hard, None)?;
+    crate::workdir::reset(repo, &before, ResetType::Hard)?;
     if branch.starts_with("refs/heads/") {
         repo.reference(&branch, before.id(), true, "rebase: abort")?;
         repo.set_head(&branch)?;

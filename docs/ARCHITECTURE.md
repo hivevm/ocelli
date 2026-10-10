@@ -89,7 +89,10 @@ golden path and the test pattern an agent copies from are named here.
   state whoever started it. `GitWriter` implements the writer port in `write.rs`, which
   dispatches each write and holds the tag, index, commit, and branch writes, the stash's in
   `stash.rs`, each checked against the state it names before anything changes by the checks of
-  `guard.rs`, the index and the working directory written through `checkout.rs` and a message
+  `guard.rs`, the index and the working directory written through `checkout.rs`, every libgit2
+  call that writes the working directory made in `workdir.rs` behind one guard against a link in
+  the way, a malformed tree a hostile remote delivered, a conflict libgit2 would write under
+  another name, or a name the file system cannot hold, and a message
   cleaned up by `message.rs` as `git` cleans it up, and returns the commit a write made; a
   commit or an annotated tag is refused where the configuration asks for a signature. A path a
   caller gives, to stage, unstage, resolve, or read a diff, is refused before git2 sees it unless

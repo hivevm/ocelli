@@ -3,14 +3,15 @@
 //! progress, write past what it stashes, overwrite a staged change, or meet a file in its way
 //! (ADR-0033).
 
-use crate::guard::{NO_IDENTITY, nothing_in_progress};
+use crate::checkout::named;
+use crate::guard::{NO_IDENTITY, bytes_to_path, nothing_in_progress};
 use anyhow::{Context, Result, bail};
 use git2::build::CheckoutBuilder;
 use git2::{
     ErrorCode, ObjectType, Oid, Repository, StashApplyOptions, StashFlags, Status, StatusOptions,
     TreeWalkMode, TreeWalkResult,
 };
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 /// Stashes the uncommitted changes, the untracked files with them where `untracked` says so.
 pub(crate) fn create(repo: &mut Repository, message: Option<&str>, untracked: bool) -> Result<()> {
@@ -24,14 +25,15 @@ pub(crate) fn create(repo: &mut Repository, message: Option<&str>, untracked: bo
     // does, a bisect aside (ADR-0033).
     nothing_in_progress(repo, true)?;
     stash_keeps_everything(repo, untracked)?;
-    match repo.stash_save2(&stasher, message, Some(flags)) {
+    match crate::workdir::stash_save(repo, &stasher, message, flags)? {
         Err(e) if e.code() == ErrorCode::NotFound => bail!("there is nothing to stash"),
         result => result?,
     };
     // libgit2 leaves a staged change in the index where the working directory holds the file as
-    // committed; the stash holds it now, and `git stash` resets to the checked-out commit.
+    // committed; the stash holds it now, and `git stash` resets to the checked-out commit. The
+    // working directory is the commit's already, so the index alone is put back.
     let head = repo.head()?.peel_to_commit()?;
-    repo.reset(head.as_object(), git2::ResetType::Hard, None)?;
+    crate::workdir::reset(repo, &head, git2::ResetType::Mixed)?;
     Ok(())
 }
 
@@ -52,7 +54,9 @@ fn stash_keeps_everything(repo: &Repository, untracked: bool) -> Result<()> {
     let index = repo.index()?;
     let mut tracked_dirs = std::collections::HashSet::new();
     for entry in index.iter() {
-        let path = String::from_utf8_lossy(&entry.path).into_owned();
+        // In the bytes the index holds: a lossy reading names another file, past which the
+        // stash would write.
+        let path = bytes_to_path(&entry.path);
         let marked = if entry.flags_extended & SKIP_WORKTREE != 0 {
             Some("skip-worktree, or outside a sparse checkout")
         } else if entry.flags_extended & INTENT_TO_ADD != 0 {
@@ -63,26 +67,32 @@ fn stash_keeps_everything(repo: &Repository, untracked: bool) -> Result<()> {
             None
         };
         if let Some(mark) = marked {
-            bail!("{path} is marked {mark} in the index, which a stash would lose: stash with git");
+            bail!(
+                "{} is marked {mark} in the index, which a stash would lose: stash with git",
+                named(&path)
+            );
         }
-        let mut dir = root.to_path_buf();
-        let parts: Vec<&str> = path.split('/').collect();
-        for (i, part) in parts.iter().enumerate() {
-            dir.push(part);
-            let last = i + 1 == parts.len();
-            let is_link = dir
+        let mut parts: Vec<&Path> = path
+            .ancestors()
+            .filter(|a| !a.as_os_str().is_empty())
+            .collect();
+        parts.reverse();
+        for part in parts {
+            let last = part == path;
+            let is_link = root
+                .join(part)
                 .symlink_metadata()
                 .is_ok_and(|m| m.file_type().is_symlink());
             if is_link && (!last || entry.mode != LINK) {
                 bail!(
                     "{} is a link where the index has {}: a stash would write through it, \
                      so move it first",
-                    dir.strip_prefix(root).unwrap_or(&dir).display(),
+                    named(part),
                     if last { "a file" } else { "a directory" }
                 );
             }
             if !last {
-                tracked_dirs.insert(parts[..=i].join("/"));
+                tracked_dirs.insert(part.to_path_buf());
             }
         }
     }
@@ -96,23 +106,30 @@ fn stash_keeps_everything(repo: &Repository, untracked: bool) -> Result<()> {
         .include_ignored(true)
         .recurse_ignored_dirs(true);
     let statuses = repo.statuses(Some(&mut options))?;
-    let of = |flag: Status| -> Vec<String> {
+    let of = |flag: Status| -> Vec<PathBuf> {
         statuses
             .iter()
             .filter(|e| e.status().contains(flag))
-            .filter_map(|e| e.path().map(str::to_string))
+            .map(|e| bytes_to_path(e.path_bytes()))
             .collect()
     };
     let (new, ignored) = (of(Status::WT_NEW), of(Status::IGNORED));
     for file in &ignored {
-        let parts: Vec<&str> = file.split('/').collect();
-        for i in 0..parts.len().saturating_sub(1) {
-            let dir = parts[..=i].join("/");
-            let prefix = format!("{dir}/");
-            if !tracked_dirs.contains(&dir) && new.iter().any(|n| n.starts_with(&prefix)) {
+        let mut dirs: Vec<&Path> = file
+            .ancestors()
+            .skip(1)
+            .filter(|a| !a.as_os_str().is_empty())
+            .collect();
+        dirs.reverse();
+        for dir in dirs {
+            let prefix = [dir.as_os_str().as_encoded_bytes(), b"/"].concat();
+            let holds = |n: &PathBuf| n.as_os_str().as_encoded_bytes().starts_with(&prefix);
+            if !tracked_dirs.contains(dir) && new.iter().any(holds) {
                 bail!(
-                    "{file} is ignored in {dir}, which holds only untracked files: a stash of \
-                     the untracked files would delete it, so move it first"
+                    "{} is ignored in {}, which holds only untracked files: a stash of \
+                     the untracked files would delete it, so move it first",
+                    named(file),
+                    named(dir)
                 );
             }
         }
@@ -180,10 +197,10 @@ fn check_applies(repo: &Repository, index: usize, commit: &str) -> Result<()> {
         untracked
             .tree()?
             .walk(TreeWalkMode::PreOrder, |dir, entry| {
-                if entry.kind() == Some(ObjectType::Blob)
-                    && let Some(name) = entry.name()
-                {
-                    files.push(Path::new(dir).join(name));
+                // A name in its bytes; a directory's that is not UTF-8 stops the walk, which
+                // refuses the apply.
+                if entry.kind() == Some(ObjectType::Blob) {
+                    files.push(Path::new(dir).join(bytes_to_path(entry.name_bytes())));
                 }
                 TreeWalkResult::Ok
             })?;
@@ -197,11 +214,22 @@ fn check_applies(repo: &Repository, index: usize, commit: &str) -> Result<()> {
     }
 
     for path in &written {
-        for dir in path
+        let above: Vec<&Path> = path
             .ancestors()
             .skip(1)
             .filter(|d| !d.as_os_str().is_empty())
-        {
+            .collect();
+        // A link in the way is the guard's of `workdir` to refuse, the apply's last check before
+        // libgit2; looking past one here would look outside the working directory.
+        let link = |d: &&Path| {
+            root.join(d)
+                .symlink_metadata()
+                .is_ok_and(|m| m.file_type().is_symlink())
+        };
+        if above.iter().any(link) {
+            continue;
+        }
+        for dir in above {
             if root.join(dir).symlink_metadata().is_ok_and(|m| !m.is_dir()) {
                 bail!("{} stands where {name} needs a directory", dir.display());
             }
@@ -249,7 +277,7 @@ pub(crate) fn apply(repo: &mut Repository, index: usize, commit: &str, drop: boo
     checkout.overwrite_ignored(false);
     let mut options = StashApplyOptions::new();
     options.checkout_options(checkout);
-    repo.stash_apply(index, Some(&mut options))?;
+    crate::workdir::stash_apply(repo, index, Oid::from_str(commit)?, &mut options)?;
     if drop {
         // Applied by now: a stash pushed meanwhile moves the entry, which then stays.
         stash_as_shown(repo, index, commit).context("the stash is applied but not dropped")?;

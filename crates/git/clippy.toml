@@ -2,8 +2,11 @@
 # as written, never as a pattern (ADR-0033, docs/CONVENTIONS.md); it compares a path with a root
 # only once both are resolved the same way (ADR-0039). A git2 method that unwraps a caller's
 # string, or one a repository or a remote holds, is listed too: a panic aborts a release build,
-# every tab of the remote server with it, and tests/git2_unwraps.txt audits each site. A method
-# listed here is used only under `#[expect(clippy::disallowed_methods, reason = "…")]`, the reason
+# every tab of the remote server with it, and tests/git2_unwraps.txt audits each site. So is one
+# that reads a path that is not UTF-8 as none, which a check would skip: a path is read and handed
+# back in its bytes. So, too, is every libgit2 call that writes the working directory, called only
+# through crate::workdir behind its guard, and the rebase whose steps write it, used only as
+# workdir::Rebase. A method listed here is used only under `#[expect(clippy::disallowed_methods, reason = "…")]`, the reason
 # saying why it is safe where it stands, and one that unwraps only inside its guarded wrapper.
 disallowed-methods = [
     { path = "std::fs::write", reason = "follows a link and drops a file's mode: write the working directory through libgit2's checkout" },
@@ -19,6 +22,30 @@ disallowed-methods = [
     { path = "std::os::unix::fs::symlink", reason = "a link is written by libgit2's checkout", allow-invalid = true },
     { path = "std::fs::OpenOptions::open", reason = "follows a link and drops a file's mode: write through libgit2's checkout" },
     { path = "std::fs::File::create", reason = "follows a link and drops a file's mode: write through libgit2's checkout" },
+    { path = "git2::Repository::checkout_tree", reason = "writes the working directory: call workdir::checkout_tree, behind the guard" },
+    { path = "git2::Repository::checkout_head", reason = "writes the working directory: call workdir::checkout_head, behind the guard" },
+    { path = "git2::Repository::checkout_index", reason = "writes the working directory: call workdir::checkout_index, behind the guard" },
+    { path = "git2::Repository::reset", reason = "writes the working directory: call workdir::reset, behind the guard" },
+    { path = "git2::Repository::merge", reason = "writes the working directory: call workdir::merge, behind the guard" },
+    { path = "git2::Repository::cherrypick", reason = "writes the working directory: call workdir::pick, behind the guard" },
+    { path = "git2::Repository::revert", reason = "writes the working directory: call workdir::pick, behind the guard" },
+    { path = "git2::Repository::rebase", reason = "writes the working directory: use workdir::Rebase, behind the guard" },
+    { path = "git2::Repository::open_rebase", reason = "its steps write the working directory: use workdir::Rebase, behind the guard" },
+    { path = "git2::Rebase::abort", reason = "writes the working directory: use workdir::Rebase, behind the guard" },
+    { path = "git2::Repository::stash_save", reason = "writes the working directory: call workdir::stash_save, behind the guard" },
+    { path = "git2::Repository::stash_save2", reason = "writes the working directory: call workdir::stash_save, behind the guard" },
+    { path = "git2::Repository::stash_save_ext", reason = "writes the working directory: call workdir::stash_save, behind the guard" },
+    { path = "git2::Repository::stash_apply", reason = "writes the working directory: call workdir::stash_apply, behind the guard" },
+    { path = "git2::Repository::stash_pop", reason = "writes the working directory: call workdir::stash_apply, behind the guard" },
+    { path = "git2::Repository::apply", reason = "writes the working directory where it applies there" },
+    { path = "git2::Submodule::update", reason = "writes a working directory past the guard of workdir" },
+    { path = "git2::Submodule::clone", reason = "writes a working directory past the guard of workdir" },
+    { path = "git2::Submodule::repo_init", reason = "writes a working directory past the guard of workdir" },
+    { path = "git2::Repository::submodule", reason = "writes a working directory past the guard of workdir" },
+    { path = "git2::Repository::worktree", reason = "writes a working directory past the guard of workdir" },
+    { path = "git2::Repository::clone", reason = "writes a working directory past the guard of workdir" },
+    { path = "git2::Repository::clone_recurse", reason = "writes a working directory past the guard of workdir" },
+    { path = "git2::build::RepoBuilder::clone", reason = "writes a working directory past the guard of workdir" },
     { path = "git2::build::CheckoutBuilder::path", reason = "a pattern to libgit2, and panics on a NUL: turn the matching off with disable_pathspec_match" },
     { path = "git2::DiffOptions::pathspec", reason = "a pattern to libgit2, and panics on a NUL: turn the matching off with disable_pathspec_match" },
     { path = "git2::StatusOptions::pathspec", reason = "a pattern to libgit2, and panics on a NUL: turn the matching off with disable_pathspec_match" },
@@ -71,6 +98,8 @@ disallowed-methods = [
     { path = "git2::RemoteCallbacks::certificate_check", reason = "unwraps the host as UTF-8, which libgit2 percent-decodes from the address or a redirect" },
     { path = "git2::DiffFile::path", reason = "unwraps a name as UTF-8 on Windows: use guard::diff_path" },
     { path = "git2::DiffFile::mode", reason = "panics on a mode it does not know" },
+    { path = "git2::StatusEntry::path", reason = "none for a path that is not UTF-8, which a check would skip: read path_bytes" },
+    { path = "git2::TreeEntry::name", reason = "none for a name that is not UTF-8, which a check would skip: read name_bytes" },
     { path = "git2::Submodule::path", reason = "unwraps the path as UTF-8 on Windows: use guard::submodules" },
     { path = "git2::Worktree::path", reason = "unwraps the path as UTF-8 on Windows: use guard::worktree_path" },
     { path = "git2::BlameHunk::path", reason = "unwraps a name as UTF-8 on Windows" },
