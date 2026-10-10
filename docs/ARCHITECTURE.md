@@ -105,15 +105,15 @@ golden path and the test pattern an agent copies from are named here.
   only for a remote named by its domain over HTTPS, and with libgit2's server timeouts set once
   for the process, the git adapter's one `unsafe` block
   ([ADR-0035](adr/0035-remotes-through-libgit2-transports.md)). The refs
-  name the default remote. Neither `GitReader` nor `GitWriter` starts a program a repository
+  name the default remote; for the remote server's turns, `refs.rs` also reads a repository's
+  resolved common directory (`common_dir`) and a digest of where its refs point (`refs_digest`).
+  Neither `GitReader` nor `GitWriter` starts a program a repository
   names, a hook included (Q-4). `confine.rs` decides for the remote server whether a repository
   opened without searching upwards lies wholly below its server root: its git, common, and
   working directories and every object store its alternates borrow, read as libgit2 reads them,
   with no link anywhere inside its git and common directories, a walk bounded by a count of
   entries past which the repository is refused as too large to check; a link made there after
-  the repository was opened, and a hard link, are not seen. For the remote server's turns it
-  also reads a repository's resolved common directory (`common_dir`) and a digest of where its
-  refs point (`refs_digest`). Once the remote server confines the
+  the repository was opened, and a hard link, are not seen. Once the remote server confines the
   process to its root, every read opens the folder it is given without searching upwards, the
   parent row is looked for only up to the root, a submodule is read only where it lies below
   it, and the working-directory node carries no author, which would come from configuration;
@@ -150,7 +150,8 @@ golden path and the test pattern an agent copies from are named here.
   for the first window of rows, for the slowest chunk taken in while the rest loads, and for the
   slowest window across the loaded history; `scripts/generate-history.sh` writes the generated
   histories of Q-2 and Q-3. `scripts/measure-mutants.sh` changes the git adapter's guards in
-  `guard.rs`, `remote.rs`, and `confine.rs` one mutant at a time and lists each one the suites of
+  `guard.rs`, `remote.rs`, and `confine.rs`, and the turns' `common_dir` and `refs_digest` in
+  `refs.rs`, one mutant at a time and lists each one the suites of
   the git adapter and the remote server let through. All four run weekly and on demand in
   `.github/workflows/measure.yml`, not in the checks
   ([ADR-0008](adr/0008-toolchain-rust-and-typescript.md)); the checks run only their self-tests.
@@ -163,7 +164,7 @@ golden path and the test pattern an agent copies from are named here.
   and writes through `GitWriter` on the same pool, one write at a time, telling the web interface
   a transfer's progress as `write-progress` events at most every tenth of a second and stopping it
   on `cancel_write` ([ADR-0031](adr/0031-front-ends-read-row-windows.md)); a `Host` given
-  `Turns` writes only once they give it the repository's turn, and tells the turn how the write
+  a `TakeTurn` writes only once it gives it the repository's turn, and tells the turn how the write
   ended before giving it back. Its events go to a
   `Report`, the window or the socket. A command fails with a `HostError`: no repository open, a
   refusal with its reason, or what git said, the kind from which the remote server decides what
@@ -196,8 +197,9 @@ golden path and the test pattern an agent copies from are named here.
   `root.rs` resolves a path from the browser against the server root and opens a repository
   only where the git adapter's `confine` finds it wholly below the root, on the blocking pool,
   and the tab's `Host` checks its directories and alternates again on the blocking pool before
-  every command that reaches it; the
-  sidebar's paths leave the server relative to the root, or empty where they lie outside, which
+  every command that reaches it. Every event, and the failure of every command that reached the
+  repository, leaves the server through `socket/scrub.rs`: the sidebar's paths leave the server
+  relative to the root, or empty where they lie outside, which
   the web interface's `repoSwitch.ts` shows as a row without its switch and says why, and
   whatever git says about a failed read reaches the browser only as "Reading the repository
   failed"
@@ -211,11 +213,12 @@ golden path and the test pattern an agent copies from are named here.
   to the tab that started it with an address's user and password and any path on the server scrubbed
   (`scrub_progress`), and what git says about a write reaching the browser only as that it was
   refused or failed. `turns.rs` gives a write its repository's turn, keyed by the resolved common
-  directory the git adapter's `confine` reads, which the `Host` takes after the root's check and
+  directory the git adapter's `refs` reads, which the `Host` takes after the root's check and
   before checking the root again and writing, so that two tabs' writes to one repository run one
   after the other, a bounded number waiting for each repository, one past them refused; when a
   connection ends its commands are aborted and a write of its still waiting for its turn gives it up
-  unwritten. `turns.rs` keeps the repository each tab has open by its common directory too: before
+  unwritten. Its registry of the tabs, `turns/tabs.rs`, keeps the repository each tab has open by
+  its common directory: before
   the turn is given back, a write done, or refused after it moved a ref, tells every other tab on
   the repository, through a worktree of it included, to load again, with the server's own
   `repo-written` event, which `SERVER_EVENTS` of `ocelli-commands` lists and the desktop host never
@@ -261,17 +264,19 @@ repository `git` made, and what it did is read back with `git` (`crates/git/test
 snapshot of the repository before and after. Each local write also runs beside the `git` command
 it stands for, on two copies of a repository in every state that changes its outcome
 (`crates/git/tests/git_parity.rs`), each departure listed with the ADR that decides it, and the
-two copies' snapshots compared with the commits each side made alone read by content. The scratch
-directory, the test's `git`, the snapshot, and `refused` are written once, in
+two copies' snapshots compared with the commits made since they parted read by content. The
+scratch directory, the test's `git`, the snapshot, and `refused` are written once, in
 `crates/git/tests/support/mod.rs`; every test starts `git` through
 `crates/git/tests/git_command/mod.rs`. A way out of the server root is tested in
 `crates/git/tests/confine_checks.rs`, each case built so that the clause of `confine.rs` it is
-about decides it; the remote server's tests keep one case of each kind at the WebSocket. The
-remote server's tests open a tab as a browser does through `crates/server/tests/browser/mod.rs`,
-whose `Pair` makes each write in the tab and through the shared `Host` on a twin of the
-repository, as the desktop host does, and compares the two (`crates/server/tests/writes.rs`,
-and `crates/server/tests/transfers.rs`, a binary of its own for the developer's configuration it
-sets for the process, with a remote below the root and a local server that stalls a fetch).
+about decides it; the remote server's tests keep one case of each kind at the WebSocket. The two
+reads of `refs.rs` the remote server's turns take are tested in `crates/git/tests/turn_reads.rs`.
+The remote server's tests open a tab as a browser does through
+`crates/server/tests/browser/mod.rs`, whose `Pair` makes each write in the tab and through the
+shared `Host` on a twin of the repository, as the desktop host does, and compares the two
+(`crates/server/tests/writes.rs`, and `crates/server/tests/transfers.rs`, a binary of its own for
+the developer's configuration it sets for the process, with a remote below the root and a local
+server that stalls a fetch).
 Where the web interface spells the JSON of a core value,
 the core's `tests/write_fixture.rs` writes an example to `crates/core/tests/fixtures/` and the web
 interface's test reads it against its types. The server's own `repo-written` event is held to

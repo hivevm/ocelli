@@ -8,19 +8,21 @@
 //! repository, one past them refused at once, and a write whose tab has closed gives up its wait
 //! without writing.
 //!
-//! Each tab with a repository open is kept here by the repository's common directory, so that a
-//! write done, or refused after it moved a ref, tells every other tab on the repository to load
-//! again before its turn is given back.
+//! The registry of the tabs, `tabs`, is told of a write done, or refused after it moved a ref,
+//! while its turn is still held.
+
+pub mod tabs;
 
 use ocelli_commands::HostError;
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Condvar, Mutex};
+use tabs::Tabs;
 
 /// The repositories a write runs on now and how many writes wait for each, by common directory,
 /// the signal that a write ended or a tab closed, how many may wait for one repository, and the
-/// repository each tab has open.
+/// registry of the tabs.
 #[derive(Clone)]
 pub struct Turns(Arc<Shared>);
 
@@ -28,24 +30,13 @@ struct Shared {
     state: Mutex<State>,
     changed: Condvar,
     most_waiting: usize,
-    /// Each tab's open repository, by the tab's number; as many as the server has tabs.
-    open: Mutex<HashMap<u64, Open>>,
-    next_tab: AtomicU64,
+    tabs: Tabs,
 }
 
 #[derive(Default)]
 struct State {
     running: HashSet<PathBuf>,
     waiting: HashMap<PathBuf, usize>,
-}
-
-/// What a tell is: telling a tab that another tab wrote to the repository it has open.
-pub type Tell = Arc<dyn Fn() + Send + Sync>;
-
-/// A tab's open repository, by its common directory, and how the tab is told of another's write.
-struct Open {
-    common: PathBuf,
-    tell: Tell,
 }
 
 /// A repository's turn, held until it is dropped.
@@ -75,51 +66,13 @@ impl Turns {
             state: Mutex::new(State::default()),
             changed: Condvar::new(),
             most_waiting,
-            open: Mutex::new(HashMap::new()),
-            next_tab: AtomicU64::new(0),
+            tabs: Tabs::default(),
         }))
     }
 
-    /// A number for a new tab, none other's.
-    pub fn tab(&self) -> u64 {
-        self.0.next_tab.fetch_add(1, Ordering::Relaxed)
-    }
-
-    /// Keeps that `tab` has the repository whose common directory is `common` open, none where
-    /// it is `None`, and is told of another tab's write to it with `tell`; nothing once `gone`
-    /// says the tab has closed, since it is forgotten then.
-    pub fn watch(&self, tab: u64, common: Option<PathBuf>, tell: Tell, gone: &AtomicBool) {
-        let mut open = self.0.open.lock().unwrap();
-        // Read under the lock `forget` takes: a tab gone before is not kept again after.
-        if gone.load(Ordering::Acquire) {
-            return;
-        }
-        match common {
-            Some(common) => open.insert(tab, Open { common, tell }),
-            None => open.remove(&tab),
-        };
-    }
-
-    /// Forgets `tab`, once it has closed and `gone` says so.
-    pub fn forget(&self, tab: u64) {
-        self.0.open.lock().unwrap().remove(&tab);
-    }
-
-    /// Tells every tab but `by` that has the repository whose common directory is `common` open
-    /// that it was written to.
-    fn written(&self, common: &Path, by: u64) {
-        let tells: Vec<Tell> = self
-            .0
-            .open
-            .lock()
-            .unwrap()
-            .iter()
-            .filter(|(tab, open)| **tab != by && open.common == common)
-            .map(|(_, open)| Arc::clone(&open.tell))
-            .collect();
-        for tell in tells {
-            tell();
-        }
+    /// The registry of the tabs whose writes take these turns.
+    pub fn tabs(&self) -> &Tabs {
+        &self.0.tabs
     }
 
     /// Waits until no other write runs on the repository whose common directory is `common`, and
@@ -167,10 +120,10 @@ impl Turns {
         gone: &AtomicBool,
         tab: u64,
     ) -> Result<Box<dyn ocelli_commands::Turn>, HostError> {
-        let common = ocelli_git::confine::common_dir(path)
+        let common = ocelli_git::refs::common_dir(path)
             .ok_or_else(|| HostError::Git(NO_COMMON_DIR.into()))?;
         let mut turn = self.take(common, gone)?;
-        let before = ocelli_git::confine::refs_digest(path);
+        let before = ocelli_git::refs::refs_digest(path);
         turn.write = Some((tab, path.to_path_buf(), before));
         Ok(Box::new(turn))
     }
@@ -196,8 +149,8 @@ impl ocelli_commands::Turn for Turn {
         let Some((tab, path, before)) = &self.write else {
             return;
         };
-        if done || ocelli_git::confine::refs_digest(path) != *before {
-            self.turns.written(&self.common, *tab);
+        if done || ocelli_git::refs::refs_digest(path) != *before {
+            self.turns.tabs().written(&self.common, *tab);
         }
     }
 }
@@ -255,54 +208,6 @@ mod tests {
             );
             std::thread::sleep(Duration::from_millis(5));
         }
-    }
-
-    #[test]
-    // Verifies: ADR-0037
-    fn a_write_tells_the_other_tabs_on_its_repository_and_no_tab_that_closed() {
-        let turns = Turns::new(4);
-        let told = Arc::new(Mutex::new(Vec::new()));
-        let tell = |name: &'static str| -> Tell {
-            let told = Arc::clone(&told);
-            Arc::new(move || told.lock().unwrap().push(name))
-        };
-        let (one, two) = (PathBuf::from("/one/.git"), PathBuf::from("/two/.git"));
-        let open = AtomicBool::new(false);
-        let (writer, beside, elsewhere, closed) =
-            (turns.tab(), turns.tab(), turns.tab(), turns.tab());
-        assert_eq!(
-            [writer, beside, elsewhere, closed]
-                .iter()
-                .collect::<HashSet<_>>()
-                .len(),
-            4,
-            "each tab its own number"
-        );
-        turns.watch(writer, Some(one.clone()), tell("writer"), &open);
-        turns.watch(beside, Some(one.clone()), tell("beside"), &open);
-        turns.watch(elsewhere, Some(two.clone()), tell("elsewhere"), &open);
-        turns.watch(closed, Some(one.clone()), tell("closed"), &open);
-        turns.forget(closed);
-        // A tab that closed while its repository opened is not kept again.
-        turns.watch(
-            closed,
-            Some(one.clone()),
-            tell("closed"),
-            &AtomicBool::new(true),
-        );
-        turns.written(&one, writer);
-        assert_eq!(*told.lock().unwrap(), ["beside"]);
-        // A tab that opened another repository, or none, is told no longer.
-        turns.watch(beside, Some(two.clone()), tell("beside"), &open);
-        turns.written(&one, writer);
-        turns.watch(beside, None, tell("beside"), &open);
-        turns.written(&two, writer);
-        assert_eq!(*told.lock().unwrap(), ["beside", "elsewhere"]);
-        assert_eq!(
-            turns.0.open.lock().unwrap().len(),
-            2,
-            "writer and elsewhere"
-        );
     }
 
     #[test]

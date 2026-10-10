@@ -214,7 +214,7 @@ async fn fetching_pulling_and_pushing_in_the_browser_end_as_the_desktop_leaves_t
             false,
         )
         .await,
-        Err(ocelli_server::socket::WRITE_FAILED.to_string())
+        Err(ocelli_server::socket::scrub::WRITE_FAILED.to_string())
     );
     assert_eq!(rev(&pair.root, "origin/follow"), moved, "the fetch is kept");
     beside.until("repo-written", |_| true).await;
@@ -242,7 +242,7 @@ async fn a_remote_on_this_machine_outside_the_root_is_neither_fetched_nor_pushed
     let mut tab = Tab::open(&running).await;
     open_and_load(&mut tab, ".").await;
     let (before, remote) = (snapshot(&root), git(&outside, &["for-each-ref"]));
-    let failed = Err(ocelli_server::socket::WRITE_FAILED.to_string());
+    let failed = Err(ocelli_server::socket::scrub::WRITE_FAILED.to_string());
     for name in ["path", "url"] {
         let fetch = Write::Fetch {
             remote: name.into(),
@@ -447,7 +447,7 @@ async fn a_fetch_and_a_pull_s_fetch_stop_when_the_browser_cancels_them() {
         assert_eq!(tab.invoke("cancel_write", json!({})).await, Ok(Value::Null));
         assert_eq!(
             tab.answer(id).await,
-            Err(ocelli_server::socket::WRITE_FAILED.to_string()),
+            Err(ocelli_server::socket::scrub::WRITE_FAILED.to_string()),
             "{write:?}"
         );
         let since = std::time::Instant::now();
@@ -504,7 +504,7 @@ async fn a_tab_closed_while_it_fetches_stops_the_fetch_and_gives_the_repository_
     }
     let (turns, common) = (
         running.turns().unwrap().clone(),
-        ocelli_git::confine::common_dir(&root).unwrap(),
+        ocelli_git::refs::common_dir(&root).unwrap(),
     );
     let taken = tokio::time::timeout(
         Duration::from_secs(20),
@@ -603,7 +603,7 @@ async fn a_fetch_from_the_browser_runs_no_credential_helper_of_the_repository_an
     };
     assert_eq!(
         browser::perform(&mut tab, &fetch).await,
-        Err(ocelli_server::socket::WRITE_FAILED.to_string())
+        Err(ocelli_server::socket::scrub::WRITE_FAILED.to_string())
     );
     let seen = seen.lock().unwrap();
     assert!(

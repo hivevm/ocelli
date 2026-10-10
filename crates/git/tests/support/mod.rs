@@ -88,6 +88,85 @@ pub fn write_file(dir: &Path, path: &str, content: &str) {
     std::fs::write(path, content).unwrap();
 }
 
+/// What a caller may send in place of a string: a NUL, nothing, a path out of the repository or
+/// into its git directory, an option, a refspec, a pattern, ref-name and revision syntax, control
+/// characters, and lengths past what a file system or a ref takes.
+pub fn hostile() -> Vec<String> {
+    let mut values: Vec<String> = [
+        "\0",
+        "a\0b",
+        "\0refs/heads/main",
+        "main\0",
+        "",
+        " ",
+        "\n",
+        "a\nb",
+        "\t",
+        "\r",
+        "\u{1}",
+        "\u{1b}[2J",
+        "-x",
+        "--upload-pack=touch x",
+        "+refs/*:refs/*",
+        "refs/*",
+        "refs/heads/a..b",
+        "refs/heads/",
+        "refs/heads/a.lock",
+        "a.",
+        "*",
+        "?",
+        "[",
+        "..",
+        "../x",
+        "a/../b",
+        "a//b",
+        "./f",
+        "/",
+        "/abs",
+        "/etc/passwd",
+        ".git",
+        ".git/config",
+        ".GIT/HEAD",
+        "\\",
+        "C:\\x",
+        "\\\\?\\C:\\",
+        "~",
+        "HEAD",
+        "@",
+        "@{",
+        "@{-1}",
+        "main@{0}",
+        "main~1",
+        "main^",
+        "main^{tree}",
+        ":",
+        "a:b",
+        ":/one",
+        "%00",
+        "file:///tmp",
+        "ext::sh -c touch% x",
+        "\u{7f}",
+        "\u{202e}",
+        "\u{feff}",
+        "\u{fffd}",
+        "\u{10ffff}",
+    ]
+    .iter()
+    .map(|v| v.to_string())
+    .collect();
+    values.push("a".repeat(100_000));
+    values.push("/".repeat(5_000));
+    values.push("../".repeat(2_000));
+    values
+}
+
+/// `text` as a failure names it: its first 40 characters, escaped.
+pub fn shortened(text: &str) -> String {
+    let start: String = text.chars().take(40).collect();
+    let cut = if start.len() < text.len() { "..." } else { "" };
+    format!("{start:?}{cut}")
+}
+
 /// A copy of the repository, for `git` to do on what the writer does on the original.
 pub fn twin(of: &Scratch, name: &str) -> Scratch {
     let t = Scratch::new(name);
@@ -231,19 +310,16 @@ fn files_below(root: &Path, path: &Path, found: &mut BTreeMap<String, String>) {
 }
 
 impl Snapshot {
-    /// Every text of the snapshot, for a change made to each alike.
-    fn texts(&mut self) -> Vec<&mut String> {
-        let mut texts = vec![
+    /// Every text of the snapshot but its files, in the same order on every snapshot.
+    fn fields(&mut self) -> [&mut String; 6] {
+        [
             &mut self.head,
             &mut self.refs,
             &mut self.stash,
             &mut self.index,
             &mut self.status,
             &mut self.config,
-        ];
-        texts.extend(self.files.values_mut());
-        texts.extend(self.in_progress.values_mut());
-        texts
+        ]
     }
 
     /// The snapshot with the files of an operation in progress `files` names left out.
@@ -280,30 +356,75 @@ impl Snapshot {
     }
 }
 
-/// The snapshots of the twins `a` and `b`: a commit or an annotated tag one of them holds and the
-/// other does not, made on one side alone, stands for its content, its time left out, since the
-/// two sides make the same commit at different times. One both hold keeps its id.
-pub fn as_twins(a: &Path, b: &Path) -> (Snapshot, Snapshot) {
-    snapshots_as_twins((a, snapshot(a)), (b, snapshot(b)))
+/// Every object a repository holds, taken where twins are about to be made of it: what both
+/// twins held when they parted, which [`as_twins`] reads by its id.
+pub struct Origin(BTreeSet<String>);
+
+impl Origin {
+    /// The objects `dir` holds now, those no ref reaches included.
+    pub fn of(dir: &Path) -> Origin {
+        let all = git(
+            dir,
+            &[
+                "cat-file",
+                "--batch-all-objects",
+                "--batch-check=%(objectname)",
+            ],
+        );
+        Origin(all.lines().map(str::to_string).collect())
+    }
+
+    fn holds(&self, id: &str) -> bool {
+        self.0.contains(id)
+    }
+}
+
+/// The snapshots of the twins `a` and `b`, which parted holding `origin`. An object of `origin`
+/// keeps its id; a commit or an annotated tag made since stands for its content, its time left
+/// out, since the two sides make the same commit at different times. Where the two read alike
+/// but for the ids they name, the ids are taken in pairs, one from each side at the same place: a
+/// pair of one id keeps it, and a pair of two commits or two tags made since the twins parted
+/// stands for their contents, their parents or objects paired alike. Whether the other side
+/// holds an id does not decide, since it may have made the same commit elsewhere, at the second
+/// this side made it.
+pub fn as_twins(a: &Path, b: &Path, origin: &Origin) -> (Snapshot, Snapshot) {
+    snapshots_as_twins((a, snapshot(a)), (b, snapshot(b)), origin)
 }
 
 /// [`as_twins`], of the snapshots already taken of each twin.
-pub fn snapshots_as_twins(a: (&Path, Snapshot), b: (&Path, Snapshot)) -> (Snapshot, Snapshot) {
-    (by_content(a.1, a.0, b.0), by_content(b.1, b.0, a.0))
+pub fn snapshots_as_twins(
+    a: (&Path, Snapshot),
+    b: (&Path, Snapshot),
+    origin: &Origin,
+) -> (Snapshot, Snapshot) {
+    let (mut ours, mut theirs) = (a.1, b.1);
+    let mut names = Names {
+        dirs: [a.0, b.0],
+        origin,
+        pairs: BTreeMap::new(),
+        alone: [BTreeMap::new(), BTreeMap::new()],
+    };
+    for (x, y) in ours.fields().into_iter().zip(theirs.fields()) {
+        names.name_both(x, y);
+    }
+    names.name_files(&mut ours.files, &mut theirs.files);
+    names.name_files(&mut ours.in_progress, &mut theirs.in_progress);
+    (ours, theirs)
 }
 
-/// Expects the twins `a` and `b` to read alike, as [`as_twins`] reads them.
+/// Expects the twins `a` and `b`, which parted holding `origin`, to read alike, as [`as_twins`]
+/// reads them.
 #[track_caller]
-pub fn assert_twins_alike(a: &Path, b: &Path, what: &str) {
-    assert_twins_alike_but(a, b, what, &[]);
+pub fn assert_twins_alike(a: &Path, b: &Path, origin: &Origin, what: &str) {
+    assert_twins_alike_but(a, b, origin, what, &[]);
 }
 
 /// [`assert_twins_alike`], but for the files of an operation in progress `known` names, where
 /// the writer is known to leave on `a` what `git` does not leave on `b`: each is asserted to
 /// still differ, so that a fix shows up as a failure that removes it.
 #[track_caller]
-pub fn assert_twins_alike_but(a: &Path, b: &Path, what: &str, known: &[&str]) {
-    let (ours, theirs) = as_twins(a, b);
+pub fn assert_twins_alike_but(a: &Path, b: &Path, origin: &Origin, what: &str, known: &[&str]) {
+    let (ours, theirs) = as_twins(a, b, origin);
     for file in known {
         assert_ne!(
             ours.in_progress.get(*file),
@@ -320,44 +441,247 @@ pub fn assert_twins_alike_but(a: &Path, b: &Path, what: &str, known: &[&str]) {
     );
 }
 
-fn by_content(mut snapshot: Snapshot, dir: &Path, other: &Path) -> Snapshot {
-    // Most ids are of objects both hold: asked of the twin at once, they keep their names.
-    let ids: Vec<String> = snapshot
-        .texts()
-        .iter()
-        .flat_map(|text| object_ids(text))
-        .collect::<BTreeSet<_>>()
-        .into_iter()
-        .collect();
-    let refs: Vec<&str> = ids.iter().map(String::as_str).collect();
-    let mut named: BTreeMap<String, String> = ids
-        .iter()
-        .zip(kinds(other, &refs))
-        .filter(|(_, kind)| kind != "missing")
-        .map(|(id, _)| (id.clone(), id.clone()))
-        .collect();
-    for text in snapshot.texts() {
-        let ids: BTreeSet<String> = object_ids(text).into_iter().collect();
+/// What the ids of the twins stand for, each side's repository in `dirs`, the objects both held
+/// when they parted in `origin`.
+struct Names<'a> {
+    dirs: [&'a Path; 2],
+    origin: &'a Origin,
+    /// The names of each pair of ids read at the same place on both sides.
+    pairs: BTreeMap<(String, String), (String, String)>,
+    /// The names of each side's ids at a place the other side does not have.
+    alone: [BTreeMap<String, String>; 2],
+}
+
+impl Names<'_> {
+    /// The files of both sides named: a file both have as a pair of texts, any other alone.
+    fn name_files(
+        &mut self,
+        ours: &mut BTreeMap<String, String>,
+        theirs: &mut BTreeMap<String, String>,
+    ) {
+        for (path, x) in ours.iter_mut() {
+            match theirs.get_mut(path) {
+                Some(y) => self.name_both(x, y),
+                None => self.name_alone(0, x),
+            }
+        }
+        for (path, y) in theirs.iter_mut() {
+            if !ours.contains_key(path) {
+                self.name_alone(1, y);
+            }
+        }
+    }
+
+    /// `x` and `y`, read at the same place on each side, named: where they read alike but for
+    /// their ids, each pair of ids at the same place in them, else each id alone.
+    fn name_both(&mut self, x: &mut String, y: &mut String) {
+        let (p, q) = (pieces(x), pieces(y));
+        let aligned = p.len() == q.len()
+            && p.iter().zip(&q).all(|pair| match pair {
+                (Piece::Id(_), Piece::Id(_)) => true,
+                (Piece::Text(l), Piece::Text(m)) => l == m,
+                _ => false,
+            });
+        if !aligned {
+            self.name_alone(0, x);
+            self.name_alone(1, y);
+            return;
+        }
+        let (mut named_x, mut named_y) = (String::new(), String::new());
+        for pair in p.iter().zip(&q) {
+            let (l, m) = match pair {
+                (Piece::Id(l), Piece::Id(m)) => self.pair(l, m),
+                (Piece::Text(t), _) => (t.to_string(), t.to_string()),
+                (Piece::Id(_), Piece::Text(_)) => unreachable!("the pieces are aligned"),
+            };
+            named_x.push_str(&l);
+            named_y.push_str(&m);
+        }
+        (*x, *y) = (named_x, named_y);
+    }
+
+    /// The names of the ids `x` on this side and `y` on the twin, read at the same place: one id
+    /// keeps it; two commits or two tags made since the twins parted whose headers have the same
+    /// fields stand for their contents, their times left out and their parents or objects
+    /// paired; any other pair is named alone, so that an object the twins parted with differs
+    /// from every other.
+    fn pair(&mut self, x: &str, y: &str) -> (String, String) {
+        if x == y {
+            return (x.to_string(), y.to_string());
+        }
+        let key = (x.to_string(), y.to_string());
+        if let Some(names) = self.pairs.get(&key) {
+            return names.clone();
+        }
+        let made_since = if self.origin.holds(x) || self.origin.holds(y) {
+            (None, None)
+        } else {
+            (made(self.dirs[0], x), made(self.dirs[1], y))
+        };
+        let names = match made_since {
+            (Some(l), Some(m)) if l.kind == m.kind && l.fields() == m.fields() => {
+                let (mut ours, mut theirs) = (Vec::new(), Vec::new());
+                for (a, b) in l.header.iter().zip(&m.header) {
+                    let (a, b) = match (a.split_once(' '), b.split_once(' ')) {
+                        (Some((key @ ("parent" | "object"), a)), Some((_, b))) => {
+                            let (a, b) = self.pair(a, b);
+                            (format!("{key} {a}"), format!("{key} {b}"))
+                        }
+                        _ => (timeless(a), timeless(b)),
+                    };
+                    ours.push(a);
+                    theirs.push(b);
+                }
+                (l.named(&ours), m.named(&theirs))
+            }
+            _ => (self.alone(0, x), self.alone(1, y)),
+        };
+        self.pairs.insert(key, names.clone());
+        names
+    }
+
+    /// The ids of `text` on side `side`, at a place the other side does not have, named alone.
+    fn name_alone(&mut self, side: usize, text: &mut String) {
+        let ids: BTreeSet<String> = pieces(text)
+            .into_iter()
+            .filter_map(|piece| match piece {
+                Piece::Id(id) => Some(id.to_string()),
+                Piece::Text(_) => None,
+            })
+            .collect();
         for id in ids {
-            let name = content_of(&id, dir, other, &mut named);
+            let name = self.alone(side, &id);
             if name != id {
                 *text = text.replace(&id, &name);
             }
         }
     }
-    snapshot
+
+    /// The id `id` on side `side`, named alone: itself where the twins parted with it or it is
+    /// neither a commit nor a tag, else its content, its time left out and its parents or object
+    /// named alone.
+    fn alone(&mut self, side: usize, id: &str) -> String {
+        if self.origin.holds(id) {
+            return id.to_string();
+        }
+        if let Some(name) = self.alone[side].get(id) {
+            return name.clone();
+        }
+        let name = match made(self.dirs[side], id) {
+            Some(object) => {
+                let header: Vec<String> = object
+                    .header
+                    .iter()
+                    .map(|line| match line.split_once(' ') {
+                        Some((key @ ("parent" | "object"), of)) => {
+                            format!("{key} {}", self.alone(side, of))
+                        }
+                        _ => timeless(line),
+                    })
+                    .collect();
+                object.named(&header)
+            }
+            None => id.to_string(),
+        };
+        self.alone[side].insert(id.to_string(), name.clone());
+        name
+    }
 }
 
-/// The object ids in `text`: each run of exactly 40 hexadecimal digits.
-fn object_ids(text: &str) -> Vec<String> {
-    text.split(|c: char| !c.is_ascii_hexdigit())
-        .filter(|w| w.len() == 40)
-        .map(str::to_string)
-        .collect()
+/// A piece of a text of a snapshot: an object id, a run of exactly 40 hexadecimal digits, or the
+/// text between two.
+enum Piece<'a> {
+    Id(&'a str),
+    Text(&'a str),
+}
+
+/// `text` cut into its object ids and the text between them.
+fn pieces(text: &str) -> Vec<Piece<'_>> {
+    let mut pieces = Vec::new();
+    let (mut start, mut run) = (0, None);
+    let ends = text.char_indices().map(Some).chain([None]);
+    for next in ends {
+        let at = next.map_or(text.len(), |(i, _)| i);
+        match (run, next.is_some_and(|(_, c)| c.is_ascii_hexdigit())) {
+            (None, true) => run = Some(at),
+            (Some(from), false) => {
+                if at - from == 40 {
+                    if start < from {
+                        pieces.push(Piece::Text(&text[start..from]));
+                    }
+                    pieces.push(Piece::Id(&text[from..at]));
+                    start = at;
+                }
+                run = None;
+            }
+            _ => {}
+        }
+    }
+    if start < text.len() {
+        pieces.push(Piece::Text(&text[start..]));
+    }
+    pieces
+}
+
+/// A commit or an annotated tag, as `git cat-file` prints it.
+struct Made {
+    kind: String,
+    header: Vec<String>,
+    message: String,
+}
+
+impl Made {
+    /// The field each line of the header starts with.
+    fn fields(&self) -> Vec<&str> {
+        self.header
+            .iter()
+            .map(|line| line.split_once(' ').map_or(line.as_str(), |(key, _)| key))
+            .collect()
+    }
+
+    /// The object as it stands for its content, its header read as `header`.
+    fn named(&self, header: &[String]) -> String {
+        format!(
+            "<{} made apart: {:?}>",
+            self.kind,
+            format!("{}\n\n{}", header.join("\n"), self.message)
+        )
+    }
+}
+
+/// The commit or annotated tag `id` in `dir`, or `None` where it is another kind of object or
+/// missing.
+fn made(dir: &Path, id: &str) -> Option<Made> {
+    let kind = kinds(dir, &[id]).remove(0);
+    if kind != "commit" && kind != "tag" {
+        return None;
+    }
+    let object = raw(dir, &["cat-file", &kind, id]);
+    let (header, message) = object.split_once("\n\n").unwrap_or((&object, ""));
+    Some(Made {
+        header: header.lines().map(str::to_string).collect(),
+        message: message.to_string(),
+        kind,
+    })
+}
+
+/// A line of a header, its time left out where it names a person.
+fn timeless(line: &str) -> String {
+    match line.split_once(' ') {
+        Some((key @ ("author" | "committer" | "tagger"), who)) => {
+            // The last two words are the time and its zone.
+            let who = who.rsplitn(3, ' ').nth(2).unwrap_or(who);
+            format!("{key} {who}")
+        }
+        _ => line.to_string(),
+    }
 }
 
 /// What `git cat-file --batch-check` says of each of `ids` in `dir`: its type, or `missing`.
 fn kinds(dir: &Path, ids: &[&str]) -> Vec<String> {
+    if ids.is_empty() {
+        return Vec::new();
+    }
     let mut child = git_command(dir)
         .args(["cat-file", "--batch-check=%(objecttype)"])
         .stdin(Stdio::piped())
@@ -376,43 +700,6 @@ fn kinds(dir: &Path, ids: &[&str]) -> Vec<String> {
         .lines()
         .map(|l| l.rsplit(' ').next().unwrap_or(l).to_string())
         .collect()
-}
-
-/// The id `id` stands for in `dir`'s snapshot beside its twin `other`: itself where `other`
-/// holds it or it is neither a commit nor a tag, else its content with its ids named alike and
-/// its times left out.
-fn content_of(id: &str, dir: &Path, other: &Path, named: &mut BTreeMap<String, String>) -> String {
-    if let Some(name) = named.get(id) {
-        return name.clone();
-    }
-    let in_other = kinds(other, &[id]).remove(0) != "missing";
-    let kind = kinds(dir, &[id]).remove(0);
-    let name = if in_other || !(kind == "commit" || kind == "tag") {
-        id.to_string()
-    } else {
-        let object = raw(dir, &["cat-file", &kind, id]);
-        let (header, message) = object.split_once("\n\n").unwrap_or((&object, ""));
-        let header: Vec<String> = header
-            .lines()
-            .map(|line| match line.split_once(' ') {
-                Some((key @ ("author" | "committer" | "tagger"), who)) => {
-                    // The last two words are the time and its zone.
-                    let who = who.rsplitn(3, ' ').nth(2).unwrap_or(who);
-                    format!("{key} {who}")
-                }
-                Some((key @ ("parent" | "object"), of)) => {
-                    format!("{key} {}", content_of(of, dir, other, named))
-                }
-                _ => line.to_string(),
-            })
-            .collect();
-        format!(
-            "<{kind} made on one side: {:?}>",
-            format!("{}\n\n{message}", header.join("\n"))
-        )
-    };
-    named.insert(id.to_string(), name.clone());
-    name
 }
 
 /// Writes `write` and expects it refused with `why` among its words, and the repository's

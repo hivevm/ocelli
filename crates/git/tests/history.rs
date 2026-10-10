@@ -16,8 +16,8 @@ use ocelli_core::port::{RepositoryReader, RepositoryWriter, ResetMode, Take, Wri
 use ocelli_git::{GitReader, GitWriter};
 use std::path::Path;
 use support::{
-    Scratch, Snapshot, assert_twins_alike, git, git_command, git_may_fail, refused, snapshot,
-    stopped_partway, twin, write_file,
+    Origin, Scratch, Snapshot, assert_twins_alike, git, git_command, git_may_fail, refused,
+    snapshot, stopped_partway, twin, write_file,
 };
 
 /// A repository whose `main` and `side` both start from `f` = "base\n"; `main` then writes `f`
@@ -273,6 +273,7 @@ fn a_reset_moves_the_branch_as_git_reset_does_in_each_mode() {
     ] {
         let repo = diverged(&format!("reset{flag}"), "ours\n", "base\n");
         write_file(&repo.0, "g", "mine\n");
+        let origin = Origin::of(&repo.0);
         let other = twin(&repo, &format!("reset{flag}-twin"));
         let reset = Write::Reset {
             branch: "main".into(),
@@ -282,7 +283,7 @@ fn a_reset_moves_the_branch_as_git_reset_does_in_each_mode() {
         };
         GitWriter.write(&repo.0, &reset).unwrap();
         git(&other.0, &["reset", "--quiet", flag, "HEAD~1"]);
-        assert_twins_alike(&repo.0, &other.0, flag);
+        assert_twins_alike(&repo.0, &other.0, &origin, flag);
     }
 }
 
@@ -312,13 +313,14 @@ fn a_conflict_git_left_is_resolved_as_git_checkout_and_git_add_resolve_it() {
     for (take, side) in [(Take::Ours, "--ours"), (Take::Theirs, "--theirs")] {
         let repo = diverged(&format!("resolve{side}"), "ours\n", "theirs\n");
         assert!(!git_may_fail(&repo.0, &["merge", "side"]));
+        let origin = Origin::of(&repo.0);
         let other = twin(&repo, &format!("resolve{side}-twin"));
         GitWriter
             .write(&repo.0, &resolve(&repo.0, "f", take))
             .unwrap();
         git(&other.0, &["checkout", side, "f"]);
         git(&other.0, &["add", "f"]);
-        assert_twins_alike(&repo.0, &other.0, side);
+        assert_twins_alike(&repo.0, &other.0, &origin, side);
 
         let at = head(&repo.0);
         let carry_on = Write::Continue {
@@ -392,6 +394,7 @@ fn a_stopped_cherry_pick_continues_with_its_author_and_an_abort_goes_back() {
         let repo = diverged(&format!("abort-{operation}"), "ours\n", "theirs\n");
         write_file(&repo.0, "untracked", "mine\n");
         let before = snapshot(&repo.0);
+        let origin = Origin::of(&repo.0);
         let other = twin(&repo, &format!("abort-{operation}-twin"));
         assert!(!git_may_fail(&repo.0, &[operation, "side"]));
         let op = match operation {
@@ -406,7 +409,7 @@ fn a_stopped_cherry_pick_continues_with_its_author_and_an_abort_goes_back() {
         gone_back(&repo.0, &before, &format!("{operation} --abort"));
         assert!(!git_may_fail(&other.0, &[operation, "side"]));
         git(&other.0, &[operation, "--abort"]);
-        assert_twins_alike(&repo.0, &other.0, operation);
+        assert_twins_alike(&repo.0, &other.0, &origin, operation);
     }
 }
 
@@ -444,6 +447,7 @@ fn a_stopped_rebase_continues_to_its_end_and_an_abort_restores_the_branch() {
 
     let repo = diverged("rebase-abort", "ours\n", "theirs\n");
     let before = snapshot(&repo.0);
+    let origin = Origin::of(&repo.0);
     let other = twin(&repo, "rebase-abort-twin");
     let rebase = Write::Rebase {
         branch: "main".into(),
@@ -459,7 +463,7 @@ fn a_stopped_rebase_continues_to_its_end_and_an_abort_restores_the_branch() {
     gone_back(&repo.0, &before, "aborted");
     assert!(!git_may_fail(&other.0, &["rebase", "side"]));
     git(&other.0, &["rebase", "--abort"]);
-    assert_twins_alike(&repo.0, &other.0, "aborted");
+    assert_twins_alike(&repo.0, &other.0, &origin, "aborted");
 }
 
 #[test]
@@ -468,6 +472,7 @@ fn a_rebase_either_side_started_is_aborted_by_the_other_and_continued_where_it_s
     // git starts it: Ocelli refuses to continue it and aborts it as git would.
     let repo = diverged("git-rebase", "ours\n", "theirs\n");
     let before = snapshot(&repo.0);
+    let origin = Origin::of(&repo.0);
     let other = twin(&repo, "git-rebase-twin");
     assert!(!git_may_fail(&repo.0, &["rebase", "side"]));
     GitWriter
@@ -488,11 +493,12 @@ fn a_rebase_either_side_started_is_aborted_by_the_other_and_continued_where_it_s
     git(&other.0, &["checkout", "--ours", "f"]);
     git(&other.0, &["add", "f"]);
     git(&other.0, &["rebase", "--abort"]);
-    assert_twins_alike(&repo.0, &other.0, "aborted by Ocelli");
+    assert_twins_alike(&repo.0, &other.0, &origin, "aborted by Ocelli");
 
     // Ocelli starts it: git aborts it.
     let repo = diverged("ocelli-rebase", "ours\n", "theirs\n");
     let before = snapshot(&repo.0);
+    let origin = Origin::of(&repo.0);
     let other = twin(&repo, "ocelli-rebase-twin");
     let rebase = Write::Rebase {
         branch: "main".into(),
@@ -504,7 +510,7 @@ fn a_rebase_either_side_started_is_aborted_by_the_other_and_continued_where_it_s
     gone_back(&repo.0, &before, "aborted by git");
     assert!(!git_may_fail(&other.0, &["rebase", "side"]));
     git(&other.0, &["rebase", "--abort"]);
-    assert_twins_alike(&repo.0, &other.0, "aborted by git");
+    assert_twins_alike(&repo.0, &other.0, &origin, "aborted by git");
 }
 
 #[test]
@@ -516,6 +522,7 @@ fn a_stopped_revert_is_aborted_as_git_revert_abort_does() {
     git(&repo.0, &["commit", "--quiet", "-am", "again"]);
     write_file(&repo.0, "untracked", "mine\n");
     let before = snapshot(&repo.0);
+    let origin = Origin::of(&repo.0);
     let other = twin(&repo, "revert-abort-twin");
     let revert = Write::Revert {
         branch: "main".into(),
@@ -540,7 +547,7 @@ fn a_stopped_revert_is_aborted_as_git_revert_abort_does() {
     gone_back(&repo.0, &before, "aborted");
     assert!(!git_may_fail(&other.0, &["revert", "--no-edit", &reverted]));
     git(&other.0, &["revert", "--abort"]);
-    assert_twins_alike(&repo.0, &other.0, "aborted");
+    assert_twins_alike(&repo.0, &other.0, &origin, "aborted");
 }
 
 mod programs;
@@ -642,11 +649,12 @@ fn a_conflicted_link_is_resolved_as_git_resolves_it_and_nothing_outside_is_writt
     git(d, &["add", "f"]);
     git(d, &["commit", "--quiet", "-m", "ours, a link"]);
     assert!(!git_may_fail(d, &["merge", "side"]));
+    let origin = Origin::of(&s.0);
     let other = twin(&s, "link-twin");
     GitWriter.write(d, &resolve(d, "f", Take::Theirs)).unwrap();
     git(&other.0, &["checkout", "--theirs", "f"]);
     git(&other.0, &["add", "f"]);
-    assert_twins_alike(d, &other.0, "resolved");
+    assert_twins_alike(d, &other.0, &origin, "resolved");
     assert_eq!(
         std::fs::read_to_string(outside.0.join("kept")).unwrap(),
         "precious\n",
@@ -665,7 +673,7 @@ fn a_conflicted_link_is_resolved_as_git_resolves_it_and_nothing_outside_is_writt
     };
     GitWriter.write(d, &abort).unwrap();
     git(&other.0, &["merge", "--abort"]);
-    assert_twins_alike(d, &other.0, "aborted");
+    assert_twins_alike(d, &other.0, &origin, "aborted");
     assert!(
         d.join("f")
             .symlink_metadata()
@@ -896,10 +904,11 @@ fn an_abort_keeps_an_edit_made_while_stopped_as_git_does() {
     assert!(!git_may_fail(d, &["merge", "side"]));
     // `s` came in cleanly; the developer edits it while the merge is stopped.
     write_file(d, "s", "an edit of the developer's\n");
+    let origin = Origin::of(&repo.0);
     let other = twin(&repo, "abort-edit-twin");
     refused(d, &abort(d, Operation::Merge), "s was changed");
     assert!(!git_may_fail(&other.0, &["merge", "--abort"]));
-    assert_twins_alike(d, &other.0, "refused alike");
+    assert_twins_alike(d, &other.0, &origin, "refused alike");
 }
 
 #[test]
@@ -1063,11 +1072,12 @@ fn an_abort_puts_back_a_file_and_a_directory_the_operation_swapped_as_git_does()
         );
         let d = &repo.0;
         assert!(!git_may_fail(d, &["merge", "side"]));
+        let origin = Origin::of(&repo.0);
         let other = twin(&repo, &format!("{name}-twin"));
         git_may_fail(&other.0, &["update-index", "--refresh"]);
         GitWriter.write(d, &abort(d, Operation::Merge)).unwrap();
         git(&other.0, &["merge", "--abort"]);
-        assert_twins_alike(d, &other.0, name);
+        assert_twins_alike(d, &other.0, &origin, name);
     }
 }
 
@@ -1156,6 +1166,7 @@ fn an_abort_never_writes_through_a_link_the_operation_put_in_a_directorys_place(
     );
     let d = &repo.0;
     assert!(!git_may_fail(d, &["merge", "side"]));
+    let origin = Origin::of(&repo.0);
     let other = twin(&repo, "swap-link-twin");
     git_may_fail(&other.0, &["update-index", "--refresh"]);
     GitWriter.write(d, &abort(d, Operation::Merge)).unwrap();
@@ -1164,7 +1175,7 @@ fn an_abort_never_writes_through_a_link_the_operation_put_in_a_directorys_place(
         "outside\n"
     );
     git(&other.0, &["merge", "--abort"]);
-    assert_twins_alike(d, &other.0, "aborted");
+    assert_twins_alike(d, &other.0, &origin, "aborted");
 }
 
 #[test]
@@ -1250,11 +1261,12 @@ fn an_abort_over_a_submodule_moved_or_replaced_ends_as_git_does_or_keeps_its_con
     });
     let d = &repo.0;
     assert!(!git_may_fail(d, &["merge", "side"]));
+    let origin = Origin::of(&repo.0);
     let other = twin(&repo, "sub-bump-twin");
     git_may_fail(&other.0, &["update-index", "--refresh"]);
     GitWriter.write(d, &abort(d, Operation::Merge)).unwrap();
     git(&other.0, &["merge", "--abort"]);
-    assert_twins_alike(d, &other.0, "aborted");
+    assert_twins_alike(d, &other.0, &origin, "aborted");
 
     // Theirs puts a file in its place: the abort puts the submodule back, as git's does.
     let (repo, _sub) = with_submodule("sub-file", &|d, _| {
@@ -1264,11 +1276,17 @@ fn an_abort_over_a_submodule_moved_or_replaced_ends_as_git_does_or_keeps_its_con
     });
     let d = &repo.0;
     assert!(!git_may_fail(d, &["merge", "side"]));
+    let origin = Origin::of(&repo.0);
     let other = twin(&repo, "sub-file-twin");
     git_may_fail(&other.0, &["update-index", "--refresh"]);
     GitWriter.write(d, &abort(d, Operation::Merge)).unwrap();
     git(&other.0, &["merge", "--abort"]);
-    assert_twins_alike(d, &other.0, "aborted over a file in the submodule's place");
+    assert_twins_alike(
+        d,
+        &other.0,
+        &origin,
+        "aborted over a file in the submodule's place",
+    );
 }
 
 #[test]

@@ -94,7 +94,7 @@ pub type Guard = Arc<dyn Fn(&Path) -> Result<(), String> + Send + Sync>;
 /// What a host waits for before a write reaches the repository at the path: the remote server's
 /// turn among its tabs' writes to one repository, held until the write ends (ADR-0037). It reads
 /// the file system and waits for another tab's write: it runs on the blocking pool.
-pub type Turns = Arc<dyn Fn(&Path) -> Result<Box<dyn Turn>, HostError> + Send + Sync>;
+pub type TakeTurn = Arc<dyn Fn(&Path) -> Result<Box<dyn Turn>, HostError> + Send + Sync>;
 
 /// A repository's turn, held while a write runs and told how the write ended before it is given
 /// back, so that the remote server tells its other tabs on the repository to load again before
@@ -149,7 +149,7 @@ pub struct Host {
     /// Checked before every command that reaches the repository; none in the desktop host.
     guard: Option<Guard>,
     /// Taken before every write; none in the desktop host, which shows a repository in one window.
-    turns: Option<Turns>,
+    take_turn: Option<TakeTurn>,
     /// The history of the newest load (ADR-0031).
     session: Arc<Session>,
     /// The flag that stops the write that runs, replaced for each write.
@@ -169,12 +169,12 @@ impl Host {
         }
     }
 
-    /// The host, writing only once `turns` gives it the repository's turn, so that the writes of
-    /// several hosts to one repository run one after the other, each checking what it expects
+    /// The host, writing only once `take_turn` gives it the repository's turn, so that the writes
+    /// of several hosts to one repository run one after the other, each checking what it expects
     /// once its turn comes (ADR-0037).
-    pub fn taking_turns(self, turns: Turns) -> Host {
+    pub fn taking_turns(self, take_turn: TakeTurn) -> Host {
         Host {
-            turns: Some(turns),
+            take_turn: Some(take_turn),
             ..self
         }
     }
@@ -331,12 +331,12 @@ impl Host {
         // (ADR-0035).
         let cancel = Arc::new(AtomicBool::new(false));
         *self.cancel.lock().unwrap() = Arc::clone(&cancel);
-        let turns = self.turns.clone();
+        let take_turn = self.take_turn.clone();
         let written = tokio::task::spawn_blocking(move || {
             checked(&guard, &repo_path)?;
             // Another host's write to the repository ends first; the root is checked again after
             // the wait, and the write checks what it expects as it runs (ADR-0039, ADR-0037).
-            let mut turn = match &turns {
+            let mut turn = match &take_turn {
                 Some(take) => {
                     let turn = take(&repo_path)?;
                     checked(&guard, &repo_path)?;

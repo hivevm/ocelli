@@ -14,6 +14,8 @@ use ocelli_server::{Limits, Options, Running, start};
 use serde::Serialize;
 use serde_json::{Value, json};
 use std::path::{Path, PathBuf};
+use std::sync::Once;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
@@ -225,18 +227,27 @@ impl Tab {
     }
 
     pub async fn message(&mut self) -> Value {
+        tokio::time::timeout(Duration::from_secs(20), self.next_message())
+            .await
+            .expect("the server answers")
+            .unwrap_or_else(|why| panic!("{why}"))
+    }
+
+    /// The next message; why there is none where the server closed the connection, sent what is
+    /// no text, or broke the protocol.
+    pub async fn next_message(&mut self) -> Result<Value, String> {
         loop {
-            let message = tokio::time::timeout(Duration::from_secs(20), self.socket.next())
-                .await
-                .expect("the server answers")
-                .unwrap()
-                .unwrap();
-            match message {
-                Message::Text(text) => return serde_json::from_str(&text).unwrap(),
+            match self.socket.next().await {
+                Some(Ok(Message::Text(text))) => return Ok(serde_json::from_str(&text).unwrap()),
                 // A ping the server sends while a command runs is answered by the client, as a
                 // browser answers it, and is no message of the command's.
-                Message::Ping(_) | Message::Pong(_) => continue,
-                other => panic!("not a text message: {other:?}"),
+                Some(Ok(Message::Ping(_) | Message::Pong(_))) => continue,
+                Some(Ok(Message::Close(frame))) => {
+                    return Err(format!("the server closed the connection: {frame:?}"));
+                }
+                Some(Ok(other)) => return Err(format!("not a text message: {other:?}")),
+                Some(Err(e)) => return Err(format!("the connection broke: {e}")),
+                None => return Err("the connection ended".to_string()),
             }
         }
     }
@@ -446,7 +457,7 @@ impl Desktop {
     pub async fn write(&self, write: &Write, confirmed: bool) -> Result<Value, String> {
         self.write_saying(write, confirmed)
             .await
-            .map_err(ocelli_server::socket::scrub_write)
+            .map_err(ocelli_server::socket::scrub::scrub_write)
     }
 
     /// [`Desktop::write`], its failure as the desktop host reads it, with what git said.
@@ -495,6 +506,8 @@ pub struct Pair {
     pub desktop: Desktop,
     pub scratch: Scratch,
     pub twin: Option<Scratch>,
+    /// What the two held when they parted.
+    pub parted: crate::support::Origin,
 }
 
 #[cfg(unix)]
@@ -520,6 +533,7 @@ impl Pair {
         let root = scratch.0.join("root");
         std::fs::create_dir_all(&root).unwrap();
         setup(&scratch.0);
+        let parted = crate::support::Origin::of(&root);
         let (twin, other) = if from_scratch {
             let other = scratch.0.join("desktop");
             let copied = std::process::Command::new("cp")
@@ -554,6 +568,7 @@ impl Pair {
             desktop,
             scratch,
             twin,
+            parted,
         }
     }
 
@@ -572,7 +587,12 @@ impl Pair {
             (Ok(Value::String(_)), Ok(Value::String(_))) => {}
             _ => assert_eq!(here, there, "{write:?}: the server, then the desktop host"),
         }
-        crate::support::assert_twins_alike(&self.root, &self.other, &format!("{write:?}"));
+        crate::support::assert_twins_alike(
+            &self.root,
+            &self.other,
+            &self.parted,
+            &format!("{write:?}"),
+        );
         here
     }
 
@@ -599,7 +619,7 @@ impl Pair {
         let before = (snapshot_of(&self.root), snapshot_of(&self.other));
         assert_eq!(
             perform_as(&mut self.tab, &write, confirmed).await,
-            Err(ocelli_server::socket::WRITE_FAILED.to_string()),
+            Err(ocelli_server::socket::scrub::WRITE_FAILED.to_string()),
             "{write:?}"
         );
         let there = self
@@ -619,4 +639,46 @@ impl Pair {
         change(&self.root);
         change(&self.other);
     }
+}
+
+/// The panics this process has had since the count began, inside git2 and outside the tests' own
+/// code: the release build aborts on a panic, so one in the server takes it down with every tab,
+/// where a test build only fails the command, or answers it as a failed read where it ran on the
+/// blocking pool. The panics are still reported as they were.
+struct Panics {
+    git2: AtomicUsize,
+    outside_tests: AtomicUsize,
+}
+
+fn panics() -> &'static Panics {
+    static COUNT: Panics = Panics {
+        git2: AtomicUsize::new(0),
+        outside_tests: AtomicUsize::new(0),
+    };
+    static HOOK: Once = Once::new();
+    HOOK.call_once(|| {
+        let previous = std::panic::take_hook();
+        std::panic::set_hook(Box::new(move |info| {
+            let file = info.location().map_or("", |l| l.file());
+            if file.contains("git2-") {
+                COUNT.git2.fetch_add(1, Ordering::SeqCst);
+            }
+            if !file.contains("/tests/") && !file.contains("\\tests\\") {
+                COUNT.outside_tests.fetch_add(1, Ordering::SeqCst);
+            }
+            previous(info);
+        }));
+    });
+    &COUNT
+}
+
+/// How many panics inside git2 this process has had since the count began.
+pub fn git2_panics() -> usize {
+    panics().git2.load(Ordering::SeqCst)
+}
+
+/// How many panics outside the tests' own code this process has had since the count began, those
+/// inside git2 among them.
+pub fn panics_outside_tests() -> usize {
+    panics().outside_tests.load(Ordering::SeqCst)
 }

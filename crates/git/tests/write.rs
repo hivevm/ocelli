@@ -18,7 +18,8 @@ use shown::{kinds_of_write, stage_in, unstage_in};
 use std::collections::BTreeSet;
 use std::path::Path;
 use support::{
-    Scratch, git, git_command, head_of, refused, refused_reporting, snapshot, write_file,
+    Origin, Scratch, as_twins, assert_twins_alike, git, git_command, head_of, refused,
+    refused_reporting, snapshot, twin, write_file,
 };
 
 mod programs;
@@ -64,6 +65,80 @@ fn the_snapshot_sees_every_part_a_write_can_change() {
     sees("a sequencer", &|| {
         write_file(d, ".git/sequencer/todo", "pick x\n");
     });
+}
+
+/// `git` in `dir` with `args`, its commits made at the second `at`.
+fn git_at(dir: &Path, at: u32, args: &[&str]) {
+    let date = format!("{at} +0000");
+    let out = git_command(dir)
+        .env("GIT_AUTHOR_DATE", &date)
+        .env("GIT_COMMITTER_DATE", &date)
+        .args(args)
+        .output()
+        .unwrap();
+    assert!(out.status.success(), "{out:?}");
+}
+
+#[test]
+fn twins_read_alike_where_one_makes_at_the_time_of_the_other_what_the_other_made_before() {
+    let scratch = with_file("same-second");
+    let origin = Origin::of(&scratch.0);
+    let other = twin(&scratch, "same-second-twin");
+    // The stash `git` makes in `dir` at the second `at`, of `f` changed to `content`.
+    let stash_at = |dir: &Path, at: u32, content: &str, message: &[&str]| {
+        write_file(dir, "f", content);
+        git_at(dir, at, &[&["stash", "push", "--quiet"], message].concat());
+    };
+    // Each side stashes twice, the twin a second later: the index commit of this side's second
+    // stash is the one of the twin's first, which the twin holds, where the twin's second stash
+    // has an index commit of its own, alike but for its time.
+    for (dir, start) in [(&scratch.0, 1_700_000_000), (&other.0, 1_700_000_001)] {
+        stash_at(dir, start, "changed\n", &["-m", "first"]);
+        git(dir, &["stash", "apply", "--quiet"]);
+        stash_at(dir, start + 1, "changed\n", &[]);
+    }
+    assert_twins_alike(&scratch.0, &other.0, &origin, "stashed a second apart");
+    // A stash of another change still differs, made at the same second or not.
+    stash_at(&scratch.0, 1_700_000_003, "one\n", &[]);
+    stash_at(&other.0, 1_700_000_003, "two\n", &[]);
+    let (ours, theirs) = as_twins(&scratch.0, &other.0, &origin);
+    assert_ne!(ours, theirs);
+}
+
+#[test]
+fn twins_differ_where_one_rewrote_a_commit_they_parted_with_alike_but_for_its_time() {
+    let scratch = with_file("amended");
+    let origin = Origin::of(&scratch.0);
+    let other = twin(&scratch, "amended-twin");
+    git_at(
+        &scratch.0,
+        1_900_000_000,
+        &["commit", "--quiet", "--amend", "--no-edit"],
+    );
+    let (ours, theirs) = as_twins(&scratch.0, &other.0, &origin);
+    assert_ne!(ours, theirs);
+}
+
+#[test]
+fn twins_differ_where_one_swapped_branches_on_commits_they_parted_with_alike_but_for_their_time() {
+    let scratch = with_file("swapped");
+    let d = &scratch.0;
+    for (branch, at) in [("p", 1_700_000_000), ("q", 1_700_000_001)] {
+        git(d, &["switch", "--quiet", "-c", branch, "main"]);
+        git_at(
+            d,
+            at,
+            &["commit", "--quiet", "--allow-empty", "-m", "alike"],
+        );
+    }
+    git(d, &["switch", "--quiet", "main"]);
+    let origin = Origin::of(d);
+    let other = twin(&scratch, "swapped-twin");
+    let (p, q) = (git(d, &["rev-parse", "p"]), git(d, &["rev-parse", "q"]));
+    git(d, &["branch", "--quiet", "--force", "p", &q]);
+    git(d, &["branch", "--quiet", "--force", "q", &p]);
+    let (ours, theirs) = as_twins(d, &other.0, &origin);
+    assert_ne!(ours, theirs);
 }
 
 /// A repository with two commits on main, its identity in its own configuration, and the SHAs.

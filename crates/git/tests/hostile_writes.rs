@@ -3,64 +3,24 @@
 //! A write's strings come from the caller, a browser of the remote server among them: names,
 //! ids, messages, paths, and a remote's name. git2 turns some into C strings by unwrapping, and a
 //! release build aborts on a panic, so a NUL in any of them would take the whole server down.
-//! Every kind of write, from the core's fixture of one example each, is written with each of its
-//! string fields set in turn to each hostile value, and none may panic.
+//! Every kind of write, each made from a repository in the state it is written in, is written
+//! with each of its string fields set in turn to each hostile value, each time in a fresh copy of
+//! that repository, and none may panic.
 
 #![allow(
     clippy::disallowed_methods,
     reason = "a test sets a repository up by hand, the way a developer would"
 )]
 
+mod reachable;
+mod shown;
 mod support;
 use ocelli_core::port::{RepositoryWriter, Write};
 use ocelli_git::GitWriter;
+use reachable::Repositories;
 use serde_json::Value;
 use std::path::Path;
-use support::{Scratch, git, write_file};
-
-/// What a caller may send in place of a string.
-fn hostile() -> Vec<String> {
-    let mut values: Vec<String> = [
-        "\0",
-        "a\0b",
-        "\0refs/heads/main",
-        "main\0",
-        "",
-        " ",
-        "\n",
-        "a\nb",
-        "-x",
-        "--upload-pack=touch x",
-        "+refs/*:refs/*",
-        "refs/*",
-        "*",
-        "[",
-        "..",
-        "../x",
-        "/",
-        "/abs",
-        ".git/config",
-        "\\",
-        "~",
-        "HEAD",
-        "@",
-        "@{-1}",
-        "main~1",
-        "main^",
-        ":",
-        "a:b",
-        "%00",
-        "file:///tmp",
-        "\u{7f}",
-        "\u{202e}",
-    ]
-    .iter()
-    .map(|v| v.to_string())
-    .collect();
-    values.push("a".repeat(100_000));
-    values.push("/".repeat(5_000));
-    values
-}
+use support::{Scratch, git, hostile, shortened, write_file};
 
 /// Every string of `value` but a write's kind and the names of an enum's variants, which a
 /// different string would only make unreadable, each as the path of keys that leads to it.
@@ -106,37 +66,40 @@ fn repository(dir: &Path) {
 #[test]
 fn no_string_a_caller_gives_in_any_write_makes_the_writer_panic() {
     let scratch = Scratch::new("hostile");
-    let dir = scratch.0.join("repo");
-    std::fs::create_dir_all(&dir).unwrap();
-    repository(&dir);
-    let fixture = Path::new(env!("CARGO_MANIFEST_DIR")).join("../core/tests/fixtures/writes.json");
-    let examples: Vec<Value> =
-        serde_json::from_str(&std::fs::read_to_string(fixture).unwrap()).unwrap();
+    let repositories = Repositories::new(&scratch.0);
+    let dir = scratch.0.join("written");
     let values = hostile();
-    let (mut written, mut panicked) = (0, Vec::new());
-    for example in &examples {
+    let mut panicked = Vec::new();
+    for (state, make) in reachable::examples(&repositories) {
+        let example = serde_json::to_value(make(&repositories.of(state))).unwrap();
+        let kind = &example["kind"];
+        // As made, the write is written: a hostile value in its place reaches as far.
+        repositories.fresh(state, &dir);
+        let write: Write = serde_json::from_value(example.clone()).unwrap();
+        if let Err(e) = GitWriter.write(&dir, &write) {
+            panic!("{kind} as made is refused: {e:#}");
+        }
         let mut fields = Vec::new();
-        string_fields(example, &mut Vec::new(), &mut fields);
-        assert!(
-            !fields.is_empty() || example["kind"] == "createStash",
-            "{example}"
-        );
+        string_fields(&example, &mut Vec::new(), &mut fields);
+        // Every kind of write takes a string: its fields are set, not none of them.
+        assert!(!fields.is_empty(), "{example}");
         for field in &fields {
             for value in &values {
                 let mut sent = example.clone();
                 set(&mut sent, field, value);
                 let write: Write = serde_json::from_value(sent).unwrap();
+                repositories.fresh(state, &dir);
                 let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                     GitWriter.write(&dir, &write)
                 }));
-                written += 1;
                 if result.is_err() {
-                    panicked.push(format!("{} {field:?} = {value:.20?}", example["kind"]));
+                    let failure = format!("{kind} {field:?} = {}", shortened(value));
+                    eprintln!("panicked: {failure}");
+                    panicked.push(failure);
                 }
             }
         }
     }
-    assert!(written > examples.len() * values.len(), "{written} writes");
     assert!(panicked.is_empty(), "the writer panicked on: {panicked:#?}");
 }
 
