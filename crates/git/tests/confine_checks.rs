@@ -18,7 +18,9 @@
 #![cfg(unix)]
 
 mod support;
-use ocelli_git::confine::{Refused, WALK_CAP, check_below, lies_below, still_below};
+use ocelli_git::confine::{
+    Refused, WALK_CAP, check_below, common_dir, lies_below, refs_digest, still_below,
+};
 use std::os::unix::ffi::OsStrExt;
 use std::path::{Path, PathBuf};
 use support::{Scratch, git};
@@ -412,4 +414,54 @@ fn a_chain_of_alternates_is_followed_only_so_deep() {
         !still_below(&repo, root),
         "a chain deeper than libgit2 follows is refused"
     );
+}
+
+#[test]
+// Verifies: ADR-0037
+fn a_worktree_and_its_repository_share_one_common_directory_and_another_repository_does_not() {
+    let tree = Tree::new("confine-shared-common");
+    let main = tree.root.join("ok");
+    let worktree = tree.root.join("wt");
+    git(
+        &main,
+        &["worktree", "add", "--quiet", worktree.to_str().unwrap()],
+    );
+    let common = common_dir(&main).expect("the repository's common directory");
+    assert_eq!(common, main.join(".git").canonicalize().unwrap());
+    assert_eq!(common_dir(&worktree), Some(common.clone()));
+    // Reached through a link, it is the same repository.
+    std::os::unix::fs::symlink(&main, tree.root.join("via")).unwrap();
+    assert_eq!(common_dir(&tree.root.join("via")), Some(common.clone()));
+    assert_ne!(common_dir(&tree.outside), Some(common));
+    // A folder without a repository of its own has none: the one around it is not searched for.
+    assert_eq!(common_dir(&tree.root), None);
+    assert!(common_dir(&tree.encl).is_some());
+}
+
+#[test]
+// Verifies: ADR-0037
+fn the_refs_digest_changes_with_a_ref_or_head_and_with_nothing_else() {
+    let tree = Tree::new("confine-refs-digest");
+    let repo = tree.root.join("ok");
+    let digest = || refs_digest(&repo).expect("the repository's refs");
+    let before = digest();
+    assert_eq!(digest(), before, "read twice, nothing changed");
+    // A change to the working directory and the index moves no ref.
+    std::fs::write(repo.join("f"), "changed\n").unwrap();
+    git(&repo, &["add", "f"]);
+    assert_eq!(digest(), before);
+    // A ref made, moved, and deleted; HEAD switched to another branch at the same commit.
+    git(&repo, &["branch", "other"]);
+    let made = digest();
+    assert_ne!(made, before);
+    git(&repo, &["commit", "--quiet", "-m", "two"]);
+    let moved = digest();
+    assert_ne!(moved, made);
+    git(&repo, &["switch", "--quiet", "-c", "third"]);
+    assert_ne!(digest(), moved);
+    let switched = digest();
+    git(&repo, &["symbolic-ref", "HEAD", "refs/heads/main"]);
+    assert_ne!(digest(), switched, "HEAD names another branch");
+    // A folder without a repository of its own has none.
+    assert_eq!(refs_digest(&tree.root), None);
 }

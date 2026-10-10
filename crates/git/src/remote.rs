@@ -19,6 +19,7 @@ pub(crate) fn fetch(
         .find_remote(name)
         .with_context(|| format!("there is no remote named '{name}' any more"))?;
     let url = remote.url().unwrap_or_default().to_string();
+    crate::confine::remote_within_root(repo.path(), name, &url)?;
     let transfer = Transfer::new("Fetching", name, progress);
     let mut options = git2::FetchOptions::new();
     options.remote_callbacks(transfer.callbacks());
@@ -231,6 +232,7 @@ pub(crate) fn push(
         .or(remote.url())
         .unwrap_or_default()
         .to_string();
+    crate::confine::remote_within_root(repo.path(), &remote_name, &url)?;
     let transfer = Transfer::new("Pushing", &remote_name, progress);
     let refused = std::cell::RefCell::new(None);
     let mut callbacks = transfer.callbacks();

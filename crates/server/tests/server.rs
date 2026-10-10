@@ -6,295 +6,27 @@
     reason = "a test sets a repository up by hand, the way a developer would"
 )]
 
+mod browser;
+#[path = "../../git/tests/shown/mod.rs"]
+mod shown;
 #[path = "../../git/tests/support/mod.rs"]
 mod support;
 
+use browser::*;
 use futures_util::{SinkExt, StreamExt};
-use ocelli_commands::{Answered, COMMANDS, Host, Report};
+use ocelli_commands::{Answered, COMMANDS, Host, SERVER_EVENTS};
+use ocelli_core::port::Write;
 use ocelli_server::{Limits, Options, Running, start};
-use serde::Serialize;
 use serde_json::{Value, json};
+use shown::{kinds_of_write, stage_in, unstage_in};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
-use support::{Scratch, git, git_command};
+use support::{Scratch, git, git_command, snapshot};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
-use tokio::sync::mpsc;
+use tokio_tungstenite::tungstenite::Message;
 use tokio_tungstenite::tungstenite::client::IntoClientRequest;
 use tokio_tungstenite::tungstenite::http::HeaderValue;
-use tokio_tungstenite::{MaybeTlsStream, WebSocketStream, tungstenite::Message};
-
-/// A scratch tree, named for the test and the process and removed when the test ends: `root/`, a
-/// repository with three commits, and `outside/`, a repository beside it.
-struct Tree(
-    PathBuf,
-    #[allow(
-        dead_code,
-        reason = "held so that the tree is removed when the test ends"
-    )]
-    Scratch,
-);
-
-impl Tree {
-    fn new(name: &str) -> Tree {
-        let scratch = Scratch::new(name);
-        for repo in ["root", "outside"] {
-            three_commits(&scratch.0.join(repo));
-        }
-        Tree(scratch.0.clone(), scratch)
-    }
-
-    fn root(&self) -> PathBuf {
-        self.0.join("root")
-    }
-}
-
-/// A repository with three commits at `repo`.
-fn three_commits(repo: &Path) {
-    std::fs::create_dir_all(repo).unwrap();
-    git(repo, &["init", "--quiet", "-b", "main"]);
-    for n in 1..=3 {
-        std::fs::write(repo.join("f"), format!("{n}\n")).unwrap();
-        git(repo, &["add", "f"]);
-        git(repo, &["commit", "--quiet", "-m", &format!("commit {n}")]);
-    }
-}
-
-async fn start_on(root: PathBuf, limits: Limits) -> Running {
-    start(Options {
-        root,
-        port: 0,
-        limits,
-        listen: None,
-    })
-    .await
-    .unwrap()
-}
-
-async fn server(tree: &Tree) -> Running {
-    start_on(tree.root(), Limits::default()).await
-}
-
-/// An answer over HTTP: its status, its headers with lowercase names, and its body.
-struct Answer {
-    status: u16,
-    headers: Vec<(String, String)>,
-    body: String,
-}
-
-impl Answer {
-    fn header(&self, name: &str) -> Option<&str> {
-        self.headers
-            .iter()
-            .find(|(n, _)| n == name)
-            .map(|(_, v)| v.as_str())
-    }
-}
-
-/// `GET target` under the `Host` given, with the extra header lines.
-async fn get_as(port: u16, host: &str, target: &str, extra: &[(&str, &str)]) -> Answer {
-    let stream = TcpStream::connect(("127.0.0.1", port)).await.unwrap();
-    get_over(stream, host, target, extra).await
-}
-
-/// `GET target` over `stream`, under the `Host` given, with the extra header lines.
-async fn get_over<S>(mut stream: S, host: &str, target: &str, extra: &[(&str, &str)]) -> Answer
-where
-    S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin,
-{
-    let mut request = format!("GET {target} HTTP/1.1\r\nHost: {host}\r\nConnection: close\r\n");
-    for (name, value) in extra {
-        request.push_str(&format!("{name}: {value}\r\n"));
-    }
-    request.push_str("\r\n");
-    stream.write_all(request.as_bytes()).await.unwrap();
-    let mut raw = Vec::new();
-    // What arrived before the connection closed is the answer, a TLS connection closed without
-    // its last record included.
-    let _ = stream.read_to_end(&mut raw).await;
-    let raw = String::from_utf8_lossy(&raw).into_owned();
-    let (head, body) = raw.split_once("\r\n\r\n").expect("an answer");
-    let mut lines = head.lines();
-    let status = lines
-        .next()
-        .unwrap()
-        .split(' ')
-        .nth(1)
-        .unwrap()
-        .parse()
-        .unwrap();
-    let headers = lines
-        .filter_map(|l| l.split_once(':'))
-        .map(|(n, v)| (n.trim().to_ascii_lowercase(), v.trim().to_string()))
-        .collect();
-    Answer {
-        status,
-        headers,
-        body: body.to_string(),
-    }
-}
-
-async fn get(port: u16, target: &str, extra: &[(&str, &str)]) -> Answer {
-    get_as(port, &format!("localhost:{port}"), target, extra).await
-}
-
-/// The path and query of the URL the server printed.
-fn target(running: &Running) -> String {
-    let prefix = format!("http://localhost:{}", running.port);
-    running.url.strip_prefix(&prefix).unwrap().to_string()
-}
-
-/// The session cookie the printed URL gives, as a `Cookie` header carries it.
-async fn log_in(running: &Running) -> String {
-    let answer = get(running.port, &target(running), &[]).await;
-    assert_eq!(answer.status, 303);
-    let set = answer.header("set-cookie").unwrap();
-    set.split(';').next().unwrap().to_string()
-}
-
-type Socket = WebSocketStream<MaybeTlsStream<TcpStream>>;
-
-/// A WebSocket handshake with the cookie and origin given; the status of a refusal.
-async fn connect(port: u16, cookie: Option<&str>, origin: Option<&str>) -> Result<Socket, u16> {
-    handshake(port, "/ws", cookie, origin).await
-}
-
-/// A WebSocket handshake to `target` with the cookie and origin given; the status of a refusal.
-async fn handshake(
-    port: u16,
-    target: &str,
-    cookie: Option<&str>,
-    origin: Option<&str>,
-) -> Result<Socket, u16> {
-    let mut request = format!("ws://localhost:{port}{target}")
-        .into_client_request()
-        .unwrap();
-    for (name, value) in [("cookie", cookie), ("origin", origin)] {
-        if let Some(value) = value {
-            request
-                .headers_mut()
-                .insert(name, HeaderValue::from_str(value).unwrap());
-        }
-    }
-    let stream = TcpStream::connect(("127.0.0.1", port)).await.unwrap();
-    match tokio_tungstenite::client_async(request, MaybeTlsStream::Plain(stream)).await {
-        Ok((socket, _)) => Ok(socket),
-        Err(tokio_tungstenite::tungstenite::Error::Http(response)) => {
-            Err(response.status().as_u16())
-        }
-        Err(e) => panic!("the handshake failed otherwise: {e}"),
-    }
-}
-
-/// A browser tab on the server: its socket, the events it has received, and the next id.
-struct Tab {
-    socket: Socket,
-    events: Vec<(String, Value)>,
-    next: u64,
-}
-
-impl Tab {
-    async fn open(running: &Running) -> Tab {
-        let cookie = log_in(running).await;
-        let origin = format!("http://localhost:{}", running.port);
-        let socket = connect(running.port, Some(&cookie), Some(&origin))
-            .await
-            .unwrap();
-        Tab {
-            socket,
-            events: Vec::new(),
-            next: 0,
-        }
-    }
-
-    async fn message(&mut self) -> Value {
-        loop {
-            let message = tokio::time::timeout(Duration::from_secs(20), self.socket.next())
-                .await
-                .expect("the server answers")
-                .unwrap()
-                .unwrap();
-            match message {
-                Message::Text(text) => return serde_json::from_str(&text).unwrap(),
-                // A ping the server sends while a command runs is answered by the client, as a
-                // browser answers it, and is no message of the command's.
-                Message::Ping(_) | Message::Pong(_) => continue,
-                other => panic!("not a text message: {other:?}"),
-            }
-        }
-    }
-
-    /// Sends a command as `invoke` would and returns its answer, keeping the events that
-    /// arrive meanwhile.
-    async fn invoke(&mut self, cmd: &str, args: Value) -> Result<Value, String> {
-        self.next += 1;
-        let id = self.next;
-        let command = json!({ "id": id, "cmd": cmd, "args": args });
-        self.socket
-            .send(Message::Text(command.to_string().into()))
-            .await
-            .unwrap();
-        loop {
-            let message = self.message().await;
-            if message["id"] == id {
-                return match message.get("err") {
-                    Some(e) => Err(e.as_str().unwrap().to_string()),
-                    None => Ok(message["ok"].clone()),
-                };
-            }
-            self.keep(message);
-        }
-    }
-
-    fn keep(&mut self, message: Value) {
-        let event = message["event"].as_str().expect("an event").to_string();
-        self.events.push((event, message["payload"].clone()));
-    }
-
-    /// Waits for the event `name` whose payload `matches`.
-    async fn until(&mut self, name: &str, matches: impl Fn(&Value) -> bool) -> Value {
-        let found = |events: &[(String, Value)]| {
-            events
-                .iter()
-                .find(|(n, p)| n == name && matches(p))
-                .map(|(_, p)| p.clone())
-        };
-        loop {
-            if let Some(payload) = found(&self.events) {
-                return payload;
-            }
-            let message = self.message().await;
-            self.keep(message);
-        }
-    }
-}
-
-/// The events of the shared `Host`, for the answer the desktop host gives to compare with.
-#[derive(Clone)]
-struct Events(mpsc::UnboundedSender<(String, Value)>);
-
-impl Report for Events {
-    fn report<S: Serialize + Clone>(&self, event: &str, payload: S) {
-        let _ = self
-            .0
-            .send((event.to_string(), serde_json::to_value(payload).unwrap()));
-    }
-}
-
-/// The window the shared commands, which the desktop host answers from, give for `repo` once its
-/// whole history has loaded.
-async fn desktop_window(repo: &Path, top: usize, rows: usize) -> Value {
-    let host = Host::default();
-    let (tx, mut rx) = mpsc::unbounded_channel();
-    host.open_repo(repo.to_path_buf(), ".".into(), None, Events(tx))
-        .unwrap();
-    while let Some((event, payload)) = rx.recv().await {
-        if event == "history-grew" && payload["loading"] == false {
-            break;
-        }
-    }
-    serde_json::to_value(host.read_window(top, rows)).unwrap()
-}
 
 #[tokio::test]
 // Verifies: ADR-0037, ADR-0038, ADR-0039, G-8
@@ -338,6 +70,7 @@ async fn the_printed_url_opens_the_repository_at_the_root_and_its_rows_arrive_as
     let mut tab = Tab {
         socket,
         events: Vec::new(),
+        answers: Vec::new(),
         next: 0,
     };
     assert_eq!(tab.invoke("startup_repo", json!({})).await, Ok(json!(".")));
@@ -467,26 +200,383 @@ async fn a_path_outside_the_server_root_is_refused() {
 }
 
 #[tokio::test]
-// Verifies: ADR-0037
-async fn a_write_is_refused_while_the_server_only_reads() {
+// Verifies: ADR-0037, Q-5
+async fn without_allow_writes_every_write_is_refused_and_nothing_changes() {
     let tree = Tree::new("write");
+    let root = tree.root();
+    with_changes(&root);
+    git(&root, &["add", "new"]);
     let running = server(&tree).await;
     let mut tab = Tab::open(&running).await;
-    tab.invoke("open_repo", json!({ "path": "." }))
-        .await
-        .unwrap();
-    tab.until("history-grew", |p| p["loading"] == false).await;
-    let head = git(&tree.root(), &["rev-parse", "HEAD"]);
-    let write = json!({ "kind": "createTag", "name": "new", "commit": head });
+    open_and_load(&mut tab, ".").await;
+    let before = snapshot(&root);
+    let head = git(&root, &["rev-parse", "HEAD"]);
+    let refused = Err(ocelli_server::socket::WRITES_REFUSED.to_string());
+    // The writes a server started with the switch performs, as the web interface sends them,
+    // confirmed or not.
+    let writes = [
+        stage_in(&root, "f"),
+        unstage_in(&root, "new"),
+        Write::Commit {
+            message: "from the browser".into(),
+            head: Some(head.clone()),
+        },
+        Write::CreateTag {
+            name: "new".into(),
+            commit: head,
+            message: None,
+        },
+    ];
+    for write in &writes {
+        for confirmed in [false, true] {
+            let sent = json!({ "write": write, "confirmed": confirmed });
+            assert_eq!(
+                tab.invoke("perform_write", sent).await,
+                refused,
+                "{write:?}"
+            );
+        }
+    }
+    // Every kind of write the core takes, whatever it carries.
+    let kinds = kinds_of_write();
+    assert!(kinds.contains(&"commit".to_string()), "{kinds:?}");
+    for kind in kinds {
+        let sent = json!({ "write": { "kind": kind }, "confirmed": true });
+        assert_eq!(tab.invoke("perform_write", sent).await, refused, "{kind}");
+    }
+    assert_eq!(snapshot(&root), before);
+}
+
+#[tokio::test]
+// Verifies: ADR-0037, ADR-0039
+async fn with_allow_writes_a_write_refused_by_git_changes_nothing_and_names_no_path() {
+    let tree = Tree::new("write-refused");
+    let root = tree.root();
+    with_changes(&root);
+    let running = writing_on(root.clone()).await;
+    let mut tab = Tab::open(&running).await;
+    open_and_load(&mut tab, ".").await;
+    let before = snapshot(&root);
+    let head = git(&root, &["rev-parse", "HEAD"]);
+    // Fetching a remote the repository does not have, staging f as content it does not hold,
+    // and committing on a commit not checked out: the git adapter refuses each, in words that
+    // reach the browser only as WRITE_FAILED.
+    let failed = Err(ocelli_server::socket::WRITE_FAILED.to_string());
+    let fetch = Write::Fetch {
+        remote: "origin".into(),
+    };
+    assert_eq!(perform(&mut tab, &fetch).await, failed);
+    let stale = Write::StageFile {
+        path: "f".into(),
+        shown: Some(head.clone()),
+    };
+    assert_eq!(perform(&mut tab, &stale).await, failed);
+    let elsewhere = Write::Commit {
+        message: "from the browser".into(),
+        head: Some(git(&root, &["rev-parse", "HEAD~1"])),
+    };
+    assert_eq!(perform(&mut tab, &elsewhere).await, failed);
+    assert_eq!(snapshot(&root), before);
+    // As shown, the same file stages.
     assert_eq!(
-        tab.invoke(
-            "perform_write",
-            json!({ "write": write, "confirmed": false })
-        )
-        .await,
-        Err(ocelli_server::socket::WRITES_REFUSED.to_string())
+        perform(&mut tab, &stage_in(&root, "f")).await,
+        Ok(Value::Null)
     );
-    assert_eq!(git(&tree.root(), &["tag", "--list", "new"]), "");
+    assert_ne!(snapshot(&root), before);
+}
+
+/// How many panics inside git2 this process has had since the count began: the release build
+/// aborts on a panic, so one there takes the whole server down with every tab, where a test
+/// build only fails the command. The panics are still reported as they were.
+fn git2_panics() -> &'static std::sync::atomic::AtomicUsize {
+    static COUNT: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+    static HOOK: std::sync::Once = std::sync::Once::new();
+    HOOK.call_once(|| {
+        let previous = std::panic::take_hook();
+        std::panic::set_hook(Box::new(move |info| {
+            if info.location().is_some_and(|l| l.file().contains("git2-")) {
+                COUNT.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            }
+            previous(info);
+        }));
+    });
+    &COUNT
+}
+
+#[tokio::test]
+// Verifies: ADR-0037, ADR-0039
+async fn a_path_that_names_no_file_of_the_working_directory_is_refused_and_the_server_answers_on() {
+    let panics = git2_panics().load(std::sync::atomic::Ordering::SeqCst);
+    let tree = Tree::new("write-paths");
+    let root = tree.root();
+    with_changes(&root);
+    let running = writing_on(root.clone()).await;
+    let mut tab = Tab::open(&running).await;
+    open_and_load(&mut tab, ".").await;
+    let before = snapshot(&root);
+    let head = git(&root, &["rev-parse", "HEAD"]);
+    let failed = Err(ocelli_server::socket::WRITE_FAILED.to_string());
+    for path in [
+        "",
+        ".",
+        "./f",
+        "../x",
+        "/abs",
+        "f\0g",
+        ".git/config",
+        ".GIT/HEAD",
+    ] {
+        for shown in [None, Some(head.clone())] {
+            let stage = Write::StageFile {
+                path: path.into(),
+                shown: shown.clone(),
+            };
+            assert_eq!(perform(&mut tab, &stage).await, failed, "{path:?}");
+            let unstage = Write::UnstageFile {
+                path: path.into(),
+                shown,
+            };
+            assert_eq!(perform(&mut tab, &unstage).await, failed, "{path:?}");
+        }
+        let diff = json!({ "sha": head, "filePath": path });
+        assert_eq!(
+            tab.invoke("get_file_diff", diff).await,
+            Err(ocelli_server::socket::READ_FAILED.to_string()),
+            "{path:?}"
+        );
+    }
+    // A name with a NUL, which git2 unwraps into a C string, for a tag and a branch.
+    for name in ["a\0b", "\0"] {
+        let tag = Write::CreateTag {
+            name: name.into(),
+            commit: head.clone(),
+            message: None,
+        };
+        assert_eq!(perform(&mut tab, &tag).await, failed, "{name:?}");
+        let branch = Write::CreateBranch {
+            name: name.into(),
+            commit: head.clone(),
+            switch: false,
+        };
+        assert_eq!(perform(&mut tab, &branch).await, failed, "{name:?}");
+    }
+    assert_eq!(snapshot(&root), before);
+    assert_eq!(
+        git2_panics().load(std::sync::atomic::Ordering::SeqCst),
+        panics,
+        "git2 panicked on a path or a name the browser sent"
+    );
+    // The server still answers, and writes a file of the working directory.
+    assert_eq!(
+        perform(&mut tab, &stage_in(&root, "f")).await,
+        Ok(Value::Null)
+    );
+    assert_ne!(snapshot(&root), before);
+}
+
+/// Waits until `n` writes wait for the repository whose common directory is `common`.
+async fn until_waiting(running: &Running, common: &Path, n: usize) {
+    let since = std::time::Instant::now();
+    while running.turns().unwrap().waiting(common) != n {
+        assert!(
+            since.elapsed() < Duration::from_secs(20),
+            "{n} never waited"
+        );
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+}
+
+#[tokio::test]
+// Verifies: ADR-0037
+async fn a_write_past_those_waiting_is_refused_and_a_closed_tab_s_waiting_write_never_runs() {
+    let tree = Tree::new("write-waits");
+    let root = tree.root();
+    with_changes(&root);
+    let limits = Limits {
+        writes_waiting: 1,
+        ..Limits::default()
+    };
+    let running = writing_within(root.clone(), limits).await;
+    let common = ocelli_git::confine::common_dir(&root).unwrap();
+    let mut first = Tab::open(&running).await;
+    open_and_load(&mut first, ".").await;
+    let mut second = Tab::open(&running).await;
+    open_and_load(&mut second, ".").await;
+    let before = snapshot(&root);
+    // A write of another tab holds the repository's turn.
+    let held = {
+        let (turns, common) = (running.turns().unwrap().clone(), common.clone());
+        let never = std::sync::atomic::AtomicBool::new(false);
+        tokio::task::spawn_blocking(move || turns.take(common, &never))
+            .await
+            .unwrap()
+            .unwrap()
+    };
+    let stage = stage_in(&root, "f");
+    let write = json!({ "write": stage, "confirmed": false });
+    first.send("perform_write", write).await;
+    until_waiting(&running, &common, 1).await;
+    // As many wait as may: the next is refused at once.
+    assert_eq!(
+        perform(&mut second, &stage).await,
+        Err(ocelli_server::turns::TOO_MANY_WAITING.to_string())
+    );
+    // The first tab closes while its write waits: the write gives its wait up, the turn still
+    // held, so it never ran.
+    drop(first);
+    until_waiting(&running, &common, 0).await;
+    drop(held);
+    assert_eq!(snapshot(&root), before);
+    // Once the turn is free, a write runs.
+    assert_eq!(perform(&mut second, &stage).await, Ok(Value::Null));
+    assert_ne!(snapshot(&root), before);
+}
+
+/// Expects the server's `repo-written` message, as a tab receives it, to be the fixture the web
+/// interface's test reads against its types: where the file differs, it is written anew and the
+/// test fails, so that the change to it is committed with the change to the event.
+fn the_fixture_holds(message: &Value) {
+    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/repo-written.json");
+    let written = serde_json::to_string_pretty(message).unwrap() + "\n";
+    if std::fs::read_to_string(&path).unwrap_or_default() != written {
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(&path, &written).unwrap();
+        panic!(
+            "{} did not hold what the server sends; it is written anew, commit it",
+            path.display()
+        );
+    }
+}
+
+/// Whether `tab` has been told that another tab wrote to its repository, by the time it has its
+/// answer to a command sent now: the server sends a tab's events and answers in order.
+async fn told_of_a_write(tab: &mut Tab) -> bool {
+    tab.invoke("selection", json!({})).await.unwrap();
+    tab.events.iter().any(|(event, _)| event == "repo-written")
+}
+
+#[tokio::test]
+// Verifies: ADR-0037, ADR-0033, G-8
+async fn two_tabs_writing_to_one_repository_write_in_turn_and_the_other_tabs_on_it_load_again() {
+    let tree = Tree::new("two-tabs-writing");
+    let root = tree.root();
+    with_changes(&root);
+    git(&root, &["add", "f"]);
+    // A worktree of the repository and a repository of its own, both below the root.
+    git(&root, &["worktree", "add", "--quiet", "wt"]);
+    three_commits(&root.join("sub"));
+    let running = writing_on(root.clone()).await;
+    let common = ocelli_git::confine::common_dir(&root).unwrap();
+    let mut tabs = Vec::new();
+    for path in [".", ".", "wt", "sub"] {
+        let mut tab = Tab::open(&running).await;
+        open_and_load(&mut tab, path).await;
+        tab.events.clear();
+        tabs.push(tab);
+    }
+    let [mut first, mut second, mut worktree, mut elsewhere]: [Tab; 4] =
+        tabs.try_into().ok().unwrap();
+    // Both tabs commit on the commit they show, while a write of another holds the turn.
+    let head = git(&root, &["rev-parse", "HEAD"]);
+    let commit = Write::Commit {
+        message: "from the browser".into(),
+        head: Some(head.clone()),
+    };
+    let held = {
+        let (turns, common) = (running.turns().unwrap().clone(), common.clone());
+        let never = std::sync::atomic::AtomicBool::new(false);
+        tokio::task::spawn_blocking(move || turns.take(common, &never))
+            .await
+            .unwrap()
+            .unwrap()
+    };
+    let sent = json!({ "write": commit, "confirmed": false });
+    let one = first.send("perform_write", sent.clone()).await;
+    let two = second.send("perform_write", sent).await;
+    until_waiting(&running, &common, 2).await;
+    drop(held);
+    let answers = (first.answer(one).await, second.answer(two).await);
+    // One after the other: the second finds HEAD moved, and is refused with nothing changed.
+    let failed = Err(ocelli_server::socket::WRITE_FAILED.to_string());
+    let (made, mut winner, mut loser) = match answers {
+        (Ok(made), refused) if refused == failed => (made, first, second),
+        (refused, Ok(made)) if refused == failed => (made, second, first),
+        other => panic!("not one written and one refused: {other:?}"),
+    };
+    assert_eq!(git(&root, &["rev-parse", "HEAD"]), made.as_str().unwrap());
+    assert_eq!(git(&root, &["rev-list", "--count", "HEAD"]), "4");
+    // Every other tab on the repository is told, the worktree's included; the tab that wrote,
+    // and one on another repository, are not.
+    let told = loser.until("repo-written", |_| true).await;
+    assert_eq!(told, json!(ocelli_server::socket::WRITTEN_ELSEWHERE));
+    the_fixture_holds(&json!({ "event": "repo-written", "payload": told }));
+    worktree.until("repo-written", |_| true).await;
+    assert!(!told_of_a_write(&mut winner).await, "the tab that wrote");
+    assert!(
+        !told_of_a_write(&mut elsewhere).await,
+        "a tab on another repository"
+    );
+    // The refused write moved nothing, so it told nobody: the worktree's tab was told once.
+    assert!(told_of_a_write(&mut worktree).await);
+    let times = worktree
+        .events
+        .iter()
+        .filter(|(event, _)| event == "repo-written")
+        .count();
+    assert_eq!(times, 1);
+    // Loading again as the web interface does, the other tab shows the commit made.
+    let refs = open_and_load(&mut loser, ".").await;
+    assert_eq!(row(&refs, "locals", "name", "main")["sha"], made);
+}
+
+#[cfg(unix)]
+#[path = "../../git/tests/programs/mod.rs"]
+mod programs;
+
+#[cfg(unix)]
+#[tokio::test]
+// Verifies: ADR-0037, Q-4
+async fn the_server_s_writes_run_none_of_the_programs_the_repository_names() {
+    let tree = Tree::new("write-programs");
+    let root = tree.root();
+    with_changes(&root);
+    // Outside the server root, so that the scripts and their markers are none of its files.
+    let tools = Scratch::new("write-programs-ran");
+    let markers = programs::set_everywhere(&root, &tools.0);
+    // Ocelli refuses what these would have git sign (ADR-0033); the writes here go through.
+    let mut config = git2::Repository::open(&root).unwrap().config().unwrap();
+    for (key, _) in programs::SWITCHES {
+        config.remove(key).unwrap();
+    }
+    let running = writing_on(root.clone()).await;
+    let mut tab = Tab::open(&running).await;
+    open_and_load(&mut tab, ".").await;
+    let head = git(&root, &["rev-parse", "HEAD"]);
+    // Where git runs post-index-change, and the clean filter of every path; each write made from
+    // what the repository shows once the one before it ran.
+    let writes: [fn(&Path) -> Write; 4] = [
+        |root| stage_in(root, "f"),
+        |root| stage_in(root, "new"),
+        |root| unstage_in(root, "new"),
+        |root| stage_in(root, "new"),
+    ];
+    for write in writes {
+        let write = write(&root);
+        assert_eq!(
+            perform(&mut tab, &write).await,
+            Ok(Value::Null),
+            "{write:?}"
+        );
+    }
+    // Where git runs pre-commit, prepare-commit-msg, commit-msg, the editor, and post-commit.
+    let commit = Write::Commit {
+        message: "from the browser".into(),
+        head: Some(head),
+    };
+    let made = perform(&mut tab, &commit).await.unwrap();
+    assert_eq!(made, json!(git(&root, &["rev-parse", "HEAD"])), "committed");
+    let ran = markers.ran();
+    assert!(ran.is_empty(), "programs ran: {ran:?}");
 }
 
 /// The packages a package of the lockfile depends on, by name.
@@ -638,12 +728,13 @@ async fn a_repository_below_the_root_that_reaches_outside_it_is_refused() {
 }
 
 #[tokio::test]
-// Verifies: ADR-0039
+// Verifies: ADR-0039, ADR-0037
 async fn a_repository_swapped_for_a_way_out_after_it_opened_is_checked_again() {
     let tree = Enclosed::new("swap");
     let root = tree.root();
     three_commits(&root.join("s"));
-    let running = start_on(root.clone(), Limits::default()).await;
+    // A server that writes: a write is checked again as a read is.
+    let running = writing_on(root.clone()).await;
     let mut tab = Tab::open(&running).await;
     tab.invoke("open_repo", json!({ "path": "s" }))
         .await
@@ -661,6 +752,9 @@ async fn a_repository_swapped_for_a_way_out_after_it_opened_is_checked_again() {
             .await
             .is_ok()
     );
+    std::fs::write(root.join("s/f"), "staged\n").unwrap();
+    let staged = stage_in(&root.join("s"), "f");
+    assert_eq!(perform(&mut tab, &staged).await, Ok(Value::Null));
 
     std::fs::rename(root.join("s/.git"), root.join("s-git")).unwrap();
     std::fs::write(
@@ -669,6 +763,23 @@ async fn a_repository_swapped_for_a_way_out_after_it_opened_is_checked_again() {
     )
     .unwrap();
     let outside_head = git(&tree.outside(), &["rev-parse", "HEAD"]);
+    // The writes the server performs, each one the repository outside would take.
+    std::fs::write(tree.outside().join("f"), "changed\n").unwrap();
+    let outside = snapshot(&tree.outside());
+    let stage = stage_in(&tree.outside(), "f");
+    let commit = Write::Commit {
+        message: "from the browser".into(),
+        head: Some(outside_head.clone()),
+    };
+    for write in [stage, commit] {
+        let sent = json!({ "write": write, "confirmed": false });
+        assert_eq!(
+            tab.invoke("perform_write", sent).await,
+            refused("s"),
+            "{write:?}"
+        );
+    }
+    assert_eq!(snapshot(&tree.outside()), outside);
     for (cmd, args) in [
         ("select_commit", json!({ "sha": outside_head })),
         (
@@ -1230,24 +1341,6 @@ fn row<'a>(refs: &'a Value, list: &str, key: &str, value: &str) -> &'a Value {
         .unwrap_or_else(|| panic!("no {list} row {value} in {refs}"))
 }
 
-/// Opens `path` in `tab` and waits for its load to end; the refs it sent.
-async fn open_and_load(tab: &mut Tab, path: &str) -> Value {
-    tab.events.clear();
-    assert_eq!(
-        tab.invoke("open_repo", json!({ "path": path })).await,
-        Ok(Value::Null),
-        "{path}"
-    );
-    tab.until("history-grew", |p| p["loading"] == false).await;
-    assert!(
-        tab.events
-            .contains(&("set-repo-label".to_string(), json!(path))),
-        "{:?}",
-        tab.events
-    );
-    tab.until("load-refs", |_| true).await
-}
-
 #[tokio::test]
 // Verifies: ADR-0039, ADR-0027
 async fn a_submodule_and_a_worktree_below_the_root_open_through_their_rows_and_lead_back() {
@@ -1631,6 +1724,30 @@ fn unanswered(
     commands.chain(events).collect()
 }
 
+/// Where the server's own events and the list of them part (ADR-0037): each the list names that
+/// the server never reports, and each the shared commands report too, which the desktop host
+/// would then send.
+fn misplaced(
+    server_events: &[&str],
+    by_server: &std::collections::BTreeSet<String>,
+    by_shared: &std::collections::BTreeSet<String>,
+) -> Vec<String> {
+    let mut misplaced = Vec::new();
+    for event in server_events.iter().map(|e| e.to_string()) {
+        if !by_server.contains(&event) {
+            misplaced.push(format!(
+                "the server's event {event}, which it never reports"
+            ));
+        }
+        if by_shared.contains(&event) {
+            misplaced.push(format!(
+                "the server's event {event}, which the shared commands report"
+            ));
+        }
+    }
+    misplaced
+}
+
 /// The text of every file of the web interface's sources but its tests, or of the shared
 /// commands' sources.
 fn sources(dir: &Path, keep: impl Fn(&Path) -> bool + Copy) -> String {
@@ -1654,7 +1771,7 @@ fn set(names: &[&str]) -> std::collections::BTreeSet<String> {
 /// A list of four commands, one of each way the hosts answer.
 const FOUR: &[(&str, Answered)] = &[
     ("read_window", Answered::ByBoth),
-    ("perform_write", Answered::WriteRefusedByServer),
+    ("perform_write", Answered::ByBothAsWrite),
     (
         "browse_repo",
         Answered::ByDesktop {
@@ -1735,6 +1852,21 @@ fn the_existence_check_names_each_command_and_event_of_the_web_interface_no_host
 }
 
 #[test]
+// Verifies: ADR-0037
+fn a_server_event_the_server_never_reports_or_the_shared_commands_report_is_named() {
+    let shared = set(&["history-grew", "write-progress"]);
+    assert!(misplaced(&["repo-written"], &set(&["repo-written"]), &shared).is_empty());
+    assert_eq!(
+        misplaced(&["repo-written"], &set(&["set-status"]), &shared),
+        ["the server's event repo-written, which it never reports"]
+    );
+    assert_eq!(
+        misplaced(&["write-progress"], &set(&["write-progress"]), &shared),
+        ["the server's event write-progress, which the shared commands report"]
+    );
+}
+
+#[test]
 fn the_calls_are_read_off_the_source_as_the_web_interface_writes_them() {
     let source = r#"
         await invoke<RowWindow>('read_window', { ...range });
@@ -1782,13 +1914,20 @@ async fn both_hosts_answer_the_shared_list_of_commands_and_the_web_interface_sen
     let listened = called_with(&web, "listen");
     let desktop =
         desktop_commands(&std::fs::read_to_string(repo.join("src-tauri/src/lib.rs")).unwrap());
-    let dispatched = server_commands(
-        &std::fs::read_to_string(repo.join("crates/server/src/socket.rs")).unwrap(),
-    );
+    let socket = std::fs::read_to_string(repo.join("crates/server/src/socket.rs")).unwrap();
+    let dispatched = server_commands(&socket);
     let shared = sources(&repo.join("crates/commands/src"), |p| {
         p.extension().is_some_and(|e| e == "rs")
     });
-    let reported = called_with(&shared, "report");
+    let by_shared = called_with(&shared, "report");
+    let by_server = called_with(&socket, "report");
+    assert!(by_server.contains("repo-written"), "{by_server:?}");
+    let misplaced = misplaced(SERVER_EVENTS, &by_server, &by_shared);
+    assert!(misplaced.is_empty(), "{misplaced:?}");
+    // What the web interface may listen for: the shared commands' events, which both hosts
+    // send, and the server's own, which it listens for in the desktop host to no harm.
+    let mut reported = by_shared.clone();
+    reported.extend(SERVER_EVENTS.iter().map(|e| e.to_string()));
     // The scans see what they read: the commands and events the web interface's App uses.
     assert!(
         sent.contains("read_window") && sent.contains("open_repo"),
@@ -1806,71 +1945,156 @@ async fn both_hosts_answer_the_shared_list_of_commands_and_the_web_interface_sen
         "the hosts do not carry what the web interface asks for: {missing:?}"
     );
 
-    // The running server answers what its dispatch names, a write with its refusal, and only
-    // that: the desktop's command it answers in place of is unknown to it.
+    // The running server answers what its dispatch names and only that: the desktop's command
+    // it answers in place of is unknown to it. Started without --allow-writes it refuses a write
+    // before reading it; with it, it reads the write, which these commands lack (ADR-0037).
     let tree = Tree::new("parity");
-    let running = server(&tree).await;
-    let mut tab = Tab::open(&running).await;
-    for (command, how) in COMMANDS {
-        let answer = tab.invoke(command, json!({})).await;
-        let unknown = Err(format!("Unknown command: {command}"));
-        match how {
-            Answered::WriteRefusedByServer => assert_eq!(
-                answer,
-                Err(ocelli_server::socket::WRITES_REFUSED.to_string()),
-                "{command}"
+    let refused = Err(ocelli_server::socket::WRITES_REFUSED.to_string());
+    for writes in [false, true] {
+        let running = if writes {
+            writing_on(tree.root()).await
+        } else {
+            server(&tree).await
+        };
+        let mut tab = Tab::open(&running).await;
+        for (command, how) in COMMANDS {
+            let answer = tab.invoke(command, json!({})).await;
+            let unknown = Err(format!("Unknown command: {command}"));
+            match how {
+                Answered::ByBothAsWrite if writes => {
+                    assert!(
+                        answer
+                            .as_ref()
+                            .is_err_and(|e| e.starts_with("Invalid arguments")),
+                        "{command}: {answer:?}"
+                    )
+                }
+                Answered::ByBothAsWrite => assert_eq!(answer, refused, "{command}"),
+                Answered::ByDesktop { .. } => assert_eq!(answer, unknown, "{command}"),
+                Answered::ByBoth | Answered::ByServer { .. } => {
+                    assert_ne!(answer, unknown, "{command}")
+                }
+            }
+        }
+    }
+}
+
+/// One answer to a write of each kind, by kind.
+type Answers = [(String, Result<Value, String>)];
+
+/// The writes the server does not answer as the desktop host answers them: each kind whose
+/// answer from the server, `server`, is not the one from the desktop host, `desktop`, as the
+/// browser would read it (ADR-0037).
+fn unperformed(server: &Answers, desktop: &Answers) -> Vec<String> {
+    desktop
+        .iter()
+        .filter_map(|(kind, there)| {
+            let here = server.iter().find(|(k, _)| k == kind).map(|(_, a)| a);
+            (here != Some(there)).then(|| {
+                format!("the write {kind}, which the server answers {here:?} and the desktop host {there:?}")
+            })
+        })
+        .collect()
+}
+
+#[test]
+// Verifies: ADR-0037
+fn a_write_the_desktop_answers_and_the_server_answers_otherwise_or_not_at_all_is_named() {
+    let answer = |kind: &str, answer: Result<Value, String>| (kind.to_string(), answer);
+    let failed = || Err(ocelli_server::socket::WRITE_FAILED.to_string());
+    let desktop = [
+        answer("stageFile", Ok(Value::Null)),
+        answer("dropStash", failed()),
+        answer("fetch", failed()),
+        answer("push", failed()),
+    ];
+    assert!(unperformed(&desktop, &desktop).is_empty());
+    let server = [
+        answer("stageFile", Ok(Value::Null)),
+        answer("dropStash", failed()),
+        answer(
+            "fetch",
+            Err(ocelli_server::socket::WRITES_REFUSED.to_string()),
+        ),
+    ];
+    assert_eq!(
+        unperformed(&server, &desktop),
+        [
+            format!(
+                "the write fetch, which the server answers {:?} and the desktop host {:?}",
+                Some(Err::<Value, _>(
+                    ocelli_server::socket::WRITES_REFUSED.to_string()
+                )),
+                failed()
             ),
-            Answered::ByDesktop { .. } => assert_eq!(answer, unknown, "{command}"),
-            Answered::ByBoth | Answered::ByServer { .. } => {
-                assert_ne!(answer, unknown, "{command}")
-            }
-        }
-    }
+            format!(
+                "the write push, which the server answers None and the desktop host {:?}",
+                failed()
+            ),
+        ]
+    );
 }
 
-/// The shared commands as the desktop host holds them for its window, with the events they
-/// reported, to compare the server's answers with.
-struct Desktop {
-    host: Host,
-    events: mpsc::UnboundedReceiver<(String, Value)>,
-    tx: mpsc::UnboundedSender<(String, Value)>,
-}
-
-impl Desktop {
-    /// The desktop host's answers for `repo`, once its whole history has loaded; the refs it sent.
-    async fn open(repo: &Path) -> (Desktop, Value) {
-        let (tx, mut events) = mpsc::unbounded_channel();
-        let host = Host::default();
-        host.open_repo(repo.to_path_buf(), ".".into(), None, Events(tx.clone()))
-            .unwrap();
-        let mut refs = Value::Null;
-        while let Some((event, payload)) = events.recv().await {
-            if event == "load-refs" {
-                refs = payload;
-            } else if event == "history-grew" && payload["loading"] == false {
-                break;
+#[tokio::test]
+// Verifies: ADR-0037, G-8, Q-5
+async fn with_allow_writes_the_server_answers_every_write_the_desktop_answers_and_without_it_none()
+{
+    // One example of every write the core takes, as the web interface sends it: the core's
+    // fixture, which its own test holds to every kind.
+    let fixture = Path::new(env!("CARGO_MANIFEST_DIR")).join("../core/tests/fixtures/writes.json");
+    let examples: Vec<Value> =
+        serde_json::from_str(&std::fs::read_to_string(fixture).unwrap()).unwrap();
+    let kind = |write: &Value| write["kind"].as_str().unwrap().to_string();
+    let mut kinds: Vec<String> = examples.iter().map(kind).collect();
+    kinds.sort();
+    let mut every = kinds_of_write();
+    every.sort();
+    assert_eq!(kinds, every, "an example of every write");
+    // A repository none of the examples applies to, so that each reaches the git adapter and is
+    // refused there, or is refused before it, by either host alike.
+    let tree = Tree::new("write-parity");
+    let root = tree.root();
+    let before = snapshot(&root);
+    let (desktop, _) = Desktop::open(&root).await;
+    let mut there = Vec::new();
+    for write in &examples {
+        let write: Write = serde_json::from_value(write.clone()).unwrap();
+        there.push((kind(&to_value(&write)), desktop.write(&write, true).await));
+    }
+    assert!(
+        there
+            .iter()
+            .all(|(_, a)| *a != Err(ocelli_server::socket::WRITES_REFUSED.to_string())),
+        "the desktop host answers every write"
+    );
+    for writes in [false, true] {
+        let running = if writes {
+            writing_on(root.clone()).await
+        } else {
+            server(&tree).await
+        };
+        let mut tab = Tab::open(&running).await;
+        open_and_load(&mut tab, ".").await;
+        let mut here = Vec::new();
+        for write in &examples {
+            let sent = json!({ "write": write, "confirmed": true });
+            here.push((kind(write), tab.invoke("perform_write", sent).await));
+        }
+        let unperformed = unperformed(&here, &there);
+        if writes {
+            assert!(unperformed.is_empty(), "{unperformed:?}");
+        } else {
+            assert_eq!(unperformed.len(), examples.len(), "{unperformed:?}");
+            for (kind, answer) in &here {
+                assert_eq!(
+                    answer,
+                    &Err(ocelli_server::socket::WRITES_REFUSED.to_string()),
+                    "{kind}"
+                );
             }
         }
-        (Desktop { host, events, tx }, refs)
+        assert_eq!(snapshot(&root), before, "with --allow-writes: {writes}");
     }
-
-    /// The `commit-files` payload the desktop host sends for `sha`.
-    async fn commit_files(&mut self, sha: &str) -> Value {
-        self.host
-            .select_commit(sha.to_string(), &Events(self.tx.clone()))
-            .await
-            .unwrap();
-        loop {
-            let (event, payload) = self.events.recv().await.unwrap();
-            if event == "commit-files" {
-                return payload;
-            }
-        }
-    }
-}
-
-fn to_value(answer: impl Serialize) -> Value {
-    serde_json::to_value(answer).unwrap()
 }
 
 #[tokio::test]
@@ -2029,6 +2253,66 @@ async fn each_read_the_browser_asks_is_answered_as_the_desktop_host_answers_it()
     }
 }
 
+// The twin is copied with `cp`, as the writer's own tests, which run on unix, copy theirs.
+#[cfg(unix)]
+#[tokio::test]
+// Verifies: ADR-0037, ADR-0033, G-8, G-4
+async fn with_allow_writes_staging_unstaging_and_committing_leave_the_repository_as_the_desktop_does()
+ {
+    let tree = Tree::new("writes");
+    let root = tree.root();
+    with_changes(&root);
+    // The desktop's copy, which the shared Host writes as the desktop host does.
+    let twin = support::twin(&tree.1, "writes-desktop");
+    let other = twin.0.join("root");
+    let running = writing_on(root.clone()).await;
+    let mut tab = Tab::open(&running).await;
+    open_and_load(&mut tab, ".").await;
+    let (mut desktop, _) = Desktop::open(&other).await;
+    let head = git(&root, &["rev-parse", "HEAD"]);
+    let mut made = None;
+    for step in 0..4 {
+        // Each write as the web interface makes it from what it shows now.
+        let write = match step {
+            0 => stage_in(&root, "f"),
+            1 => stage_in(&root, "new"),
+            2 => unstage_in(&root, "new"),
+            _ => Write::Commit {
+                message: "from the browser".into(),
+                head: Some(head.clone()),
+            },
+        };
+        let (here, there) = (
+            perform(&mut tab, &write).await,
+            desktop.perform(&write).await,
+        );
+        match (&here, &there) {
+            (Ok(Value::Null), Ok(Value::Null)) => {}
+            (Ok(Value::String(a)), Ok(Value::String(b))) => made = Some((a.clone(), b.clone())),
+            _ => panic!("{write:?}: the server answers {here:?}, the desktop host {there:?}"),
+        }
+        support::assert_twins_alike(&root, &other, &format!("{write:?}"));
+    }
+    let (here, there) = made.expect("the commit answers the commit it made");
+    assert_eq!(git(&root, &["rev-parse", "HEAD"]), here);
+    // As the user the server runs as, with the identity the repository's configuration names.
+    assert_eq!(
+        git(&root, &["log", "-1", "--format=%an <%ae>"]),
+        "Ada <ada@example.invalid>"
+    );
+    // The load after the write selects the commit it made, as the desktop's does (ADR-0033).
+    tab.events.clear();
+    let reload = json!({ "path": ".", "select": here });
+    assert_eq!(tab.invoke("open_repo", reload).await, Ok(Value::Null));
+    let grew = tab.until("history-grew", |p| !p["select"].is_null()).await;
+    assert_eq!(grew["select"], desktop.reload(&other, &there).await);
+    let selected = tab
+        .invoke("select_row", json!({ "row": grew["select"] }))
+        .await
+        .unwrap();
+    assert_eq!(selected["node"]["sha"], json!(here));
+}
+
 #[tokio::test]
 // Verifies: ADR-0039, ADR-0037
 async fn the_browser_chooses_a_repository_from_the_folders_below_the_root() {
@@ -2105,6 +2389,7 @@ async fn start_tls(
             cert,
             keep_in: Some(keep_in.to_path_buf()),
         }),
+        allow_writes: false,
     })
     .await
 }

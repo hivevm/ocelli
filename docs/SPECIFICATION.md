@@ -120,7 +120,8 @@ from the threats below.
 - **Q-5** — Security: the remote server hands control of a machine to whoever reaches it.
   Measured against a running remote server: every request without valid authentication is
   refused, the server accepts none from a web page of another origin, and no request reads
-  anything outside the server root.
+  anything outside the server root, nor, where the server was started with `--allow-writes`,
+  writes there, a remote on the machine included; started without it, the server changes nothing.
 - **Q-6** — Safety: an operation that discards work cannot happen by accident. Measured for each
   such operation (a hard reset, dropping a stash, applying a stash and dropping it, deleting a
   tag, deleting a branch that is not merged, aborting an operation in progress, taking one side
@@ -174,7 +175,8 @@ exist for an agent. One a test can decide is restated as a `Q-n`, so that it is 
   - other users of the machine the remote server runs on, untrusted.
 - The system shall never run a program a repository names (Q-4).
 - The system shall never act on a request to the remote server that is not authenticated (Q-5).
-- The system shall never let a browser read a repository or a file outside the server root (Q-5).
+- The system shall never let a browser read or write a repository or a file outside the server
+  root (Q-5).
 - The system shall never discard work without the developer's confirmation (Q-6).
 - The system shall never store, log, or send a credential anywhere but to the remote repository
   it belongs to (Q-7).

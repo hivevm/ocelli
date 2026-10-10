@@ -24,5 +24,7 @@ disallowed-methods = [
     { path = "git2::Index::add_all", reason = "reads each path as a pattern" },
     { path = "git2::Index::update_all", reason = "reads each path as a pattern" },
     { path = "git2::Index::remove_all", reason = "reads each path as a pattern" },
+    { path = "git2::Index::get_path", reason = "panics on a path git2 does not take as a repository's, an empty, absolute, or ./..-led one: use git::index_entry" },
     { path = "std::path::Path::starts_with", reason = "compares a path as it stands: decide it with confine::below, which resolves both sides first" },
+    { path = "git2::Reference::is_valid_name", reason = "panics on a NUL in the name: use guard::valid_ref_name" },
 ]

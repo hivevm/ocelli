@@ -28,9 +28,9 @@ pub trait Report {
 pub enum Answered {
     /// Both hosts, from the shared `Host`, with the same answer.
     ByBoth,
-    /// Both hosts carry it, the remote server refusing it as a write until its second feature
-    /// spec brings writes.
-    WriteRefusedByServer,
+    /// Both hosts carry it, the remote server refusing it as a write unless it was started with
+    /// `--allow-writes` (ADR-0037).
+    ByBothAsWrite,
     /// The desktop host alone; the remote server answers `counterpart` in its place, never this
     /// name otherwise.
     ByDesktop { counterpart: &'static str },
@@ -77,14 +77,33 @@ pub const COMMANDS: &[(&str, Answered)] = &[
     ("select_commit", Answered::ByBoth),
     ("get_file_diff", Answered::ByBoth),
     ("write_discards", Answered::ByBoth),
-    ("perform_write", Answered::WriteRefusedByServer),
-    // Stops the write that runs; with none running, as in the remote server, it stops nothing.
+    ("perform_write", Answered::ByBothAsWrite),
+    // Stops the write that runs; with none running it stops nothing.
     ("cancel_write", Answered::ByBoth),
 ];
+
+/// The events only the remote server sends, beside those of the shared commands: a tab with a
+/// repository open is told that another tab wrote to it, and loads it again (ADR-0037). The
+/// desktop host, with one window per repository it shows, never sends them.
+pub const SERVER_EVENTS: &[&str] = &["repo-written"];
 
 /// What a host checks a repository's path against before every command that reaches it: the
 /// remote server's server root (ADR-0039). It answers why it refuses.
 pub type Guard = Arc<dyn Fn(&Path) -> Result<(), String> + Send + Sync>;
+
+/// What a host waits for before a write reaches the repository at the path: the remote server's
+/// turn among its tabs' writes to one repository, held until the write ends (ADR-0037). It reads
+/// the file system and waits for another tab's write: it runs on the blocking pool.
+pub type Turns = Arc<dyn Fn(&Path) -> Result<Box<dyn Turn>, HostError> + Send + Sync>;
+
+/// A repository's turn, held while a write runs and told how the write ended before it is given
+/// back, so that the remote server tells its other tabs on the repository to load again before
+/// another write can start (ADR-0037).
+pub trait Turn: Send {
+    /// The write ended, written where `done`, refused or failed otherwise. It runs on the
+    /// blocking pool, where it may read the repository.
+    fn ended(&mut self, done: bool);
+}
 
 /// Why a command of the `Host` failed. The kind, not the words, tells a host what it may pass
 /// on: the remote server lets a refusal's reason through to the browser and replaces what git
@@ -129,6 +148,8 @@ pub struct Host {
     current_repo: Mutex<Option<PathBuf>>,
     /// Checked before every command that reaches the repository; none in the desktop host.
     guard: Option<Guard>,
+    /// Taken before every write; none in the desktop host, which shows a repository in one window.
+    turns: Option<Turns>,
     /// The history of the newest load (ADR-0031).
     session: Arc<Session>,
     /// The flag that stops the write that runs, replaced for each write.
@@ -145,6 +166,16 @@ impl Host {
         Host {
             guard: Some(guard),
             ..Host::default()
+        }
+    }
+
+    /// The host, writing only once `turns` gives it the repository's turn, so that the writes of
+    /// several hosts to one repository run one after the other, each checking what it expects
+    /// once its turn comes (ADR-0037).
+    pub fn taking_turns(self, turns: Turns) -> Host {
+        Host {
+            turns: Some(turns),
+            ..self
         }
     }
 
@@ -185,6 +216,11 @@ impl Host {
         let generation = session.begin(select);
         tokio::task::spawn_blocking(move || load(&GitReader, &path, &session, generation, &to));
         Ok(())
+    }
+
+    /// The repository open now: the one the newest `open_repo` that passed its checks named.
+    pub fn current_repo(&self) -> Option<PathBuf> {
+        self.current_repo.lock().unwrap().clone()
     }
 
     /// Stops the load that runs, for a window or a tab that closes: a newer generation refuses
@@ -295,8 +331,19 @@ impl Host {
         // (ADR-0035).
         let cancel = Arc::new(AtomicBool::new(false));
         *self.cancel.lock().unwrap() = Arc::clone(&cancel);
+        let turns = self.turns.clone();
         let written = tokio::task::spawn_blocking(move || {
             checked(&guard, &repo_path)?;
+            // Another host's write to the repository ends first; the root is checked again after
+            // the wait, and the write checks what it expects as it runs (ADR-0039, ADR-0037).
+            let mut turn = match &turns {
+                Some(take) => {
+                    let turn = take(&repo_path)?;
+                    checked(&guard, &repo_path)?;
+                    Some(turn)
+                }
+                None => None,
+            };
             let mut told: Option<std::time::Instant> = None;
             let mut progress = |p: &str| {
                 if told.is_none_or(|t| t.elapsed() >= PROGRESS_EVERY) {
@@ -305,7 +352,13 @@ impl Host {
                 }
                 !cancel.load(Ordering::Relaxed)
             };
-            port::perform(&GitWriter, &repo_path, &write, confirmation, &mut progress).map_err(git)
+            let written =
+                port::perform(&GitWriter, &repo_path, &write, confirmation, &mut progress)
+                    .map_err(git);
+            if let Some(turn) = &mut turn {
+                turn.ended(written.is_ok());
+            }
+            written
         })
         .await;
         self.writing.store(false, Ordering::Release);
@@ -729,6 +782,88 @@ mod tests {
     }
 
     #[test]
+    // Verifies: ADR-0039, ADR-0037
+    fn a_write_waits_for_its_turn_after_the_root_and_the_root_is_checked_again_once_it_comes() {
+        let refusing = Arc::new(AtomicBool::new(false));
+        let refuses = Arc::clone(&refusing);
+        let taken = Arc::new(Mutex::new(Vec::new()));
+        let (taker, flip) = (Arc::clone(&taken), Arc::clone(&refusing));
+        // The root moves while the write waits for its turn: the guard refuses from then on.
+        let host = Host::guarded(Arc::new(move |_| {
+            if refuses.load(Ordering::SeqCst) {
+                Err("refused".into())
+            } else {
+                Ok(())
+            }
+        }))
+        .taking_turns(Arc::new(move |path| {
+            taker.lock().unwrap().push(path.to_path_buf());
+            flip.store(true, Ordering::SeqCst);
+            Ok(Box::new(Told::default()))
+        }));
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .build()
+            .unwrap();
+        let _in = runtime.enter();
+        let dir = std::env::temp_dir().join(format!("ocelli-turns-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        host.open_repo(dir.clone(), "d".into(), None, Nowhere)
+            .unwrap();
+        let tag = Write::CreateTag {
+            name: "t".into(),
+            commit: "c".into(),
+            message: None,
+        };
+        assert_eq!(
+            runtime.block_on(host.perform_write(tag.clone(), false, Nowhere)),
+            Err(HostError::Refused("refused".into()))
+        );
+        assert_eq!(
+            *taken.lock().unwrap(),
+            std::slice::from_ref(&dir),
+            "the turn was taken"
+        );
+        // The guard refusing first, no turn is taken.
+        assert_eq!(
+            runtime.block_on(host.perform_write(tag.clone(), false, Nowhere)),
+            Err(HostError::Refused("refused".into()))
+        );
+        assert_eq!(taken.lock().unwrap().len(), 1);
+        // A turn that cannot be taken fails the write with its reason.
+        let host = Host::default().taking_turns(Arc::new(|_| Err(HostError::Git("no".into()))));
+        host.open_repo(dir.clone(), "d".into(), None, Nowhere)
+            .unwrap();
+        assert_eq!(
+            runtime.block_on(host.perform_write(tag.clone(), false, Nowhere)),
+            Err(HostError::Git("no".into()))
+        );
+        // A write that reached the repository tells its turn how it ended, here that it failed:
+        // the folder holds no repository.
+        let told = Told::default();
+        let ends = Arc::clone(&told.0);
+        let host =
+            Host::default().taking_turns(Arc::new(move |_| Ok(Box::new(Told(Arc::clone(&ends))))));
+        host.open_repo(dir.clone(), "d".into(), None, Nowhere)
+            .unwrap();
+        assert!(matches!(
+            runtime.block_on(host.perform_write(tag, false, Nowhere)),
+            Err(HostError::Git(_))
+        ));
+        assert_eq!(*told.0.lock().unwrap(), [false]);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A turn that records how each write it was held for ended.
+    #[derive(Default)]
+    struct Told(Arc<Mutex<Vec<bool>>>);
+
+    impl Turn for Told {
+        fn ended(&mut self, done: bool) {
+            self.0.lock().unwrap().push(done);
+        }
+    }
+
+    #[test]
     // Verifies: ADR-0039
     fn each_failure_of_a_command_carries_its_kind() {
         let runtime = tokio::runtime::Builder::new_current_thread()
@@ -792,7 +927,7 @@ mod tests {
                     Some(Answered::ByDesktop { counterpart: name }),
                     "{name}"
                 ),
-                Answered::ByBoth | Answered::WriteRefusedByServer => {
+                Answered::ByBoth | Answered::ByBothAsWrite => {
                     assert!(how.by_desktop() && how.by_server(), "{name}")
                 }
             }

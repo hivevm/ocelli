@@ -6,7 +6,7 @@
 > is updated in the same change as the structure it describes
 > ([ADR-0001](adr/0001-agent-governance-model.md)).
 >
-> **Last design revision:** 2026-10-08, due after 20 changes. The revision that ran moves the
+> **Last design revision:** 2026-10-09, due after 20 changes. The revision that ran moves the
 > date; the number is this project's to set; a sensor counts the changes outside `docs/` since
 > the commit that set the date and says when the next is due
 > ([ADR-0006](adr/0006-feature-layer.md)).
@@ -42,7 +42,9 @@ logged in with the connection token it printed
 ([ADR-0038](adr/0038-remote-server-localhost-tls-session-cookie.md)),
 and only about the repositories below its server root
 ([ADR-0039](adr/0039-git-adapter-confined-to-the-server-root.md));
-it only reads so far. The
+it only reads unless started with `--allow-writes`, and then writes as the user it runs as
+([ADR-0037](adr/0037-remote-server-websocket-per-tab.md)).
+The
 measurement of the quality goals, which ships to nobody, is the one part that runs the git binary
 and fetches over the network: the corpus of public repositories, in the Measure workflow.
 
@@ -89,7 +91,12 @@ golden path and the test pattern an agent copies from are named here.
   `stash.rs`, each checked against the state it names before anything changes by the checks of
   `guard.rs`, the index and the working directory written through `checkout.rs` and a message
   cleaned up by `message.rs` as `git` cleans it up, and returns the commit a write made; a
-  commit or an annotated tag is refused where the configuration asks for a signature. Each write
+  commit or an annotated tag is refused where the configuration asks for a signature. A path a
+  caller gives, to stage, unstage, resolve, or read a diff, is refused before git2 sees it unless
+  it is plain names below the working directory outside any `.git`, and the index is read at a
+  path only through `git::index_entry`, since git2's `Index::get_path` panics on some; a write any
+  string of which holds a NUL is refused before git2 sees it, and a reference name is checked
+  only through `guard::valid_ref_name`, since git2 unwraps both into C strings. Each write
   does what `git` does for the same command, and where it departs, the one ADR of the writer
   lists why ([ADR-0033](adr/0033-writes-what-git-writes.md)). A fetch, a pull, which then
   fast-forwards the checked-out branch, and a push, never by force and where `push.default` sends
@@ -104,7 +111,9 @@ golden path and the test pattern an agent copies from are named here.
   working directories and every object store its alternates borrow, read as libgit2 reads them,
   with no link anywhere inside its git and common directories, a walk bounded by a count of
   entries past which the repository is refused as too large to check; a link made there after
-  the repository was opened, and a hard link, are not seen. Once the remote server confines the
+  the repository was opened, and a hard link, are not seen. For the remote server's turns it
+  also reads a repository's resolved common directory (`common_dir`) and a digest of where its
+  refs point (`refs_digest`). Once the remote server confines the
   process to its root, every read opens the folder it is given without searching upwards, the
   parent row is looked for only up to the root, a submodule is read only where it lies below
   it, and the working-directory node carries no author, which would come from configuration;
@@ -147,13 +156,15 @@ golden path and the test pattern an agent copies from are named here.
   ([ADR-0008](adr/0008-toolchain-rust-and-typescript.md)); the checks run only their self-tests.
 - **Host commands** (`crates/commands`, `ocelli-commands`) — the commands and events of a host of
   the web interface, once for the desktop host and the remote server, free of any transport
-  ([ADR-0037](adr/0037-remote-server-websocket-per-tab.md)). A
-  `Host` holds what one window or tab has open: it loads the history through `GitReader` on
+  ([ADR-0037](adr/0037-remote-server-websocket-per-tab.md)).
+  A `Host` holds what one window or tab has open: it loads the history through `GitReader` on
   Tokio's blocking pool into the `History` of a load session (`session.rs`), answers the web
   interface's reads of it, windows of rows, search, and the selected commit with its lineage,
   and writes through `GitWriter` on the same pool, one write at a time, telling the web interface
   a transfer's progress as `write-progress` events at most every tenth of a second and stopping it
-  on `cancel_write` ([ADR-0031](adr/0031-front-ends-read-row-windows.md)). Its events go to a
+  on `cancel_write` ([ADR-0031](adr/0031-front-ends-read-row-windows.md)); a `Host` given
+  `Turns` writes only once they give it the repository's turn, and tells the turn how the write
+  ended before giving it back. Its events go to a
   `Report`, the window or the socket. A command fails with a `HostError`: no repository open, a
   refusal with its reason, or what git said, the kind from which the remote server decides what
   the browser reads. `COMMANDS` lists the commands once, each with how the two hosts answer it,
@@ -191,7 +202,26 @@ golden path and the test pattern an agent copies from are named here.
   whatever git says about a failed read reaches the browser only as "Reading the repository
   failed"
   ([ADR-0039](adr/0039-git-adapter-confined-to-the-server-root.md)).
-  It refuses every write with a reason the web interface shows, and answers in place of the
+  Started without `--allow-writes` it refuses every write with a reason the web interface shows;
+  with it, a tab's `perform_write` and `cancel_write` reach its `Host` as the desktop's do, as the
+  user the server runs as, a transfer with the SSH agent of the server's environment and the
+  credential helpers of its account's global and system configuration, to a remote over the network
+  or one on the machine below the root, which the confined git adapter decides with
+  `confine::remote_within_root` before libgit2's local transport opens it, its `write-progress` sent
+  to the tab that started it with an address's user and password and any path on the server scrubbed
+  (`scrub_progress`), and what git says about a write reaching the browser only as that it was
+  refused or failed. `turns.rs` gives a write its repository's turn, keyed by the resolved common
+  directory the git adapter's `confine` reads, which the `Host` takes after the root's check and
+  before checking the root again and writing, so that two tabs' writes to one repository run one
+  after the other, a bounded number waiting for each repository, one past them refused; when a
+  connection ends its commands are aborted and a write of its still waiting for its turn gives it up
+  unwritten. `turns.rs` keeps the repository each tab has open by its common directory too: before
+  the turn is given back, a write done, or refused after it moved a ref, tells every other tab on
+  the repository, through a worktree of it included, to load again, with the server's own
+  `repo-written` event, which `SERVER_EVENTS` of `ocelli-commands` lists and the desktop host never
+  sends
+  ([ADR-0037](adr/0037-remote-server-websocket-per-tab.md)).
+  It answers in place of the
   desktop's folder dialog `list_folders`, the folders below a folder of the root, those
   holding a `.git` marked, no link out of the root followed, a bounded number read. With
   `--listen` it binds that address alone and speaks TLS alone through rustls with ring
@@ -236,10 +266,20 @@ directory, the test's `git`, the snapshot, and `refused` are written once, in
 `crates/git/tests/support/mod.rs`; every test starts `git` through
 `crates/git/tests/git_command/mod.rs`. A way out of the server root is tested in
 `crates/git/tests/confine_checks.rs`, each case built so that the clause of `confine.rs` it is
-about decides it; the remote server's tests keep one case of each kind at the WebSocket. Where
-the web interface spells the JSON of a core value,
+about decides it; the remote server's tests keep one case of each kind at the WebSocket. The
+remote server's tests open a tab as a browser does through `crates/server/tests/browser/mod.rs`,
+whose `Pair` makes each write in the tab and through the shared `Host` on a twin of the
+repository, as the desktop host does, and compares the two (`crates/server/tests/writes.rs`,
+and `crates/server/tests/transfers.rs`, a binary of its own for the developer's configuration it
+sets for the process, with a remote below the root and a local server that stalls a fetch).
+Where the web interface spells the JSON of a core value,
 the core's `tests/write_fixture.rs` writes an example to `crates/core/tests/fixtures/` and the web
-interface's test reads it against its types.
+interface's test reads it against its types. The server's own `repo-written` event is held to
+the web interface's types by `crates/server/tests/fixtures/repo-written.json`, which the server's
+test writes and `transport.test.ts` reads. `crates/git/tests/hostile_writes.rs` writes every
+kind of write with each string field set to each hostile value, and none may panic;
+`crates/git/tests/confined_remotes.rs`, a binary of its own that confines the process, reaches a
+remote on this machine.
 
 ## How it runs
 
@@ -282,7 +322,7 @@ lives between them. Only what a newcomer would otherwise reconstruct from code.
   name what is lost ([ADR-0034](adr/0034-discarding-work-only-after-confirmation.md)); the web
   interface sends every write as the core's `Write` in JSON, asking the `Host`'s
   `write_discards` what it discards and handing it to `perform_write`, which the remote server
-  refuses. A write refused changes
+  performs only where it was started with `--allow-writes`. A write refused changes
   nothing and its reason goes to the developer. A write done starts a new load session of the
   same repository, which takes the commit the write made, or else the commit selected before, and
   names its row once a chunk lays it out, unless the developer has chosen another by then; the

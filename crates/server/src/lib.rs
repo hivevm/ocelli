@@ -9,6 +9,7 @@ pub mod auth;
 pub mod root;
 pub mod socket;
 pub mod tls;
+pub mod turns;
 pub mod web;
 
 use auth::Gate;
@@ -37,6 +38,9 @@ pub struct Options {
     pub limits: Limits,
     /// The address named with `--listen`, served over TLS in place of the loopback addresses.
     pub listen: Option<Listen>,
+    /// Whether the browser may write, as the desktop host writes, as the user the server runs as;
+    /// without `--allow-writes` every write is refused (ADR-0037).
+    pub allow_writes: bool,
 }
 
 /// What bounds the resources one client can hold.
@@ -62,6 +66,8 @@ pub struct Limits {
     pub ping: Duration,
     /// How long a tab may send nothing, not even the answer to a ping, before it is closed.
     pub idle: Duration,
+    /// The most writes that wait for one repository's turn; one past them is refused at once.
+    pub writes_waiting: usize,
 }
 
 impl Default for Limits {
@@ -77,6 +83,7 @@ impl Default for Limits {
             waiting: 8,
             ping: Duration::from_secs(30),
             idle: Duration::from_secs(75),
+            writes_waiting: 8,
         }
     }
 }
@@ -93,13 +100,15 @@ pub struct Listen {
 }
 
 pub const USAGE: &str = "Usage: ocelli-server --root <folder> [--port <port>] \
-                         [--listen <address>[:<port>] [--cert <file> --key <file>]]";
+                         [--listen <address>[:<port>] [--cert <file> --key <file>]] \
+                         [--allow-writes]";
 
 impl Options {
     /// The options of a command line, the program's name first.
     pub fn parse(args: impl IntoIterator<Item = String>) -> Result<Options, String> {
         let mut args = args.into_iter().skip(1);
         let (mut root, mut port, mut listen, mut cert, mut key) = (None, 0, None, None, None);
+        let mut allow_writes = false;
         while let Some(arg) = args.next() {
             match arg.as_str() {
                 "--root" => root = Some(PathBuf::from(args.next().ok_or(USAGE)?)),
@@ -112,6 +121,7 @@ impl Options {
                 "--listen" => listen = Some(args.next().ok_or(USAGE)?),
                 "--cert" => cert = Some(PathBuf::from(args.next().ok_or(USAGE)?)),
                 "--key" => key = Some(PathBuf::from(args.next().ok_or(USAGE)?)),
+                "--allow-writes" => allow_writes = true,
                 _ => return Err(format!("Unknown argument {arg}\n{USAGE}")),
             }
         }
@@ -145,6 +155,7 @@ impl Options {
             port,
             limits: Limits::default(),
             listen,
+            allow_writes,
         })
     }
 }
@@ -163,6 +174,9 @@ struct Server {
     tabs: Arc<Semaphore>,
     /// The tabs' load sessions the server holds.
     sessions: socket::Sessions,
+    /// The turns of the repositories' writes, where the server was started with `--allow-writes`;
+    /// none where it refuses every write (ADR-0037).
+    writes: Option<turns::Turns>,
     /// The hashes of the inline scripts of the web interface's `index.html`.
     script_hashes: Vec<String>,
     /// The certificate of a server listening on a named address, none on the loopback addresses.
@@ -179,6 +193,7 @@ pub struct Running {
     /// The SHA-256 fingerprint of its certificate, where it speaks TLS (ADR-0038).
     pub fingerprint: Option<String>,
     sessions: socket::Sessions,
+    writes: Option<turns::Turns>,
 }
 
 impl Running {
@@ -186,6 +201,11 @@ impl Running {
     /// closed connection's commands or load still hold until they stop (ADR-0037).
     pub fn sessions(&self) -> usize {
         self.sessions.count()
+    }
+
+    /// The turns its tabs' writes take, where it was started with `--allow-writes` (ADR-0037).
+    pub fn turns(&self) -> Option<&turns::Turns> {
+        self.writes.as_ref()
     }
 }
 
@@ -223,6 +243,9 @@ pub async fn start(options: Options) -> Result<Running, String> {
         waiting: Arc::new(Semaphore::new(options.limits.waiting)),
         tabs: Arc::new(Semaphore::new(options.limits.tabs)),
         sessions: socket::Sessions::default(),
+        writes: options
+            .allow_writes
+            .then(|| turns::Turns::new(options.limits.writes_waiting)),
         limits: options.limits,
         script_hashes,
         tls: tls.map(Arc::new),
@@ -286,6 +309,7 @@ pub async fn start(options: Options) -> Result<Running, String> {
         addresses,
         fingerprint: server.tls.as_ref().map(|tls| tls.fingerprint()),
         sessions: server.sessions.clone(),
+        writes: server.writes.clone(),
     })
 }
 
@@ -497,11 +521,11 @@ async fn admit(server: &Server, host: &str, request: Request) -> Response {
             return refuse(StatusCode::SERVICE_UNAVAILABLE, "Too many tabs are open");
         };
         let (root, limits) = (Arc::clone(&server.root), server.limits);
-        let sessions = server.sessions.clone();
+        let (sessions, writes) = (server.sessions.clone(), server.writes.clone());
         return upgrade
             .max_message_size(socket::MAX_MESSAGE)
             .on_upgrade(move |ws| async move {
-                socket::serve(ws, root, limits, sessions).await;
+                socket::serve(ws, root, limits, sessions, writes).await;
                 drop(tab);
             });
     }
@@ -542,6 +566,7 @@ mod tests {
                 port: 8000,
                 limits: Limits::default(),
                 listen: None,
+                allow_writes: false,
             })
         );
         assert_eq!(
@@ -551,10 +576,26 @@ mod tests {
                 port: 0,
                 limits: Limits::default(),
                 listen: None,
+                allow_writes: false,
             })
         );
         assert!(Options::parse(args(&["ocelli-server", "--root", "/r", "--port", "x"])).is_err());
         assert!(Options::parse(args(&["ocelli-server", "--root", "/r", "extra"])).is_err());
+    }
+
+    #[test]
+    // Verifies: ADR-0037
+    fn writes_are_allowed_only_by_the_switch_given_at_the_start() {
+        let allowed = |list: &[&str]| {
+            let mut all = vec!["ocelli-server"];
+            all.extend(list);
+            Options::parse(args(&all)).map(|o| o.allow_writes)
+        };
+        assert_eq!(allowed(&["--root", "/r"]), Ok(false));
+        assert_eq!(allowed(&["--root", "/r", "--allow-writes"]), Ok(true));
+        assert_eq!(allowed(&["--allow-writes", "--root", "/r"]), Ok(true));
+        assert!(allowed(&["--root", "/r", "--allow-writes=no"]).is_err());
+        assert!(USAGE.contains("[--allow-writes]"), "{USAGE}");
     }
 
     #[test]

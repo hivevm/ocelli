@@ -6,11 +6,11 @@ use crate::checkout::{check_out, entry_as_in};
 use crate::git::{INDEX, WORKTREE};
 use crate::guard::{
     NO_IDENTITY, as_shown, at_tip, branch_as_shown, not_checked_out_elsewhere, nothing_in_progress,
-    refname_of, refuse_where_signing_is_asked, valid_branch_name,
+    refname_of, refuse_where_signing_is_asked, repository_path, valid_branch_name,
 };
 use crate::message::{Made, cleaned, stripped};
 use anyhow::{Context, Result, bail};
-use git2::{BranchType, Commit, ObjectType, Oid, Reference, Repository, Status};
+use git2::{BranchType, Commit, ObjectType, Oid, Repository, Status};
 use ocelli_core::port::Write;
 use std::path::Path;
 
@@ -21,6 +21,7 @@ pub fn write(
     write: &Write,
     progress: &mut dyn FnMut(&str) -> bool,
 ) -> Result<Option<String>> {
+    crate::guard::no_nul(write)?;
     let mut repo = crate::confine::open(repo_path)?;
     let done = match write {
         Write::Fetch { remote } => crate::remote::fetch(&repo, remote, progress),
@@ -55,7 +56,8 @@ pub fn write(
             path,
             conflict,
             take,
-        } => crate::conflicts::resolve(&repo, path, conflict, *take),
+        } => repository_path(path)
+            .and_then(|()| crate::conflicts::resolve(&repo, path, conflict, *take)),
         Write::Continue { operation, head } => {
             return crate::conflicts::continue_stopped(&repo, *operation, head);
         }
@@ -87,10 +89,12 @@ pub fn write(
         } => track_remote(&repo, remote, branch, tip),
         Write::DeleteBranch { name, tip, merged } => delete_branch(&repo, name, tip, *merged),
         Write::StageFile { path, shown } => {
+            repository_path(path)?;
             as_shown(&repo, path, shown, |s| s.workdir)?;
             stage_file(&repo, path)
         }
         Write::UnstageFile { path, shown } => {
+            repository_path(path)?;
             as_shown(&repo, path, shown, |s| s.index)?;
             unstage_file(&repo, path)
         }
@@ -120,7 +124,7 @@ pub fn write(
 fn create_tag(repo: &Repository, name: &str, commit: &str, message: Option<&str>) -> Result<()> {
     let refname = format!("refs/tags/{name}");
     // `git tag` refuses a leading dash too, which would read as an option.
-    if name.starts_with('-') || !Reference::is_valid_name(&refname) {
+    if name.starts_with('-') || !crate::guard::valid_ref_name(&refname) {
         bail!("'{name}' is not a name a tag can have");
     }
     if repo.find_reference(&refname).is_ok() {

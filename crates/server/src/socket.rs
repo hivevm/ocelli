@@ -5,10 +5,13 @@
 //! passes them; the server answers `{"id", "ok"}` with the value the Tauri command returns, or
 //! `{"id", "err"}` with the reason it rejects with. An event is `{"event", "payload"}`. No path
 //! outside the server root leaves the server (ADR-0039): the paths of the sidebar's rows are sent
-//! relative to it, or empty where they lie outside, and what git says is replaced.
+//! relative to it, or empty where they lie outside, and what git says is replaced. A write runs
+//! only where the server was started with `--allow-writes`, through the shared `Host` as in the
+//! desktop host, taking turns with the other tabs' writes to its repository (ADR-0037).
 
 use crate::Limits;
 use crate::root::Root;
+use crate::turns::Turns;
 use axum::extract::ws::{Message, WebSocket};
 use ocelli_commands::{Host, HostError, Report};
 use ocelli_core::port::Write;
@@ -19,11 +22,22 @@ use std::path::Path;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use tokio::sync::{Notify, Semaphore, mpsc};
+use tokio::task::JoinSet;
 
-/// The reason every write is refused with until the remote server's second feature spec brings
-/// writes (ADR-0037).
+/// The reason every write is refused with where the server was started without `--allow-writes`
+/// (ADR-0037).
 pub const WRITES_REFUSED: &str =
-    "The remote server only reads: writing is not offered in the browser";
+    "The remote server only reads: it writes only when started with --allow-writes";
+
+/// What the failure of a write the git adapter reported says in the browser, its refusals
+/// included: its words may name a path on the server (ADR-0039).
+pub const WRITE_FAILED: &str =
+    "The write was refused or failed: reload to see the repository as it is";
+
+/// What a tab is told, as the server's own `repo-written` event, once another tab wrote to the
+/// repository it has open, which it then loads again (ADR-0037).
+pub const WRITTEN_ELSEWHERE: &str =
+    "Another tab wrote to this repository: it is shown as it is now";
 
 /// What a reason that names a path on the server says instead.
 pub const READ_FAILED: &str = "Reading the repository failed";
@@ -49,6 +63,49 @@ pub fn scrub(error: HostError) -> String {
     match error {
         HostError::NoRepository | HostError::Refused(_) => error.to_string(),
         HostError::Git(_) => READ_FAILED.into(),
+    }
+}
+
+/// The failure of a write as the browser may read it: `scrub`, with what git said, or the git
+/// adapter's refusal, which its type does not tell from it, as `WRITE_FAILED`.
+pub fn scrub_write(error: HostError) -> String {
+    match error {
+        HostError::Git(_) => WRITE_FAILED.into(),
+        error => scrub(error),
+    }
+}
+
+/// A transfer's progress as the browser may read it: a word that is an address keeps its scheme,
+/// host, and path but not the user name and password it may carry, and a word that names a path
+/// on the server, absolute or with a backslash, reads `<path>`. The git adapter's progress names
+/// the remote and counts objects; what a repository's configuration names is untrusted, so what
+/// may reach the words is scrubbed here (ADR-0039, ADR-0037).
+pub fn scrub_progress(text: &str) -> String {
+    let scrubbed: Vec<String> = text.split(' ').map(scrub_word).collect();
+    scrubbed.join(" ")
+}
+
+fn scrub_word(word: &str) -> String {
+    if let Some((scheme, rest)) = word.split_once("://") {
+        let (authority, path) = rest.split_at(rest.find('/').unwrap_or(rest.len()));
+        let host = authority
+            .rsplit_once('@')
+            .map_or(authority, |(_, host)| host);
+        // A local address's path is a path on the server.
+        let path = if scheme.eq_ignore_ascii_case("file") {
+            "<path>"
+        } else {
+            path
+        };
+        return format!("{scheme}://{host}{path}");
+    }
+    let bare = word.trim_start_matches(['"', '\'', '(', '[', '<', '`']);
+    let drive =
+        bare.len() > 2 && bare.as_bytes()[0].is_ascii_alphabetic() && bare[1..].starts_with(":/");
+    if bare.starts_with(['/', '~']) || bare.contains('\\') || drive {
+        "<path>".into()
+    } else {
+        word.into()
     }
 }
 
@@ -94,6 +151,11 @@ pub fn outbound(root: &Root, event: &str, payload: &mut Value) {
             }
         }
         "set-status" => scrub_status(payload),
+        "write-progress" => {
+            if let Some(text) = payload.as_str() {
+                *payload = Value::String(scrub_progress(text));
+            }
+        }
         "history-grew" => scrub_status(&mut payload["status"]),
         _ => {}
     }
@@ -158,19 +220,49 @@ struct Tab {
     host: Host,
     root: Arc<Root>,
     to: ToSocket,
+    /// The turns of the server's writes, where the tab may write: the server was started with
+    /// `--allow-writes` (ADR-0037).
+    writes: Option<Turns>,
+    /// The tab's number among the turns' tabs.
+    number: u64,
+    /// Set once the connection has ended.
+    gone: Arc<AtomicBool>,
+    /// Held while the tab's open repository is registered with the turns.
+    registering: std::sync::Mutex<()>,
     /// Whether the web interface has asked for the repository to open at its start.
     started: AtomicBool,
 }
 
 /// Serves one connection until the browser closes it, or until it does not read what it is sent
-/// in time, then stops its load and drops its load session (ADR-0037).
-pub async fn serve(mut socket: WebSocket, root: Arc<Root>, limits: Limits, sessions: Sessions) {
+/// in time, then stops its load and drops its load session (ADR-0037). Its writes take turns with
+/// the other tabs' in `writes`, none where the server refuses every write (ADR-0037).
+pub async fn serve(
+    mut socket: WebSocket,
+    root: Arc<Root>,
+    limits: Limits,
+    sessions: Sessions,
+    writes: Option<Turns>,
+) {
     let (tx, mut rx) = mpsc::channel::<String>(limits.queue);
     let overflowed = Arc::new(Notify::new());
     let guard_root = Arc::clone(&root);
+    // Every command that reaches the repository checks it again (ADR-0039).
+    let host = Host::guarded(Arc::new(move |path| guard_root.verify(path)));
+    // Set once the connection ends: a write still waiting for its turn then gives it up.
+    let gone = Arc::new(AtomicBool::new(false));
+    let number = writes.as_ref().map_or(0, Turns::tab);
     let tab = Arc::new(Tab {
-        // Every command that reaches the repository checks it again (ADR-0039).
-        host: Host::guarded(Arc::new(move |path| guard_root.verify(path))),
+        writes: writes.clone(),
+        number,
+        gone: Arc::clone(&gone),
+        registering: std::sync::Mutex::new(()),
+        host: match writes.clone() {
+            Some(turns) => {
+                let gone = Arc::clone(&gone);
+                host.taking_turns(Arc::new(move |path| turns.of(path, &gone, number)))
+            }
+            None => host,
+        },
         to: ToSocket {
             tx,
             overflowed: Arc::clone(&overflowed),
@@ -181,6 +273,9 @@ pub async fn serve(mut socket: WebSocket, root: Arc<Root>, limits: Limits, sessi
         started: AtomicBool::new(false),
     });
     let commands = Arc::new(Semaphore::new(COMMANDS_AT_ONCE));
+    // The commands that run, aborted when the connection ends, so that a closed tab holds no
+    // task: its slot is free for another, which must not find its work still queued.
+    let mut running = JoinSet::new();
     // A connection that died without a close, its browser gone or its network, sends nothing,
     // not even the answer to a ping: past `idle` it is closed and its tab's slot freed.
     let mut pings =
@@ -189,6 +284,7 @@ pub async fn serve(mut socket: WebSocket, root: Arc<Root>, limits: Limits, sessi
     loop {
         tokio::select! {
             () = overflowed.notified() => break,
+            Some(_) = running.join_next(), if !running.is_empty() => {}
             _ = pings.tick() => {
                 if heard.elapsed() >= limits.idle {
                     break;
@@ -227,7 +323,7 @@ pub async fn serve(mut socket: WebSocket, root: Arc<Root>, limits: Limits, sessi
                     break;
                 };
                 let tab = Arc::clone(&tab);
-                tokio::spawn(async move {
+                running.spawn(async move {
                     let answer = match answer(&tab, &command.cmd, command.args).await {
                         Ok(value) => json!({ "id": command.id, "ok": value }),
                         Err(reason) => json!({ "id": command.id, "err": reason }),
@@ -239,6 +335,18 @@ pub async fn serve(mut socket: WebSocket, root: Arc<Root>, limits: Limits, sessi
         }
     }
     tab.host.stop();
+    // A local write already writing finishes, as a write in the desktop host does when its
+    // window closes; a fetch, or a pull while it fetches, stops, as `cancel_write` stops it, so
+    // that a tab gone holds no repository's turn for a transfer nobody waits for; a push, which
+    // cannot be stopped, finishes. One still waiting for its turn gives it up unwritten
+    // (ADR-0037).
+    tab.host.cancel_write();
+    gone.store(true, Ordering::Release);
+    if let Some(turns) = writes {
+        turns.forget(number);
+        turns.wake();
+    }
+    running.abort_all();
 }
 
 /// `work` on the blocking pool, for what reads the file system.
@@ -308,6 +416,13 @@ struct Discards {
     write: Write,
 }
 
+/// The arguments of `perform_write`, as the desktop host's command takes them.
+#[derive(Deserialize)]
+struct Perform {
+    write: Write,
+    confirmed: bool,
+}
+
 /// The answer to one command, as the desktop host's command of the same name gives it, from the
 /// same `Host` (ADR-0037).
 async fn answer(tab: &Arc<Tab>, cmd: &str, a: Value) -> Result<Value, String> {
@@ -327,7 +442,21 @@ async fn answer(tab: &Arc<Tab>, cmd: &str, a: Value) -> Result<Value, String> {
                 let opened = tab.root.open(&path)?;
                 tab.host
                     .open_repo(opened.path, opened.label, select, tab.to.clone())
-                    .map_err(scrub)
+                    .map_err(scrub)?;
+                if let Some(turns) = &tab.writes {
+                    // The repository the tab shows now, read under the lock: of two opens of one
+                    // tab at once, the one that registers last reads the repository the later
+                    // open left, whichever finished first.
+                    let _one = tab.registering.lock().unwrap();
+                    let common = tab
+                        .host
+                        .current_repo()
+                        .and_then(|path| ocelli_git::confine::common_dir(&path));
+                    let to = tab.to.clone();
+                    let tell = Arc::new(move || to.report("repo-written", WRITTEN_ELSEWHERE));
+                    turns.watch(tab.number, common, tell, &tab.gone);
+                }
+                Ok(())
             })
             .await?;
             value(())
@@ -372,8 +501,19 @@ async fn answer(tab: &Arc<Tab>, cmd: &str, a: Value) -> Result<Value, String> {
             let Discards { write } = args(a)?;
             value(Host::write_discards(&write))
         }
-        "perform_write" => Err(WRITES_REFUSED.into()),
-        "cancel_write" => value(()),
+        "perform_write" => {
+            // Refused before its arguments are read: a server without the switch writes nothing.
+            if tab.writes.is_none() {
+                return Err(WRITES_REFUSED.into());
+            }
+            let Perform { write, confirmed } = args(a)?;
+            let made = host.perform_write(write, confirmed, tab.to.clone()).await;
+            value(made.map_err(scrub_write)?)
+        }
+        "cancel_write" => {
+            host.cancel_write();
+            value(())
+        }
         _ => Err(format!("Unknown command: {cmd}")),
     }
 }
@@ -460,6 +600,22 @@ mod tests {
             scrub(HostError::NoRepository),
             HostError::NoRepository.to_string()
         );
+        // A write's failure from git, the git adapter's refusal among them, says that it failed;
+        // Ocelli's own refusals pass as they do for a read.
+        for said in [
+            "the checked-out commit is no longer the one shown: reload to see it as it is",
+            "failed to write /srv/repo/.git/index.lock: Permission denied",
+        ] {
+            assert_eq!(scrub_write(HostError::Git(said.into())), WRITE_FAILED);
+        }
+        assert_eq!(
+            scrub_write(HostError::Refused("A write is still running".into())),
+            "A write is still running"
+        );
+        assert_eq!(
+            scrub_write(HostError::NoRepository),
+            HostError::NoRepository.to_string()
+        );
         let tree = Tree::new("status");
         let root = Root::new(&tree.0.join("root")).unwrap();
         let mut status = json!("Error: failed to resolve path '/srv/x'");
@@ -476,6 +632,41 @@ mod tests {
             outbound(&root, "set-status", &mut status);
             assert_eq!(status, plain);
         }
+    }
+
+    #[test]
+    // Verifies: ADR-0037, ADR-0039, Q-7
+    fn a_transfer_s_progress_names_no_credential_and_no_path_on_the_server() {
+        for (said, read) in [
+            (
+                "Fetching origin: 3 of 5 objects",
+                "Fetching origin: 3 of 5 objects",
+            ),
+            ("Pushing a: 1 of 2 objects", "Pushing a: 1 of 2 objects"),
+            (
+                "Fetching https://ada:SECRET@example.org/r.git: authenticating",
+                "Fetching https://example.org/r.git: authenticating",
+            ),
+            (
+                "Fetching ssh://ada@host:22: the server is preparing",
+                "Fetching ssh://host:22: the server is preparing",
+            ),
+            (
+                "Fetching file:///srv/root/remote.git: 1 of 1 objects",
+                "Fetching file://<path> 1 of 1 objects",
+            ),
+            (
+                "from /srv/root/remote.git ('/home/ada/x') C:/Users/ada C:\\Users\\ada ~/r",
+                "from <path> <path> <path> <path> <path>",
+            ),
+        ] {
+            assert_eq!(scrub_progress(said), read, "{said}");
+        }
+        let tree = Tree::new("progress");
+        let root = Root::new(&tree.0.join("root")).unwrap();
+        let mut payload = json!("Fetching https://u:p@h/r: /srv/x");
+        outbound(&root, "write-progress", &mut payload);
+        assert_eq!(payload, "Fetching https://h/r: <path>");
     }
 
     #[test]

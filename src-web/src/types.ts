@@ -269,3 +269,8 @@ export interface Staging {
   staged: 'no' | 'yes' | 'partly';
   shown: { workdir: string | null; index: string | null };
 }
+
+/** The remote server's own event, `repo-written`: another tab wrote to the repository this tab
+    has open, which it loads again; the payload is what the status bar says. The desktop host
+    never sends it (ADR-0037). */
+export type RepoWritten = string;
