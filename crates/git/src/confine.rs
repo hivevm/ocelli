@@ -80,51 +80,6 @@ pub(crate) fn open(path: &Path) -> Result<Repository, git2::Error> {
     }
 }
 
-/// The common directory of the repository at `path`, opened without searching upwards, resolved,
-/// links included: one for a working directory and every worktree that belongs to it, which the
-/// remote server orders its tabs' writes by (ADR-0037). `None` where no repository opens there or
-/// its common directory does not resolve.
-pub fn common_dir(path: &Path) -> Option<PathBuf> {
-    let repo = Repository::open_ext(
-        path,
-        RepositoryOpenFlags::NO_SEARCH,
-        std::iter::empty::<&OsStr>(),
-    )
-    .ok()?;
-    repo.commondir().canonicalize().ok()
-}
-
-/// A digest of where `HEAD` and every ref of the repository at `path` point, opened without
-/// searching upwards: the remote server compares the digest taken before a write with the one after, to
-/// tell its other tabs on the repository to load again where a refused write moved a ref, as a
-/// pull's fetch does before its fast-forward is refused (ADR-0037). `None` where no repository
-/// opens there or its refs cannot be listed.
-pub fn refs_digest(path: &Path) -> Option<u64> {
-    use std::hash::{Hash, Hasher};
-    let repo = Repository::open_ext(
-        path,
-        RepositoryOpenFlags::NO_SEARCH,
-        std::iter::empty::<&OsStr>(),
-    )
-    .ok()?;
-    let mut digest = std::collections::hash_map::DefaultHasher::new();
-    let mut each = |reference: &git2::Reference| {
-        reference.name_bytes().hash(&mut digest);
-        reference
-            .target()
-            .map(|oid| oid.as_bytes().to_vec())
-            .hash(&mut digest);
-        reference.symbolic_target_bytes().hash(&mut digest);
-    };
-    if let Ok(head) = repo.find_reference("HEAD") {
-        each(&head);
-    }
-    for reference in repo.references().ok()? {
-        each(&reference.ok()?);
-    }
-    Some(digest.finish())
-}
-
 /// Whether libgit2 reaches `url` over the network rather than through its local transport, which
 /// opens a repository on this machine in-process: an address with a network scheme, or one that
 /// reads as `host:path` as ssh's does where no folder of that name exists, which libgit2 would

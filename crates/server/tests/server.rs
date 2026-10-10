@@ -261,7 +261,7 @@ async fn with_allow_writes_a_write_refused_by_git_changes_nothing_and_names_no_p
     // Fetching a remote the repository does not have, staging f as content it does not hold,
     // and committing on a commit not checked out: the git adapter refuses each, in words that
     // reach the browser only as WRITE_FAILED.
-    let failed = Err(ocelli_server::socket::WRITE_FAILED.to_string());
+    let failed = Err(ocelli_server::socket::scrub::WRITE_FAILED.to_string());
     let fetch = Write::Fetch {
         remote: "origin".into(),
     };
@@ -285,28 +285,10 @@ async fn with_allow_writes_a_write_refused_by_git_changes_nothing_and_names_no_p
     assert_ne!(snapshot(&root), before);
 }
 
-/// How many panics inside git2 this process has had since the count began: the release build
-/// aborts on a panic, so one there takes the whole server down with every tab, where a test
-/// build only fails the command. The panics are still reported as they were.
-fn git2_panics() -> &'static std::sync::atomic::AtomicUsize {
-    static COUNT: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
-    static HOOK: std::sync::Once = std::sync::Once::new();
-    HOOK.call_once(|| {
-        let previous = std::panic::take_hook();
-        std::panic::set_hook(Box::new(move |info| {
-            if info.location().is_some_and(|l| l.file().contains("git2-")) {
-                COUNT.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-            }
-            previous(info);
-        }));
-    });
-    &COUNT
-}
-
 #[tokio::test]
 // Verifies: ADR-0037, ADR-0039
 async fn a_path_that_names_no_file_of_the_working_directory_is_refused_and_the_server_answers_on() {
-    let panics = git2_panics().load(std::sync::atomic::Ordering::SeqCst);
+    let panics = git2_panics();
     let tree = Tree::new("write-paths");
     let root = tree.root();
     with_changes(&root);
@@ -315,7 +297,7 @@ async fn a_path_that_names_no_file_of_the_working_directory_is_refused_and_the_s
     open_and_load(&mut tab, ".").await;
     let before = snapshot(&root);
     let head = git(&root, &["rev-parse", "HEAD"]);
-    let failed = Err(ocelli_server::socket::WRITE_FAILED.to_string());
+    let failed = Err(ocelli_server::socket::scrub::WRITE_FAILED.to_string());
     for path in [
         "",
         ".",
@@ -341,7 +323,7 @@ async fn a_path_that_names_no_file_of_the_working_directory_is_refused_and_the_s
         let diff = json!({ "sha": head, "filePath": path });
         assert_eq!(
             tab.invoke("get_file_diff", diff).await,
-            Err(ocelli_server::socket::READ_FAILED.to_string()),
+            Err(ocelli_server::socket::scrub::READ_FAILED.to_string()),
             "{path:?}"
         );
     }
@@ -362,7 +344,7 @@ async fn a_path_that_names_no_file_of_the_working_directory_is_refused_and_the_s
     }
     assert_eq!(snapshot(&root), before);
     assert_eq!(
-        git2_panics().load(std::sync::atomic::Ordering::SeqCst),
+        git2_panics(),
         panics,
         "git2 panicked on a path or a name the browser sent"
     );
@@ -397,7 +379,7 @@ async fn a_write_past_those_waiting_is_refused_and_a_closed_tab_s_waiting_write_
         ..Limits::default()
     };
     let running = writing_within(root.clone(), limits).await;
-    let common = ocelli_git::confine::common_dir(&root).unwrap();
+    let common = ocelli_git::refs::common_dir(&root).unwrap();
     let mut first = Tab::open(&running).await;
     open_and_load(&mut first, ".").await;
     let mut second = Tab::open(&running).await;
@@ -466,7 +448,7 @@ async fn two_tabs_writing_to_one_repository_write_in_turn_and_the_other_tabs_on_
     git(&root, &["worktree", "add", "--quiet", "wt"]);
     three_commits(&root.join("sub"));
     let running = writing_on(root.clone()).await;
-    let common = ocelli_git::confine::common_dir(&root).unwrap();
+    let common = ocelli_git::refs::common_dir(&root).unwrap();
     let mut tabs = Vec::new();
     for path in [".", ".", "wt", "sub"] {
         let mut tab = Tab::open(&running).await;
@@ -497,7 +479,7 @@ async fn two_tabs_writing_to_one_repository_write_in_turn_and_the_other_tabs_on_
     drop(held);
     let answers = (first.answer(one).await, second.answer(two).await);
     // One after the other: the second finds HEAD moved, and is refused with nothing changed.
-    let failed = Err(ocelli_server::socket::WRITE_FAILED.to_string());
+    let failed = Err(ocelli_server::socket::scrub::WRITE_FAILED.to_string());
     let (made, mut winner, mut loser) = match answers {
         (Ok(made), refused) if refused == failed => (made, first, second),
         (refused, Ok(made)) if refused == failed => (made, second, first),
@@ -1025,7 +1007,7 @@ async fn what_git_says_about_a_failed_read_reaches_the_browser_only_as_reading_f
             json!({ "sha": "no-such-commit", "filePath": "f" })
         )
         .await,
-        Err(ocelli_server::socket::READ_FAILED.to_string())
+        Err(ocelli_server::socket::scrub::READ_FAILED.to_string())
     );
 }
 
@@ -2001,7 +1983,7 @@ fn unperformed(server: &Answers, desktop: &Answers) -> Vec<String> {
 // Verifies: ADR-0037
 fn a_write_the_desktop_answers_and_the_server_answers_otherwise_or_not_at_all_is_named() {
     let answer = |kind: &str, answer: Result<Value, String>| (kind.to_string(), answer);
-    let failed = || Err(ocelli_server::socket::WRITE_FAILED.to_string());
+    let failed = || Err(ocelli_server::socket::scrub::WRITE_FAILED.to_string());
     let desktop = [
         answer("stageFile", Ok(Value::Null)),
         answer("dropStash", failed()),
@@ -2262,6 +2244,7 @@ async fn with_allow_writes_staging_unstaging_and_committing_leave_the_repository
     let tree = Tree::new("writes");
     let root = tree.root();
     with_changes(&root);
+    let parted = support::Origin::of(&root);
     // The desktop's copy, which the shared Host writes as the desktop host does.
     let twin = support::twin(&tree.1, "writes-desktop");
     let other = twin.0.join("root");
@@ -2291,7 +2274,7 @@ async fn with_allow_writes_staging_unstaging_and_committing_leave_the_repository
             (Ok(Value::String(a)), Ok(Value::String(b))) => made = Some((a.clone(), b.clone())),
             _ => panic!("{write:?}: the server answers {here:?}, the desktop host {there:?}"),
         }
-        support::assert_twins_alike(&root, &other, &format!("{write:?}"));
+        support::assert_twins_alike(&root, &other, &parted, &format!("{write:?}"));
     }
     let (here, there) = made.expect("the commit answers the commit it made");
     assert_eq!(git(&root, &["rev-parse", "HEAD"]), here);
