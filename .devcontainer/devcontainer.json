@@ -63,8 +63,7 @@
     // VS Code extensions installed inside the container
     "vscode": {
       "extensions": [
-        "anthropic.claude-code",
-        "mistralai.mistral-vibe-code"
+        "anthropic.claude-code"
       ]
     }
   },
