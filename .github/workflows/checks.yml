@@ -207,6 +207,21 @@ jobs:
         run: bash scripts/check-devcontainer-toolchain.sh
       - name: Build, test, and lint
         run: bash scripts/check-build.sh
+      # Verifies: ADR-0041 — no macOS binary loads a library outside the system, such as the
+      # build machine's Homebrew OpenSSL, which a Mac without Homebrew does not have.
+      - name: Check that the macOS binaries load only the system's libraries
+        if: runner.os == 'macOS'
+        run: |
+          status=0
+          for bin in target/debug/ocelli target/debug/ocelli-cli target/debug/ocelli-server; do
+            foreign="$(otool -L "$bin" | tail -n +2 | awk '{ print $1 }' |
+              grep -v -E '^(/usr/lib/|/System/Library/)' || true)"
+            if [ -n "$foreign" ]; then
+              echo "::error::$bin loads libraries outside the system: $(echo $foreign)"
+              status=1
+            fi
+          done
+          exit "$status"
       # The weekly measurement's script, tried on two small repositories (feature spec #11).
       - name: Self-test the measurement of edge crossings
         run: bash scripts/test-measure-crossings.sh
