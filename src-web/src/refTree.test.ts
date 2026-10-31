@@ -1,4 +1,4 @@
-// Verifies: ADR-draft-sidebar-worktrees-filter, ADR-0028
+// Verifies: ADR-0041, ADR-0028
 import { describe, expect, test } from 'bun:test';
 import { anyLeaf, countLeaves, filterByName, groupByFolder, refShas } from './refTree.ts';
 
