@@ -18,6 +18,13 @@
 set -uo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+
+# A measurement takes minutes, and scripts/check-all.sh runs every script a workflow runs, so it
+# skips itself unless OCELLI_MEASURE_ALL=1, which .github/workflows/measure.yml sets.
+if [[ "${OCELLI_MEASURE_ALL:-}" != 1 ]]; then
+  echo "Mutants of the git adapter's guards: skipped — measured weekly by .github/workflows/measure.yml; OCELLI_MEASURE_ALL=1 measures here."
+  exit 0
+fi
 VERSION="27.1.0"
 jobs="${OCELLI_MUTANTS_JOBS:-2}"
 out="$(mktemp -d)"

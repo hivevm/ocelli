@@ -23,6 +23,13 @@ set -uo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
+# A measurement takes minutes, and scripts/check-all.sh runs every script a workflow runs, so it
+# skips itself unless OCELLI_MEASURE_ALL=1, which .github/workflows/measure.yml sets.
+if [[ "${OCELLI_MEASURE_ALL:-}" != 1 ]]; then
+  echo "Edge crossings (Q-1): skipped — measured weekly by .github/workflows/measure.yml; OCELLI_MEASURE_ALL=1 measures here."
+  exit 0
+fi
+
 DEFAULT_CORPUS="git https://github.com/git/git.git 8103b446517e0c44e67561b9d0ccce56efa60a71 45086
 cargo https://github.com/rust-lang/cargo.git bb2126cffae48394a37db8728dc50a17bbfe54d4 1627
 svelte https://github.com/sveltejs/svelte.git 7c2fcdae6a29fb3b36855dc8e86eb7ce4c56b93a 0
