@@ -223,11 +223,13 @@ pub(crate) fn save_merge(
         their: theirs,
     } = conflict_at(&index, path)?;
     let side = ours.as_ref().context("the conflict has no side of ours")?;
+    // The file as it is: its mode the working directory's, which `git add` takes, not ours.
     let entry = IndexEntry {
         flags: side.flags & !STAGE_MASK,
         path: side.path.clone(),
         id: repo.blob(written.as_bytes())?,
         file_size: u32::try_from(written.len()).unwrap_or(u32::MAX),
+        mode: mode_of(repo, path, side.mode),
         ..*side
     };
     index.conflict_remove(Path::new(path))?;
@@ -246,14 +248,38 @@ pub(crate) fn save_merge(
         .path(path);
     let checked_out = crate::workdir::checkout_index(repo, &mut index, &mut checkout)
         .and_then(|w| w.map_err(anyhow::Error::from));
-    if let Err(e) = checked_out {
-        restore(repo, path, [&ancestor, &ours, &theirs])?;
-        return Err(e);
-    }
+    // The conflict back as it was, so that `git add` meets the stages it meets: the file it
+    // stages is cleaned against them, a CRLF the result was written with taken back to LF.
+    restore(repo, path, [&ancestor, &ours, &theirs])?;
+    checked_out?;
     let mut index = repo.index()?;
     index.add_path(Path::new(path))?;
     index.write()?;
     Ok(())
+}
+
+/// The mode of the working directory's file at `path`, as `git add` stages it: executable where
+/// the file is and `core.fileMode` reads it, else `ours`'s.
+fn mode_of(repo: &Repository, path: &str, ours: u32) -> u32 {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let file_mode = repo
+            .config()
+            .and_then(|c| c.get_bool("core.fileMode"))
+            .unwrap_or(true);
+        if let (true, Some(root)) = (file_mode, repo.workdir())
+            && let Ok(meta) = root.join(path).symlink_metadata()
+        {
+            return if meta.permissions().mode() & 0o111 != 0 {
+                0o100755
+            } else {
+                0o100644
+            };
+        }
+    }
+    let _ = (repo, path);
+    ours
 }
 
 /// Refuses a `path` of the working directory below a link or a file, other than one `its_own`

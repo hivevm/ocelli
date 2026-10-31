@@ -340,6 +340,7 @@
   // ── Actions ────────────────────────────────────────────────────────────────
   async function browseRepo(): Promise<void> {
     notice = null;
+    if (!await mayLeaveMerge()) return;
     if (remote) {
       choosingFolder = true;
       return;
@@ -370,7 +371,7 @@
   /// folder picker triggers, so the graph, the refs and the label all follow.
   async function openRepoPath(path: string): Promise<void> {
     notice = null;
-    if (!path) return;
+    if (!path || !await mayLeaveMerge()) return;
     status = 'Opening…';
     await invoke('open_repo', { path }).catch((e: unknown) => { status = 'Error: ' + e; });
   }
@@ -493,18 +494,22 @@
     diffLines = [];
   }
 
-  /** The conflicted file open in the merge editor, and why its last save was refused. */
-  let merging = $state<{ conflict: Conflict; file: MergeFile; refused: string | null } | null>(null);
+  /** The conflicted file open in the merge editor, why its last save was refused, and whether a
+      save runs. */
+  let merging = $state<{
+    conflict: Conflict; file: MergeFile; refused: string | null; saving: boolean;
+  } | null>(null);
+  let mergeEditor = $state<{ current: () => string } | undefined>();
 
   /** Opens the conflicted file `path` in the merge editor (ADR-0031), over the commit graph as
-      the diff opens. */
+      the diff opens; a file open in it already is left first, as Close leaves it. */
   async function openMerge(path: string): Promise<void> {
     const conflict = repoRefs?.inProgress?.conflicts.find(c => c.path === path);
-    if (!conflict) return;
+    if (!conflict || !await mayLeaveMerge()) return;
     try {
       const json = await invoke<string>('get_merge_file', { path });
       closeDiff();
-      merging = { conflict, file: JSON.parse(json), refused: null };
+      merging = { conflict, file: JSON.parse(json), refused: null, saving: false };
     } catch (e) {
       report(e);
     }
@@ -513,18 +518,24 @@
   /** Saves the result as the file's resolution and closes the editor; a refusal keeps it open
       and says why. */
   async function saveMerge(result: string): Promise<void> {
-    if (!merging) return;
+    if (!merging || merging.saving) return;
+    merging.saving = true;
     const refused = await performWrite(saveRequest(merging.conflict, merging.file, result));
+    if (!merging) return;
+    merging.saving = false;
     if (refused === null) merging = null;
-    else if (merging) merging.refused = refused;
+    else merging.refused = refused;
   }
 
-  /** Leaves the editor, asking first where the result is not saved (Q-7). */
-  async function leaveMerge(result: string): Promise<void> {
-    if (!merging) return;
+  /** Leaves the editor, asking first where the result is not saved (Q-7); resolves with whether
+      it was left. */
+  async function mayLeaveMerge(): Promise<boolean> {
+    if (!merging) return true;
+    const result = mergeEditor?.current() ?? merging.file.text;
     if (unsaved(merging.file, result)
-        && !await askBefore(unsavedLoss(merging.conflict.path), 'Leave')) return;
+        && !await askBefore(unsavedLoss(merging.conflict.path), 'Leave')) return false;
     merging = null;
+    return true;
   }
 </script>
 
@@ -635,8 +646,9 @@
 
         {#if merging}
           <div id="diff-overlay">
-            <MergeEditor path={merging.conflict.path} file={merging.file} refused={merging.refused}
-                         onSave={saveMerge} onLeave={leaveMerge} />
+            <MergeEditor bind:this={mergeEditor} path={merging.conflict.path} file={merging.file}
+                         refused={merging.refused} saving={merging.saving}
+                         onSave={saveMerge} onLeave={() => void mayLeaveMerge()} />
           </div>
         {:else if diffFile !== null}
           <div id="diff-overlay">

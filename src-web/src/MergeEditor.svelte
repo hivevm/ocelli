@@ -2,7 +2,7 @@
   // The merge editor (ADR-0031, G-15): a conflicted file as the working directory holds it, its
   // blocks set apart by their marker lines, the text editable everywhere with undo. Saving takes
   // the result as the file's resolution; leaving with a result not saved asks first (Q-7).
-  import { EditorState, RangeSetBuilder, StateField } from '@codemirror/state';
+  import { Compartment, EditorState, RangeSetBuilder, StateField } from '@codemirror/state';
   import { Decoration, EditorView, keymap, lineNumbers, type DecorationSet } from '@codemirror/view';
   import { defaultKeymap, history, historyKeymap } from '@codemirror/commands';
   import { blockLines } from './mergeEditor.ts';
@@ -13,10 +13,12 @@
     file: MergeFile;
     /** Why the last save was refused, shown until the next. */
     refused: string | null;
+    /** Whether a save runs: the text is not editable meanwhile, so no edit is lost when it ends. */
+    saving: boolean;
     onSave: (result: string) => void;
     onLeave: (result: string) => void;
   }
-  let { path, file, refused, onSave, onLeave }: Props = $props();
+  let { path, file, refused, saving, onSave, onLeave }: Props = $props();
 
   let host: HTMLDivElement;
   let view: EditorView | null = null;
@@ -38,9 +40,20 @@
     });
   }
 
+  const locked = new Compartment();
+
   function result(): string {
     return view?.state.doc.toString() ?? '';
   }
+
+  /** The result as the editor holds it now. */
+  export function current(): string {
+    return result();
+  }
+
+  $effect(() => {
+    view?.dispatch({ effects: locked.reconfigure(EditorState.readOnly.of(saving)) });
+  });
 
   $effect(() => {
     const editor = new EditorView({
@@ -50,9 +63,10 @@
         extensions: [
           lineNumbers(),
           history(),
+          locked.of(EditorState.readOnly.of(false)),
           blockField(file),
           keymap.of([
-            { key: 'Mod-s', preventDefault: true, run: () => { onSave(result()); return true; } },
+            { key: 'Mod-s', preventDefault: true, run: () => { if (!saving) onSave(result()); return true; } },
             { key: 'Escape', run: () => { onLeave(result()); return true; } },
             ...defaultKeymap,
             ...historyKeymap,
@@ -73,7 +87,7 @@
   <div class="merge-header">
     <span class="merge-path" title={path}>{path}</span>
     {#if refused}<span class="refused">{refused}</span>{/if}
-    <button class="btn primary" title="Save as the file's resolution (Ctrl+S)"
+    <button class="btn primary" title="Save as the file's resolution (Ctrl+S)" disabled={saving}
             onclick={() => onSave(result())}>Save</button>
     <button class="btn" title="Close (Esc)" onclick={() => onLeave(result())}>Close</button>
   </div>

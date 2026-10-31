@@ -240,3 +240,47 @@ fn a_result_with_a_marker_a_file_changed_since_or_a_conflict_moved_on_is_refused
     git(&repo.0, &["add", "f"]);
     refused(&repo.0, &stale, "no longer conflicts");
 }
+
+#[test]
+fn a_result_saved_under_autocrlf_is_staged_as_git_add_stages_it() {
+    let repo = diverged(
+        "autocrlf",
+        b"a\nbase\n",
+        Some(b"a\nours\n"),
+        Some(b"a\ntheirs\n"),
+    );
+    git(&repo.0, &["config", "core.autocrlf", "true"]);
+    assert!(!git_may_fail(&repo.0, &["merge", "side"]));
+    let origin = Origin::of(&repo.0);
+    let other = twin(&repo, "autocrlf-twin");
+    GitWriter
+        .write(&repo.0, &save(&repo.0, "a\nboth\n"))
+        .unwrap();
+    std::fs::write(other.0.join("f"), std::fs::read(repo.0.join("f")).unwrap()).unwrap();
+    git(&other.0, &["add", "f"]);
+    assert_twins_alike(&repo.0, &other.0, &origin, "autocrlf");
+}
+
+#[test]
+fn a_result_saved_keeps_the_mode_the_file_has() {
+    use std::os::unix::fs::PermissionsExt;
+    let repo = diverged("mode", b"base\n", Some(b"ours\n"), Some(b"theirs\n"));
+    // Theirs makes the file executable as well, which git leaves in the working directory.
+    git(&repo.0, &["switch", "--quiet", "side"]);
+    std::fs::set_permissions(repo.0.join("f"), std::fs::Permissions::from_mode(0o755)).unwrap();
+    git(&repo.0, &["add", "f"]);
+    git(&repo.0, &["commit", "--quiet", "-m", "executable"]);
+    git(&repo.0, &["switch", "--quiet", "main"]);
+    assert!(!git_may_fail(&repo.0, &["merge", "side"]));
+    let origin = Origin::of(&repo.0);
+    let other = twin(&repo, "mode-twin");
+    GitWriter.write(&repo.0, &save(&repo.0, "both\n")).unwrap();
+    write_file(&other.0, "f", "both\n");
+    git(&other.0, &["add", "f"]);
+    assert_twins_alike(&repo.0, &other.0, &origin, "mode");
+    let mode = std::fs::metadata(repo.0.join("f"))
+        .unwrap()
+        .permissions()
+        .mode();
+    assert_ne!(mode & 0o111, 0, "the file stays executable");
+}
