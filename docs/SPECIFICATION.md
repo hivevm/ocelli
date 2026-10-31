@@ -16,19 +16,20 @@ application far more memory and CPU than the task needs. The free tools in wide 
 than a few parallel branches. And no tool in wide use offers the same view in the three places
 developers work: on the desktop, in a browser against a remote machine, and in a terminal.
 
-It is worth solving now because there is a concrete idea for a layout that draws the whole commit
-graph, every branch included, as readably as GitKraken does: each branch in a lane of its own, the
-main branch as a straight line on the left, and few crossing edges.
+It is worth solving because a layout exists that draws the whole commit graph, every branch
+included, as readably as GitKraken does: each branch in a lane of its own, the main line as a
+straight line on the left, and few edge crossings. GitGraph, the viewer this repository built
+before Ocelli, proved it.
 
 ## Mission
 
-Give every developer a free, lightweight way to view and edit a Git repository through a
+Give every developer a free, lightweight way to view a Git repository and work on it through a
 readable commit graph, on the desktop, in the browser, and in the terminal.
 
 ## Vision
 
 A developer opens any repository, from a small project to one with a million commits, and reads
-its whole history at a glance: every branch in its own lane, the main branch on the left, and the
+its whole history at a glance: every branch in its own lane, the main line on the left, and the
 places where work diverged and merged plain to see. From that commit graph they do their daily
 Git work, and rework history where they need to, without switching to the shell.
 
@@ -38,12 +39,11 @@ it starts and runs on a fraction of the resources an Electron application takes.
 
 ## Strategy
 
-Lead with the commit graph. Ocelli starts from GitGraph, the read-only viewer this repository
-built before: its layout, its look, and its behaviour carry over unchanged onto Ocelli's
-architecture first, because the layout is what no free tool offers and GitGraph has proven it.
-Editing and the remote server follow once the viewer stands on the new architecture.
-Every front end offers the same commit graph and the same operations, so that a developer who
-learns Ocelli in one place knows it in the others.
+Lead with the commit graph. Its layout, carried over from GitGraph, the read-only viewer this
+repository built before, is what no free tool offers, so the rest of Ocelli is built around it,
+and the layout changes only by a decision weighed against Q-1. Every front end offers the same
+commit graph and the same operations, so that a developer who learns Ocelli in one place knows
+it in the others: a feature is done when all three front ends offer it (G-18).
 
 ## Goals / Success Criteria
 
@@ -53,46 +53,49 @@ that test exists the criterion is pending work, and the traceability check lists
 ([ADR-0002](adr/0002-decisions-verified-by-tests.md)). Identifiers are never reused.
 Only a normalization renumbers them ([`AGENTS.md` §3](../AGENTS.md#3-adr-rules), rule 5).
 
-1. **G-1** — When a repository is opened, the system shall show its commit graph with every
-   branch and tag.
+1. **G-1** — When a repository is opened, the system shall show its commit graph with every branch
+   and tag.
 2. **G-2** — When the commit graph is drawn, the system shall keep each branch in one lane over the
    whole length it is shown.
 3. **G-3** — When the commit graph is drawn, the system shall draw the main line as one straight
    line down the leftmost lane, and nothing else in that lane.
-4. **G-4** — The system shall let the developer stage changes, commit, create, switch, and delete
-   branches, and fetch, pull, and push.
-5. **G-5** — The system shall let the developer merge, rebase, cherry-pick, revert, and reset from
-   the commit graph.
-6. **G-6** — When a merge, rebase, cherry-pick, or revert stops on a conflict, the system shall let
-   the developer resolve it, and continue or abort the operation.
-7. **G-7** — The system shall let the developer create, apply, and drop stashes, and create and
-   delete tags.
-8. **G-8** — The system shall offer G-1 to G-7 and G-9 to G-17 in each front end: the desktop
-   application, the web interface, and the terminal application.
-9. **G-9** — When the commit graph is drawn, the system shall draw an edge between lanes as an
+4. **G-4** — When the commit graph is drawn, the system shall draw an edge between lanes as an
    orthogonal L-shape whose bend follows its type, a branch edge bending at its parent's row and a
-   merge edge at its child's row, a merge out of the main line running up a track of its own with
-   a bend at each end, and shall route no edge through a commit it does not join, an edge down to
-   a late child excepted.
-10. **G-10** — When the commit graph is drawn, the system shall place every commit above its
-    parents, except a late child, a commit whose committer date runs backwards against a parent
-    laid out before it, which stands below that parent, and order commits by committer date where
-    the topology leaves the order open, newest at the top.
-11. **G-11** — When the commit graph is drawn, the system shall show each local branch, remote
-    branch, and tag as a ref chip on the commit it points at.
-12. **G-12** — When the developer selects a commit, the system shall show its SHA, message,
-    author, date, parents, children, and changed files, and the diff of a changed file on request.
-13. **G-13** — While a repository loads, or a fetch, pull, or push runs, the system shall keep
+   merge edge at its child's row, a merge out of the main line running up a track of its own with a
+   bend at each end, and shall route no edge through a commit it does not join, an edge down to a
+   late child excepted.
+5. **G-5** — When the commit graph is drawn, the system shall place every commit above its parents,
+   except a late child, a commit whose committer date runs backwards against a parent laid out
+   before it, which stands below that parent, and order commits by committer date where the topology
+   leaves the order open, newest at the top.
+6. **G-6** — When the commit graph is drawn, the system shall show each local branch, remote branch,
+   and tag as a ref chip on the commit it points at.
+7. **G-7** — When the commit graph is drawn, the system shall draw only the rows in view and the
+   edges that cross them.
+8. **G-8** — When the same repository state is opened twice, the system shall assign the same rows,
+   lanes, and edges both times, the working-directory node's row excepted.
+9. **G-9** — When the developer selects a commit, the system shall show its SHA, message, author,
+   date, parents, children, and changed files, and the diff of a changed file on request.
+10. **G-10** — When the developer selects a commit, the system shall set apart its lineage, the
+    commits it descends from and those that descend from it, from every other commit.
+11. **G-11** — When the developer searches, the system shall find every commit whose message,
+    author, committer, SHA, or refs contain the search text, ignoring case, in row order.
+12. **G-12** — The system shall let the developer stage changes, commit, create, switch, and delete
+    branches, and fetch, pull, and push.
+13. **G-13** — The system shall let the developer merge, rebase, cherry-pick, revert, and reset from
+    the commit graph.
+14. **G-14** — When a merge, rebase, cherry-pick, or revert stops on a conflict, the system shall
+    let the developer resolve it, and continue or abort the operation.
+15. **G-15** — When the developer opens a conflicted file, the system shall show both sides and
+    the result in a merge editor, let the developer edit the result, and take it as the file's
+    resolution.
+16. **G-16** — The system shall let the developer create, apply, and drop stashes, and create and
+    delete tags.
+17. **G-17** — While a repository loads, or a fetch, pull, or push runs, the system shall keep
     responding to input and report its progress, and let the developer stop a fetch, and a pull
     while it fetches.
-14. **G-14** — When the commit graph is drawn, the system shall draw only the rows in view and the
-    edges that cross them.
-15. **G-15** — When the same repository state is opened twice, the system shall assign the same
-    rows, lanes, and edges both times, the working-directory node's row excepted.
-16. **G-16** — When the developer searches, the system shall find every commit whose message,
-    author, committer, SHA, or refs contain the search text, ignoring case, in row order.
-17. **G-17** — When the developer selects a commit, the system shall set apart its lineage, the
-    commits it descends from and those that descend from it, from every other commit.
+18. **G-18** — The system shall offer G-1 to G-17 in each front end: the desktop application, the
+    web interface, and the terminal application.
 
 ## Quality Goals
 
@@ -102,10 +105,10 @@ against them. Each has a measure concrete enough to settle a disagreement and st
 from the threats below.
 
 - **Q-1** — Readability: the commit graph is what Ocelli exists for. Each branch keeps its lane
-  (G-2), and the layout pays for that with edge crossings, never more than recorded for the corpus;
-  a recorded count changes only with a decision about the layout. Measured on a fixed corpus of
-  public repositories, each at a fixed commit of its main branch over the first chunk of its
-  history: the layout draws no more edge crossings than the count recorded for that commit.
+  (G-2), and the layout pays for that in edge crossings, held at what is recorded: a recorded
+  count changes only with a decision about the layout. Measured on a fixed corpus of public
+  repositories, each at a fixed commit of its main branch over the first chunk of its history:
+  the layout draws no more edge crossings than the count recorded for that commit.
 - **Q-2** — Performance: a repository of one million commits stays usable. Measured on such a
   repository: the first screen of the commit graph appears within 2 s of opening it, and
   scrolling never waits more than 100 ms for the next screen.
@@ -122,22 +125,23 @@ from the threats below.
   refused, the server accepts none from a web page of another origin, and no request reads
   anything outside the server root, nor, where the server was started with `--allow-writes`,
   writes there, a remote on the machine included; started without it, the server changes nothing.
-- **Q-6** — Safety: an operation that discards work cannot happen by accident. Measured for each
-  such operation (a hard reset, dropping a stash, applying a stash and dropping it, deleting a
-  tag, deleting a branch that is not merged, aborting an operation in progress, taking one side
-  of a conflicted file): it runs only after the developer confirms it.
-- **Q-7** — Security: a repository must not obtain the developer's credentials. Measured on a
+- **Q-6** — Security: a repository must not obtain the developer's credentials. Measured on a
   repository whose remote address and configuration are written to obtain them, a line break in
   the address's user name, an address of another host, a remote over plain HTTP, a credential
   helper of its own: no credential of the developer's leaves for another host or unencrypted,
   and the repository's own helper does not run.
+- **Q-7** — Safety: an operation that discards work cannot happen by accident. Measured for each
+  such operation (a hard reset, dropping a stash, applying a stash and dropping it, deleting a
+  tag, deleting a branch that is not merged, aborting an operation in progress, taking one side
+  of a conflicted file): it runs only after the developer confirms it.
 
 ## Non-Goals
 
 What this project explicitly does not try to do.
 
 - Hosting: no pull requests, issues, or code review. Ocelli works on the repository only.
-- An editor or IDE: Ocelli shows diffs and does not edit files, except to resolve a conflict.
+- An editor or IDE: Ocelli shows diffs and edits no file but a conflicted one, in a merge editor
+  of its own.
 - Its own Git: no storage format and no extension of its own. Every repository Ocelli touches
   stays fully usable with the standard `git`.
 - A shared server: the remote server serves one developer, not a team.
@@ -177,9 +181,9 @@ exist for an agent. One a test can decide is restated as a `Q-n`, so that it is 
 - The system shall never act on a request to the remote server that is not authenticated (Q-5).
 - The system shall never let a browser read or write a repository or a file outside the server
   root (Q-5).
-- The system shall never discard work without the developer's confirmation (Q-6).
+- The system shall never discard work without the developer's confirmation (Q-7).
 - The system shall never store, log, or send a credential anywhere but to the remote repository
-  it belongs to (Q-7).
+  it belongs to (Q-6).
 
 ## Assumptions
 

@@ -1,4 +1,4 @@
-//! The registry of the server's tabs (ADR-0037): each tab with a repository open is kept by the
+//! The registry of the server's tabs (ADR-0035): each tab with a repository open is kept by the
 //! repository's common directory, so that a write done, or refused after it moved a ref, tells
 //! every other tab on the repository to load again before its turn is given back.
 
@@ -73,7 +73,7 @@ mod tests {
     use std::collections::HashSet;
 
     #[test]
-    // Verifies: ADR-0037
+    // Verifies: ADR-0035
     fn a_write_tells_the_other_tabs_on_its_repository_and_no_tab_that_closed() {
         let tabs = Tabs::default();
         let told = Arc::new(Mutex::new(Vec::new()));

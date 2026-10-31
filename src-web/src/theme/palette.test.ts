@@ -1,6 +1,6 @@
-// Verifies: ADR-0021
+// Verifies: ADR-0024
 //
-// The theming decision (ADR-0021) rests on two properties that a reader cannot see from one
+// The theming decision (ADR-0024) rests on two properties that a reader cannot see from one
 // palette: both themes carry the same token set, so no component can reach for a token that
 // exists in one theme only, and the lane colours are the same in both, so a commit keeps its
 // colour across a theme switch. Both are cheap to break while editing colours by hand.

@@ -1,5 +1,5 @@
 //! The desktop host's Tauri commands: each hands its arguments to the `Host` both hosts share
-//! and its events to the window, adding nothing to what the command answers (ADR-0037).
+//! and its events to the window, adding nothing to what the command answers (ADR-0035).
 
 use ocelli_commands::session::{Found, Selected, WindowJson};
 use ocelli_commands::{Host, Report};
@@ -34,7 +34,7 @@ pub fn startup_repo(state: State<'_, AppState>) -> Option<String> {
     state.startup_repo.lock().unwrap().take()
 }
 
-/// Loads a repository by path; the history arrives as events (ADR-0016, ADR-0031).
+/// Loads a repository by path; the history arrives as events (ADR-0016, ADR-0019).
 #[tauri::command]
 pub async fn open_repo(
     path: String,

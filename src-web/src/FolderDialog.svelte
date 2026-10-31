@@ -1,5 +1,5 @@
 <script lang="ts">
-  // The remote server's counterpart of the desktop's folder dialog (ADR-0037, ADR-0039): the
+  // The remote server's counterpart of the desktop's folder dialog (ADR-0035, ADR-0037): the
   // folders below the server root, one folder at a time, those holding a `.git` marked; opening
   // one hands its path to the same load the sidebar starts. The server decides what opens.
   import Dialog from './Dialog.svelte';

@@ -52,7 +52,7 @@ to invent.
   interface, and the terminal application.
   _Avoid:_ client, UI, frontend.
 - **History operation** — a merge, rebase, cherry-pick, revert, or reset of the checked-out
-  branch, offered on a commit of the commit graph (G-5); one stopped on a conflict is an operation
+  branch, offered on a commit of the commit graph (G-13); one stopped on a conflict is an operation
   in progress.
   _Avoid:_ action.
 - **Host** — what serves the web interface its commands and events: the desktop host or the
@@ -62,7 +62,7 @@ to invent.
   _Avoid:_ column, rail.
 - **Lane colour** — the colour a lane is drawn in, taken from one theme-independent list so a
   commit keeps its colour across a theme switch; deliberately not a theme token
-  ([ADR-0021](adr/0021-themes-tokens-and-palettes.md)).
+  ([ADR-0024](adr/0024-themes-tokens-and-palettes.md)).
   _Avoid:_ branch colour, since a branch is a ref and a lane outlives it.
 - **Late child** — a commit the walk yields after its parent, because its committer date runs
   backwards against it; it is laid out in its chunk, below its parent.

@@ -14,7 +14,7 @@
 # 10 percent or more the run reports the spread and fails without a verdict. Otherwise the memory
 # added is the larger loaded sum less the smaller empty one, and Q-3 holds below the limit; at or
 # above it the run fails. The absolute memory is reported beside it and decides nothing: whether
-# the desktop host keeps its own footprint is ADR-0018's, which no test decides.
+# the desktop host keeps its own footprint is ADR-0021's, which no test decides.
 #
 # Usage:
 #     scripts/measure-memory.sh

@@ -7,7 +7,7 @@
 # refs_digest in crates/git/src/refs.rs), which the remote server's tests decide too, so the web
 # interface must be built first: each mutant changes one guard, and the suites of the git adapter
 # and the server must fail on it. A mutant the suite lets through is a guard no test decides
-# (ADR-0008). The surviving mutants are
+# (ADR-0007). The surviving mutants are
 # listed, and appended to the job summary when GITHUB_STEP_SUMMARY is set.
 #
 # Usage:

@@ -2,7 +2,7 @@
   import type { Found } from './types.ts';
 
   interface Props {
-    /** Searches the history the host keeps (G-16). */
+    /** Searches the history the host keeps (G-11). */
     search: (query: string) => Promise<Found>;
     /** Changes as the history grows, so the matches cover the rows that arrive. */
     revision: number;

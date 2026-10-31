@@ -32,14 +32,14 @@ over every ref, without a topological sort: the walk starts from the refs' commi
 keeps the commits it has reached ordered by committer date, and yields each once one of its
 children has been yielded. The first chunk is laid out and shown as soon as it is read, the stash
 and working-directory nodes ride with it
-([ADR-0024](0024-synthetic-nodes-in-the-first-chunk.md)), and every further chunk is read on a
-background thread and appended until the walk ends, with the progress reported (G-13) and a load
+([ADR-0018](0018-synthetic-nodes-in-the-first-chunk.md)), and every further chunk is read on a
+background thread and appended until the walk ends, with the progress reported (G-17) and a load
 of another repository cancelling the walk of the previous one (a new load session). A commit
 yielded after its parent, a **late child**, is laid out as
-[ADR-0015](0015-layout-after-pvigier-by-chunk.md) decides.
+[ADR-0013](0013-layout-after-pvigier-by-chunk.md) decides.
 
-**Out of scope:** how a chunk is laid out, which [ADR-0015](0015-layout-after-pvigier-by-chunk.md)
-decides; how a front end reads the rows, which [ADR-0031](0031-front-ends-read-row-windows.md)
+**Out of scope:** how a chunk is laid out, which [ADR-0013](0013-layout-after-pvigier-by-chunk.md)
+decides; how a front end reads the rows, which [ADR-0019](0019-front-ends-read-row-windows.md)
 decides; loading only what is scrolled to (the maintainer chose to load the whole history); a
 chunk size the developer sets.
 
@@ -74,8 +74,8 @@ chunk size the developer sets.
   <https://www.gitkraken.com/>
 - GitGraph's `docs/adr/0011-commit-limit-3000.md` on `main`, the bound of 3 000 commits that
   sets the size of a chunk.
-- The Q-2 measurement of feature spec #27 (`scripts/measure-windows.sh`), which gave the times
-  above.
+- The Q-2 measurement, [`scripts/measure-windows.sh`](../../scripts/measure-windows.sh), which gave
+  the times above.
 
 ## Consequences
 
@@ -84,12 +84,13 @@ chunk size the developer sets.
   chunk share a date, the first chunk holds the same commits a topological walk would, so the
   reference tests hold.
 - Negative / trade-offs: where a clock ran wrong, a late child arrives after its parent and cannot
-  be placed above it (ADR-0015); a load runs on until the whole history is read, and memory grows
-  with it; the stash and working-directory nodes are placed against the first chunk only;
-  cancelling a walk is state in every front end; the first chunk of a corpus repository whose
-  dates run backwards may hold other commits than a topological walk would, which the Q-1 records
-  reflect.
-- Follow-ups: the Q-1 records measured on the corpus over the first chunk.
+  be placed above it ([ADR-0013](0013-layout-after-pvigier-by-chunk.md)); a load runs on until the
+  whole history is read, and memory grows with it; the stash and working-directory nodes are placed
+  against the first chunk only; cancelling a walk is state in every front end; the first chunk of a
+  corpus repository whose dates run backwards may hold other commits than a topological walk would,
+  which the Q-1 records reflect.
+- Follow-ups: none; the Q-1 records are measured on the corpus over the first chunk
+  ([`scripts/measure-crossings.sh`](../../scripts/measure-crossings.sh)).
 
 ## Enforcement
 

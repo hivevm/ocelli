@@ -1,4 +1,4 @@
-//! The writes of the repository port, with git2 (ADR-0033). libgit2 runs no hook and no program
+//! The writes of the repository port, with git2 (ADR-0031). libgit2 runs no hook and no program
 //! a repository's configuration names, so writing, like reading, runs no code the repository
 //! brings (Q-4). Every write checks the state it expects before it changes anything.
 

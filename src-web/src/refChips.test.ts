@@ -1,4 +1,4 @@
-// Verifies: ADR-0033, ADR-0034, G-4, G-7
+// Verifies: ADR-0031, ADR-0033, G-12, G-16
 import { describe, expect, test } from 'bun:test';
 import { commitChips } from './refChips.ts';
 import type { LocalBranch, RepoRefs } from './types.ts';

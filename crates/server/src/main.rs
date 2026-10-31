@@ -1,7 +1,7 @@
 //! `ocelli-server --root <folder>`: serves the web interface for the repositories below the
 //! folder, on this machine's loopback addresses or over TLS on the address `--listen` names, and
 //! prints once the URL that logs a browser in, with the certificate's fingerprint under TLS
-//! (ADR-0037, ADR-0038, ADR-0039).
+//! (ADR-0035, ADR-0036, ADR-0037).
 
 use ocelli_server::{Options, start};
 

@@ -1,4 +1,4 @@
-# Release pipeline (ADR-0025): pushing a v* tag builds every installer and
+# Release pipeline (ADR-0038): pushing a v* tag builds every installer and
 # attaches them to a DRAFT GitHub release — publishing stays a human act.
 name: Release
 

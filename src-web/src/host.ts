@@ -1,4 +1,4 @@
-// The host the web interface runs against, picked once at start-up (ADR-0037): the desktop host
+// The host the web interface runs against, picked once at start-up (ADR-0035): the desktop host
 // inside Tauri's WebView, the remote server's WebSocket in a browser.
 
 import { invoke as tauriInvoke, isTauri } from '@tauri-apps/api/core';
@@ -11,7 +11,7 @@ const tauri: Transport = {
 };
 
 /** Whether the host is the remote server, which chooses a folder from its own listing in place of
-    the desktop's folder dialog (ADR-0039). */
+    the desktop's folder dialog (ADR-0037). */
 export const remote = !isTauri();
 
 const transport: Transport = remote

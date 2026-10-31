@@ -1,4 +1,4 @@
-// Which of the host's answers the web interface keeps (ADR-0031).
+// Which of the host's answers the web interface keeps (ADR-0019).
 //
 // The host answers commands asynchronously while the history grows and while another repository
 // may be opened, so an answer can arrive after a newer request of the same kind, or after the

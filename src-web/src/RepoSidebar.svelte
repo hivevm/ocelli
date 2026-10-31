@@ -1,12 +1,12 @@
 <script lang="ts">
-  // The repository sidebar (ADR-0026, ADR-0027): local branches, remote branches
+  // The repository sidebar (ADR-0027, ADR-0028): local branches, remote branches
   // grouped by remote, working trees, tags, and submodules. It navigates and
-  // nothing else: the writes on a ref are the ref chips' (ADR-0033).
+  // nothing else: the writes on a ref are the ref chips' (ADR-0031).
   //
   // Rows come in two kinds. Branches and tags *reveal* a commit in the graph.
   // Working trees, submodules and the parent row *open* a repository, because
   // what they point at is a different checkout or a different object database
-  // (ADR-0027) — switching is a full reload, so those rows say where they lead.
+  // (ADR-0028) — switching is a full reload, so those rows say where they lead.
   import { anyLeaf, countLeaves, filterByName, groupByFolder } from './refTree.ts';
   import type { RefFolder } from './refTree.ts';
   import { parentBlocked, submoduleBlocked, worktreeBlocked } from './repoSwitch.ts';
@@ -100,7 +100,7 @@
 
   // A working tree row switches to that checkout: the history is the same
   // object database, but HEAD, the checked-out branch and the working-directory
-  // node (ADR-0024) are that tree's own. The one being viewed is marked and
+  // node (ADR-0018) are that tree's own. The one being viewed is marked and
   // inert, like a branch that is already HEAD.
   const worktrees = $derived(
     (repoRefs?.worktrees ?? []).map(w =>
@@ -117,7 +117,7 @@
   );
 
   // A submodule's commit belongs to *its* object database, so the row opens the
-  // repository instead of jumping (ADR-0027). Grouping runs on the path, so
+  // repository instead of jumping (ADR-0028). Grouping runs on the path, so
   // `vendor/a` and `vendor/b` fold into a folder like any other ref name.
   const submodules = $derived(
     (repoRefs?.submodules ?? []).map(sub =>
@@ -134,7 +134,7 @@
   );
 
   const parent = $derived(repoRefs?.parent ?? null);
-  // A parent outside the remote server's root shows without its switch, saying why (ADR-0039).
+  // A parent outside the remote server's root shows without its switch, saying why (ADR-0037).
   const parentReason = $derived(parent ? parentBlocked(parent) : undefined);
 
   const tags = $derived(

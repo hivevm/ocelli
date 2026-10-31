@@ -1,4 +1,4 @@
-//! Verifies: ADR-0039, ADR-0037
+//! Verifies: ADR-0037, ADR-0035
 //!
 //! Confined to a folder, as the remote server confines it, the adapter fetches from and pushes to
 //! a repository on this machine only where it lies below the folder: libgit2's local transport

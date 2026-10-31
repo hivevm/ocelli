@@ -1,8 +1,8 @@
 //! Background git access. git2 never runs on the thread that draws: the
 //! repository load and every per-commit read happen on worker threads, and
-//! their results come back to the event loop as [`Msg`] values (ADR-0028, the
-//! terminal counterpart of ADR-0019). A write runs on a thread of its own too
-//! (ADR-0033).
+//! their results come back to the event loop as [`Msg`] values (ADR-0029, the
+//! terminal counterpart of ADR-0017). A write runs on a thread of its own too
+//! (ADR-0031).
 
 use ocelli_core::load::{self, Event};
 use ocelli_core::model::{DiffLine, FileChange};
@@ -49,8 +49,8 @@ pub fn spawn_load(path: PathBuf, tx: Sender<Msg>) {
 
 /// Performs a write on a thread of its own: unlike reads, a write is never
 /// collapsed into a newer one. The core refuses one that discards work
-/// without the developer's confirmation (ADR-0034). A write that reports its
-/// progress sends it along, and stops once `cancel` is set (ADR-0035).
+/// without the developer's confirmation (ADR-0033). A write that reports its
+/// progress sends it along, and stops once `cancel` is set (ADR-0034).
 pub fn spawn_write(
     path: PathBuf,
     write: Write,
@@ -126,7 +126,7 @@ mod tests {
     use super::*;
 
     #[test]
-    // Verifies: G-13
+    // Verifies: G-17
     fn queued_requests_collapse_to_the_newest_of_each_kind() {
         let (tx, rx) = channel();
         for sha in ["a", "b", "c"] {

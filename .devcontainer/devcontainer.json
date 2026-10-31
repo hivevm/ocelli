@@ -1,7 +1,7 @@
 {
   "name": "Ocelli DevContainer",
 
-  // The base image plus the desktop host's Linux build libraries (ADR-0011).
+  // The base image plus the desktop host's Linux build libraries (ADR-0009).
   "build": {
     "dockerfile": "Dockerfile"
   },
@@ -50,16 +50,16 @@
   },
 
   // DevContainer Features layered on top of the base image. The container intentionally has NO
-  // access to the host Docker daemon (no socket mount) — see ADR-0004. Manage the host's containers
+  // access to the host Docker daemon (no socket mount) — see ADR-0009. Manage the host's containers
   // from a host-side VS Code extension instead (README → "Host container management").
   "features": {
     // GitHub CLI (`gh`) — used by the coding agent for GitHub operations and as the git
     // credential helper. A push and every gh action wait for a human instruction
     // (AGENTS.md, section 6).
     "ghcr.io/devcontainers/features/github-cli:1": {},
-    // Rust through rustup; rust-toolchain.toml pins the version and the components (ADR-0008).
+    // Rust through rustup; rust-toolchain.toml pins the version and the components (ADR-0007).
     "ghcr.io/devcontainers/features/rust:1": {},
-    // Bun, the web interface's package manager and task runner (ADR-0008).
+    // Bun, the web interface's package manager and task runner (ADR-0007).
     "ghcr.io/devcontainers-extra/features/bun:1": {
       "version": "1.4.1"
     }

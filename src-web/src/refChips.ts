@@ -1,5 +1,5 @@
 // What the ref chips of the selected commit offer: switching to a branch and deleting a branch or
-// a tag (ADR-0033, ADR-0034). A chip carries only its text, `main`, `origin/main`, or `🏷 v1`, and
+// a tag (ADR-0031, ADR-0033). A chip carries only its text, `main`, `origin/main`, or `🏷 v1`, and
 // a remote's name may hold a slash, so the text alone does not say which ref it names: remotes
 // `a` and `a/b` with branches `b/c` and `c` both show `a/b/c`. Each chip is matched to a ref on
 // the commit that no chip before it took, and draws what that ref offers.

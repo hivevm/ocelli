@@ -1,12 +1,12 @@
-//! Turns the laid-out commit graph into terminal cells (ADR-0028).
+//! Turns the laid-out commit graph into terminal cells (ADR-0029).
 //!
 //! The rows, columns and edges come unchanged from the window of rows the core
-//! answers (ADR-0031); this module only decides which box-drawing character
+//! answers (ADR-0019); this module only decides which box-drawing character
 //! each cell shows. A graph
 //! column occupies two cells — the glyph cell at `x = 2 * col` and a connector
 //! cell to its right — and every row is one line.
 //!
-//! Edge shapes follow the table of ADR-0030, keyed on
+//! Edge shapes follow the table of ADR-0015, keyed on
 //! the edge type: a BRANCH edge runs horizontally along the parent's
 //! row and bends up into the child's column; a MERGE edge runs up the parent's
 //! column and bends at the child's row — whichever side the child is on. The
@@ -123,7 +123,7 @@ impl Canvas {
         } else {
             e.source_col
         } as usize;
-        // The runs the core routes the edge along (ADR-0030); a lane is two cells wide.
+        // The runs the core routes the edge along (ADR-0015); a lane is two cells wide.
         for run in e.route() {
             match run {
                 Run::Along { row, from, to } => {
@@ -299,7 +299,7 @@ mod tests {
     }
 
     #[test]
-    // Verifies: ADR-0030
+    // Verifies: ADR-0015
     fn fork_bends_at_the_target_column_and_merge_at_the_source_column() {
         let g = fork_and_merge();
         // Rows: d (merge), c (side branch), b, a. The merge edge d←c runs up
@@ -312,7 +312,7 @@ mod tests {
     }
 
     #[test]
-    // Verifies: ADR-0028
+    // Verifies: ADR-0029
     fn ascii_glyphs_replace_every_box_drawing_character() {
         let g = fork_and_merge();
         assert_eq!(
@@ -322,7 +322,7 @@ mod tests {
     }
 
     #[test]
-    // Verifies: ADR-0017
+    // Verifies: ADR-0020
     fn edges_passing_through_the_window_are_drawn_from_off_screen_ends() {
         let g = fork_and_merge();
         // Only the middle two rows: both lanes still show, although every edge
@@ -417,7 +417,7 @@ mod tests {
     }
 
     #[test]
-    // Verifies: ADR-0017, G-14
+    // Verifies: ADR-0020, G-7
     fn long_edges_are_drawn_in_a_window_far_from_both_ends() {
         // A side branch whose fork lies 75 rows below its tip, beyond the
         // span the core buckets edges by.
@@ -435,7 +435,7 @@ mod tests {
     }
 
     #[test]
-    // Verifies: ADR-0024
+    // Verifies: ADR-0018
     fn synthetic_nodes_get_their_own_glyphs() {
         let mut stash = commit("s", 3, &["a"]);
         stash.kind = CommitKind::Stash;
@@ -447,7 +447,7 @@ mod tests {
     }
 
     #[test]
-    // Verifies: ADR-0030
+    // Verifies: ADR-0015
     fn a_merge_to_the_right_bends_at_the_top_and_clears_the_child_lane() {
         // `m` (column 1) merges `c` (column 0) into the feature line `f`
         // (column 1). The merge edge runs up c's column and bends at m's row,
@@ -460,7 +460,7 @@ mod tests {
     }
 
     #[test]
-    // Verifies: ADR-0015
+    // Verifies: ADR-0013
     fn an_edge_down_to_a_late_child_is_drawn_between_its_ends() {
         // The parent in row 0 and its late child in row 2, below it, on lane 0; a commit of lane 1
         // between them.
@@ -469,7 +469,7 @@ mod tests {
     }
 
     #[test]
-    // Verifies: ADR-0030, G-9
+    // Verifies: ADR-0015, G-4
     fn a_merge_out_of_the_main_line_runs_up_its_track() {
         // `m` (lane 0, row 2) is merged into `f` (lane 1, row 0) past the main line's `n` (lane 0,
         // row 1); the edge leaves lane 0 at m's row, runs up track 2, and turns to f.
@@ -488,7 +488,7 @@ mod tests {
     }
 
     #[test]
-    // Verifies: ADR-0030
+    // Verifies: ADR-0015
     fn a_fork_to_the_left_bends_at_the_bottom() {
         // `p` (column 1) is the first parent of `d` (column 0).
         let g = graph(&[(0, 0), (1, 1)], &[(1, 1, 0, 0, true)]);
@@ -512,7 +512,7 @@ mod tests {
     }
 
     #[test]
-    // Verifies: ADR-0017, G-14
+    // Verifies: ADR-0020, G-7
     fn a_window_past_the_end_is_empty() {
         let g = fork_and_merge();
         assert!(render(&g, 4, 5, Glyphs::Unicode).is_empty());

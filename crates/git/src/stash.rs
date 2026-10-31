@@ -1,7 +1,7 @@
 //! The stash writes of the repository port, with git2: making a stash, and applying, popping,
 //! and dropping one still where it was shown, refused where it would drop an operation in
 //! progress, write past what it stashes, overwrite a staged change, or meet a file in its way
-//! (ADR-0033).
+//! (ADR-0031).
 
 use crate::checkout::named;
 use crate::guard::{NO_IDENTITY, bytes_to_path, nothing_in_progress};
@@ -21,7 +21,7 @@ pub(crate) fn create(repo: &mut Repository, message: Option<&str>, untracked: bo
     }
     let message = message.map(str::trim).filter(|m| !m.is_empty());
     // A stash during an operation in progress would drop the operation with it, as `git stash`
-    // does, a bisect aside (ADR-0033).
+    // does, a bisect aside (ADR-0031).
     nothing_in_progress(repo, true)?;
     stash_keeps_everything(repo, untracked)?;
     match crate::workdir::stash_save(repo, &stasher, message, flags)? {
@@ -36,7 +36,7 @@ pub(crate) fn create(repo: &mut Repository, message: Option<&str>, untracked: bo
     Ok(())
 }
 
-/// Refuses a stash libgit2 would make by writing past what it stashes (ADR-0033): through a link
+/// Refuses a stash libgit2 would make by writing past what it stashes (ADR-0031): through a link
 /// that stands where the index has a file or a directory, which writes the file's committed
 /// content wherever the link points, out of the repository too; over an entry the index marks
 /// skip-worktree, assume-unchanged, or intent-to-add, whose content it overwrites or misreads;
@@ -267,7 +267,7 @@ fn check_applies(repo: &Repository, index: usize, commit: &str) -> Result<()> {
 
 /// Applies the stash at `index`, still the entry the developer saw by `commit`, and drops it
 /// after where `drop` asks, as `git stash apply` and `git stash pop` do, or refuses with nothing
-/// changed (ADR-0033).
+/// changed (ADR-0031).
 pub(crate) fn apply(repo: &mut Repository, index: usize, commit: &str, drop: bool) -> Result<()> {
     stash_as_shown(repo, index, commit)?;
     check_applies(repo, index, commit)?;

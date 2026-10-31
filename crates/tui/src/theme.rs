@@ -1,5 +1,5 @@
 //! Dark and light palettes, taken from the desktop's tokens
-//! (`src-web/src/theme/palette.ts`, ADR-0021) so both frontends share colours.
+//! (`src-web/src/theme/palette.ts`, ADR-0024) so both frontends share colours.
 //! The frame background is painted too, so a theme looks the same whatever
 //! the terminal's own background is.
 
@@ -184,7 +184,7 @@ pub fn lane(col: usize) -> Color {
 
 #[cfg(test)]
 mod tests {
-    // Verifies: ADR-0021
+    // Verifies: ADR-0024
     use super::*;
 
     fn channels(c: Color) -> (u8, u8, u8) {

@@ -1,5 +1,5 @@
 //! The history of the repository a host of the web interface holds open, kept in the host
-//! (ADR-0031).
+//! (ADR-0019).
 //! A load lays its chunks out on a thread of its own and appends them here; the web interface
 //! reads the window of rows it draws, searches, and selects through commands, so it never holds
 //! more than the rows on screen. Every load is a generation: a chunk of an older generation is
@@ -14,7 +14,7 @@ use serde::Serialize;
 use std::sync::{Arc, RwLock};
 
 /// The rows of one window, as the web interface draws them. With a commit selected, `lit_nodes`
-/// and `lit_edges` say which of the window's nodes and edges belong to its lineage (G-17); the
+/// and `lit_edges` say which of the window's nodes and edges belong to its lineage (G-10); the
 /// rest is dimmed.
 #[derive(Debug, Serialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
@@ -27,7 +27,7 @@ pub struct WindowJson {
     pub nodes: Vec<NodeJson>,
     pub edges: Vec<Edge>,
     /// Each edge's corners from its parent to its child, as rows and lanes, which the web
-    /// interface draws through (ADR-0030).
+    /// interface draws through (ADR-0015).
     pub paths: Vec<Vec<(i32, i32)>>,
     pub lit_nodes: Option<Vec<bool>>,
     pub lit_edges: Option<Vec<bool>>,
@@ -43,7 +43,7 @@ pub struct Growth {
     pub loading: bool,
     pub status: String,
     /// The row the web interface selects now: the commit a write left selected, once this
-    /// growth laid it out (ADR-0033).
+    /// growth laid it out (ADR-0031).
     pub select: Option<usize>,
 }
 
@@ -57,7 +57,7 @@ pub struct Relative {
 }
 
 /// The selected commit with its parents and children, and the history operations it offers on
-/// the checked-out branch as the core decides them from the load's refs (ADR-0036): none for a
+/// the checked-out branch as the core decides them from the load's refs (ADR-0022): none for a
 /// stash or the working directory, and none until the load has read its refs.
 #[derive(Debug, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
@@ -69,7 +69,7 @@ pub struct Selected {
 }
 
 /// The rows matching a search, newest first, and the nodes of the first `limit` of them, which
-/// the results panel lists (G-16).
+/// the results panel lists (G-11).
 #[derive(Debug, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct Found {
@@ -86,7 +86,7 @@ struct Current {
     generation: u64,
     session: LoadSession,
     /// The commit to select again in the load of a generation, which its session takes with its
-    /// first chunk (ADR-0033).
+    /// first chunk (ADR-0031).
     select_again: Option<(u64, String)>,
     /// The selected row and its lineage, grown as chunks arrive.
     selected: Option<(usize, Lineage)>,
@@ -120,7 +120,7 @@ pub struct Session {
 impl Session {
     /// Begins a load and returns its generation. The history of the load before stays readable
     /// until the new load's first chunk replaces it. `select_again` names the commit a write left
-    /// selected, to select again once the load lays it out (ADR-0033).
+    /// selected, to select again once the load lays it out (ADR-0031).
     pub fn begin(&self, select_again: Option<String>) -> u64 {
         let mut c = self.current.write().unwrap();
         c.begun += 1;
@@ -188,7 +188,7 @@ impl Session {
         Some(c.growth())
     }
 
-    /// Rows `top..top + rows` with the edges crossing them (ADR-0031).
+    /// Rows `top..top + rows` with the edges crossing them (ADR-0019).
     pub fn window(&self, top: usize, rows: usize) -> WindowJson {
         let c = self.current.read().unwrap();
         let w = c.session.history().window(top, rows);
@@ -350,7 +350,7 @@ pub(crate) mod tests {
     }
 
     #[test]
-    // Verifies: ADR-0031, G-14
+    // Verifies: ADR-0019, G-7
     fn a_window_reads_the_rows_of_every_chunk_appended() {
         let session = Session::default();
         let mut layout = Layout::new();
@@ -383,7 +383,7 @@ pub(crate) mod tests {
     }
 
     #[test]
-    // Verifies: ADR-0031, ADR-0016
+    // Verifies: ADR-0019, ADR-0016
     fn a_newer_load_refuses_the_older_ones_chunks_and_replaces_its_history_on_its_first() {
         let session = Session::default();
         let old = session.begin(None);
@@ -423,7 +423,7 @@ pub(crate) mod tests {
     }
 
     #[test]
-    // Verifies: ADR-0031, G-17
+    // Verifies: ADR-0019, G-10
     fn the_lineage_lights_the_window_and_grows_with_the_chunks() {
         let session = Session::default();
         let mut layout = Layout::new();
@@ -450,7 +450,7 @@ pub(crate) mod tests {
     }
 
     #[test]
-    // Verifies: ADR-0031, G-17
+    // Verifies: ADR-0019, G-10
     fn the_relatives_of_the_selection_gain_their_rows_as_they_arrive() {
         let session = Session::default();
         let mut layout = Layout::new();
@@ -472,7 +472,7 @@ pub(crate) mod tests {
     }
 
     #[test]
-    // Verifies: ADR-0031, G-16
+    // Verifies: ADR-0019, G-11
     fn a_search_finds_every_row_and_lists_the_first_ones() {
         let session = Session::default();
         let mut layout = Layout::new();
@@ -487,7 +487,7 @@ pub(crate) mod tests {
     }
 
     #[test]
-    // Verifies: ADR-0031, G-16
+    // Verifies: ADR-0019, G-11
     fn a_search_asked_again_as_the_history_grows_finds_what_a_fresh_one_does() {
         let session = Session::default();
         let mut layout = Layout::new();
@@ -505,7 +505,7 @@ pub(crate) mod tests {
     }
 
     #[test]
-    // Verifies: ADR-0036, ADR-0033
+    // Verifies: ADR-0022, ADR-0031
     fn a_selected_commit_offers_the_operations_of_its_loads_refs_a_stash_none() {
         use ocelli_core::model::LocalBranch;
         let refs = Arc::new(RepoRefs {
@@ -559,7 +559,7 @@ pub(crate) mod tests {
     }
 
     #[test]
-    // Verifies: ADR-0033
+    // Verifies: ADR-0031
     fn the_load_after_a_write_names_the_row_to_select_once_it_is_laid_out() {
         let session = Session::default();
         let mut layout = Layout::new();
@@ -574,7 +574,7 @@ pub(crate) mod tests {
     }
 
     #[test]
-    // Verifies: ADR-0033
+    // Verifies: ADR-0031
     fn the_developers_choice_or_a_newer_load_gives_the_commit_up() {
         let session = Session::default();
         let mut layout = Layout::new();

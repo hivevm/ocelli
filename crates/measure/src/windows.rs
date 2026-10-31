@@ -1,7 +1,7 @@
 //! `ocelli-measure windows PATH`: how long a developer waits on a large history (Q-2).
 //!
 //! The history is loaded as the front ends load it, through the core's `load` into a
-//! `LoadSession` (ADR-0016, ADR-0031). Measured are the time from opening the repository until the
+//! `LoadSession` (ADR-0016, ADR-0019). Measured are the time from opening the repository until the
 //! first window of rows is read, and, once the whole history has loaded, the time to read each
 //! window of rows across it, top to bottom, on another thread than the one that loaded, as in the
 //! front ends. The time to compute the lineage of the newest commit and to search the whole

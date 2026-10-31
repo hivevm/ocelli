@@ -1,4 +1,4 @@
-//! Verifies: ADR-0019, Q-4
+//! Verifies: ADR-0017, Q-4
 //!
 //! Opening a repository must not run code the repository brings. The repository here names a
 //! program in every place Git would run one, from the list both tests of Q-4 share (`programs`).

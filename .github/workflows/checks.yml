@@ -13,8 +13,8 @@ name: Checks
 # binding sensor runs in review-binding.yml, the repository settings sensor on a human's
 # instruction (ADR-0002); this workflow runs the self-test of each.
 #
-# The build, test, and lint job runs scripts/check-devcontainer-toolchain.sh (ADR-0011), the Dev
-# Container's share of the toolchain, then scripts/check-build.sh (ADR-0008), on Linux, macOS, and
+# The build, test, and lint job runs scripts/check-devcontainer-toolchain.sh (ADR-0009), the Dev
+# Container's share of the toolchain, then scripts/check-build.sh (ADR-0007), on Linux, macOS, and
 # Windows, so that code gated to one platform is compiled where it runs; then the self-tests of
 # scripts/measure-crossings.sh and scripts/measure-memory.sh, which the Measure workflow runs; the
 # memory self-test skips itself off Linux, in CI as in check-all.sh on such a host. It is the one
@@ -22,7 +22,7 @@ name: Checks
 # toolchain, and Bun.
 #
 # Every action is pinned to a full commit SHA with its version as a comment, and Dependabot keeps
-# the pins current (ADR-0013).
+# the pins current (ADR-0010).
 #
 # Every job is bounded by a timeout — a hung step would otherwise occupy a runner until the
 # platform's own six-hour limit — and every checkout runs with 'persist-credentials: false': the
@@ -152,7 +152,7 @@ jobs:
         run: bash scripts/sensor-plan-frontier.sh
       - name: Self-test the action references sensor
         run: bash scripts/test-sensor-action-refs.sh
-      # Verifies: ADR-0013 — the sensor fails on any action not pinned to a full commit SHA.
+      # Verifies: ADR-0010 — the sensor fails on any action not pinned to a full commit SHA.
       - name: Require every action to be pinned to a full commit SHA
         run: bash scripts/sensor-action-refs.sh --require sha
       - name: Self-test the review binding sensor
@@ -192,7 +192,7 @@ jobs:
         with:
           persist-credentials: false
       # The desktop host links against WebKitGTK on Linux; the workspace does not compile
-      # without these libraries (ADR-0018).
+      # without these libraries (ADR-0021).
       - name: Install the desktop host's Linux libraries
         if: runner.os == 'Linux'
         run: |
@@ -206,14 +206,14 @@ jobs:
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
       - name: Install the web interface's dependencies from the lockfile
         run: bun install --frozen-lockfile
-      # The Dev Container carries the same toolchain this job sets up (ADR-0011).
+      # The Dev Container carries the same toolchain this job sets up (ADR-0009).
       - name: Self-test the Dev Container toolchain check
         run: bash scripts/test-check-devcontainer-toolchain.sh
       - name: Check the Dev Container's toolchain
         run: bash scripts/check-devcontainer-toolchain.sh
       - name: Build, test, and lint
         run: bash scripts/check-build.sh
-      # Verifies: ADR-0041 — no macOS binary loads a library outside the system, such as the
+      # Verifies: ADR-0039 — no macOS binary loads a library outside the system, such as the
       # build machine's Homebrew OpenSSL, which a Mac without Homebrew does not have.
       - name: Check that the macOS binaries load only the system's libraries
         if: runner.os == 'macOS'

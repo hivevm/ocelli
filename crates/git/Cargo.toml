@@ -1,6 +1,6 @@
 [package]
 name = "ocelli-git"
-description = "The repository port implemented with git2 (ADR-0019)"
+description = "The repository port implemented with git2 (ADR-0017)"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -14,7 +14,7 @@ git2 = { version = "0.20", default-features = false, features = ["https", "ssh"]
 url = "2"
 
 # macOS ships no OpenSSL, and libssh2 needs one: build it in rather than link the build
-# machine's (ADR-0041).
+# machine's (ADR-0039).
 [target.'cfg(target_os = "macos")'.dependencies]
 openssl-sys = { version = "0.9", features = ["vendored"] }
 

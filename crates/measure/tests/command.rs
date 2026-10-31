@@ -69,7 +69,7 @@ fn assert_measured(out: &Output) {
 const LIMIT: usize = ocelli_core::model::CHUNK_COMMITS;
 
 #[test]
-// Verifies: ADR-0024
+// Verifies: ADR-0018
 fn a_stash_and_uncommitted_changes_are_left_out_of_the_comparison() {
     let scratch = Scratch::new("stash");
     let dir = scratch.0.join("repo");
@@ -306,7 +306,7 @@ fn main_line(out: &Output) -> String {
 }
 
 #[test]
-// Verifies: ADR-0032, Q-1
+// Verifies: ADR-0014, Q-1
 fn crossings_are_measured_on_the_layout_with_the_main_line() {
     let scratch = Scratch::new("main-line");
     let repo = scratch.0.join("repo.git");

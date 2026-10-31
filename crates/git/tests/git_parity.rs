@@ -1,5 +1,5 @@
 //! Each local write of the port against the `git` command it stands for, in every repository
-//! state that changes its outcome (ADR-0033). A state is set up once, then copied twice: `git`
+//! state that changes its outcome (ADR-0031). A state is set up once, then copied twice: `git`
 //! runs on one copy and the writer on the other. Where `git` goes through, the writer leaves the
 //! same `HEAD`, refs, upstreams, stashes, index, operation in progress, and working directory,
 //! ignored files included; where `git` refuses with nothing changed, the writer refuses with
@@ -266,7 +266,7 @@ const STATES: &[(&str, MakeState)] = &[
     }),
     // `git_command` turns `git`'s signing off, so `git` writes unsigned where Ocelli refuses.
     // A lightweight tag is written alike: where `git tag <name>` under `tag.gpgSign` would make
-    // a signed annotated tag, Ocelli makes a lightweight one (ADR-0033), which no `git` run here
+    // a signed annotated tag, Ocelli makes a lightweight one (ADR-0031), which no `git` run here
     // can show, its signing being off.
     ("signing asked", |d| {
         git(d, &["config", "commit.gpgSign", "true"]);
@@ -595,7 +595,7 @@ const WRITES: &[(&str, MakeWrite, &[&str])] = &[
     ),
 ];
 
-/// The history operations that write a history from the checked-out branch (ADR-0033).
+/// The history operations that write a history from the checked-out branch (ADR-0031).
 const OPERATIONS: &[&str] = &[
     "merge",
     "fast-forward merge",
@@ -603,7 +603,7 @@ const OPERATIONS: &[&str] = &[
     "cherry-pick",
     "revert",
 ];
-/// The history operations, the resets included (ADR-0033).
+/// The history operations, the resets included (ADR-0031).
 const HISTORY: &[&str] = &[
     "merge",
     "fast-forward merge",
@@ -705,32 +705,32 @@ type Cases = (
 const DEPARTURES: &[Cases] = &[
     // An operation starts from a clean tree, stricter than `git`, which carries along changes it
     // does not touch.
-    (TRACKED_CHANGES, OPERATIONS, "ADR-0033"),
+    (TRACKED_CHANGES, OPERATIONS, "ADR-0031"),
     // An operation, a reset included, starts where nothing is in progress, not even a bisect.
-    (IN_PROGRESS, HISTORY, "ADR-0033"),
+    (IN_PROGRESS, HISTORY, "ADR-0031"),
     // A stopped operation is concluded by continuing it, which commits as the operation would.
-    (STOPPED, &["commit"], "ADR-0033"),
+    (STOPPED, &["commit"], "ADR-0031"),
     // A commit and an annotated tag are refused where signing is asked; the operations commit.
     (
         &["signing asked"],
         &["annotated tag", "merge", "rebase", "cherry-pick", "revert"],
-        "ADR-0033",
+        "ADR-0031",
     ),
     (
         &["signing asked with a change staged"],
         &["commit"],
-        "ADR-0033",
+        "ADR-0031",
     ),
     // A write that would leave the working directory in conflict refuses, where `git stash
     // apply` stops in the conflict.
     (
         &["staged change on a touched path"],
         &["apply stash", "pop stash"],
-        "ADR-0033",
+        "ADR-0031",
     ),
     // A stash is made, applied, and popped only where nothing is in progress, which `git stash`
     // would drop, and applied only over an index that holds no staged change and a working
-    // directory that holds every file it changes (ADR-0033).
+    // directory that holds every file it changes (ADR-0031).
     (
         STOPPED,
         &[
@@ -739,7 +739,7 @@ const DEPARTURES: &[Cases] = &[
             "apply stash",
             "pop stash",
         ],
-        "ADR-0033",
+        "ADR-0031",
     ),
     (
         &[
@@ -752,10 +752,10 @@ const DEPARTURES: &[Cases] = &[
             "touched file deleted",
         ],
         &["apply stash", "pop stash"],
-        "ADR-0033",
+        "ADR-0031",
     ),
     // A write that would replace an ignored file, a directory holding one where a file goes or
-    // one where a directory goes, is refused, where `git` deletes it and goes on (ADR-0033).
+    // one where a directory goes, is refused, where `git` deletes it and goes on (ADR-0031).
     (
         &[
             "directory holding ignored files where a file goes",
@@ -770,18 +770,18 @@ const DEPARTURES: &[Cases] = &[
             "rebase",
             "cherry-pick",
         ],
-        "ADR-0033",
+        "ADR-0031",
     ),
     // A refusal changes nothing, where `git switch -c` writes the target's tree to the index and
     // the working directory before it finds the name taken, and stops there.
     (
         &["clashing names"],
         &["create and switch", "track"],
-        "ADR-0033",
+        "ADR-0031",
     ),
     // A refusal changes nothing, where `git stash apply` writes the stash's untracked files, or
     // its changes, before it finds a file in its way, and stops there.
-    (APPLIED_IN_PART, &["apply stash", "pop stash"], "ADR-0033"),
+    (APPLIED_IN_PART, &["apply stash", "pop stash"], "ADR-0031"),
 ];
 
 /// Where the writer differs from `git` and no ADR decides it: each group a finding for the
@@ -972,7 +972,7 @@ fn run_state(root: &Path, origin: &Path, base: &Base, index: usize) -> Verdicts 
 }
 
 #[test]
-// Verifies: ADR-0033
+// Verifies: ADR-0031
 fn each_write_does_what_git_does_in_every_state_or_an_adr_says_why_not() {
     for (states, writes, _) in DEPARTURES.iter().chain(MISMATCHES) {
         for s in *states {

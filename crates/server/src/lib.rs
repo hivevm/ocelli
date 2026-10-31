@@ -1,9 +1,9 @@
-//! The remote server (ADR-0037): it serves the web interface to a browser and carries the desktop
+//! The remote server (ADR-0035): it serves the web interface to a browser and carries the desktop
 //! host's commands and events over one WebSocket per tab, answering them through the commands
 //! both hosts share. It listens on the machine's loopback addresses, or over TLS alone on an
 //! address the developer names, and admits a browser only by
-//! the connection token it prints, exchanged for a session cookie, from its own origin (ADR-0038),
-//! and opens only the repositories below its server root (ADR-0039).
+//! the connection token it prints, exchanged for a session cookie, from its own origin (ADR-0036),
+//! and opens only the repositories below its server root (ADR-0037).
 
 pub mod auth;
 pub mod root;
@@ -31,7 +31,7 @@ use tokio::sync::Semaphore;
 /// What the server is started with.
 #[derive(Debug, PartialEq, Eq)]
 pub struct Options {
-    /// The server root: required, there is no default (ADR-0039).
+    /// The server root: required, there is no default (ADR-0037).
     pub root: PathBuf,
     /// The port on the loopback addresses; 0 lets the system choose a free one.
     pub port: u16,
@@ -39,7 +39,7 @@ pub struct Options {
     /// The address named with `--listen`, served over TLS in place of the loopback addresses.
     pub listen: Option<Listen>,
     /// Whether the browser may write, as the desktop host writes, as the user the server runs as;
-    /// without `--allow-writes` every write is refused (ADR-0037).
+    /// without `--allow-writes` every write is refused (ADR-0035).
     pub allow_writes: bool,
 }
 
@@ -88,7 +88,7 @@ impl Default for Limits {
     }
 }
 
-/// An address the developer names, always served over TLS (ADR-0038).
+/// An address the developer names, always served over TLS (ADR-0036).
 #[derive(Debug, PartialEq, Eq)]
 pub struct Listen {
     pub address: SocketAddr,
@@ -165,7 +165,7 @@ struct Server {
     root: Arc<Root>,
     gate: Gate,
     /// Held while a token is checked, so that the wait after wrong ones holds for the whole
-    /// server and not per connection (ADR-0038).
+    /// server and not per connection (ADR-0036).
     token_turn: tokio::sync::Mutex<()>,
     /// A permit per wrong token that waits for its answer.
     waiting: Arc<Semaphore>,
@@ -175,7 +175,7 @@ struct Server {
     /// The tabs' load sessions the server holds.
     sessions: socket::Sessions,
     /// The turns of the repositories' writes, where the server was started with `--allow-writes`;
-    /// none where it refuses every write (ADR-0037).
+    /// none where it refuses every write (ADR-0035).
     writes: Option<turns::Turns>,
     /// The hashes of the inline scripts of the web interface's `index.html`.
     script_hashes: Vec<String>,
@@ -190,7 +190,7 @@ pub struct Running {
     pub root: PathBuf,
     /// The addresses it listens on.
     pub addresses: Vec<SocketAddr>,
-    /// The SHA-256 fingerprint of its certificate, where it speaks TLS (ADR-0038).
+    /// The SHA-256 fingerprint of its certificate, where it speaks TLS (ADR-0036).
     pub fingerprint: Option<String>,
     sessions: socket::Sessions,
     writes: Option<turns::Turns>,
@@ -198,18 +198,18 @@ pub struct Running {
 
 impl Running {
     /// How many tabs' load sessions the server holds now: one per open connection, and one a
-    /// closed connection's commands or load still hold until they stop (ADR-0037).
+    /// closed connection's commands or load still hold until they stop (ADR-0035).
     pub fn sessions(&self) -> usize {
         self.sessions.count()
     }
 
-    /// The turns its tabs' writes take, where it was started with `--allow-writes` (ADR-0037).
+    /// The turns its tabs' writes take, where it was started with `--allow-writes` (ADR-0035).
     pub fn turns(&self) -> Option<&turns::Turns> {
         self.writes.as_ref()
     }
 }
 
-/// Starts the server (ADR-0038): by default on the loopback addresses over plain HTTP, IPv4
+/// Starts the server (ADR-0036): by default on the loopback addresses over plain HTTP, IPv4
 /// always, IPv6 where the machine has it, on the same port; with `--listen` on that address
 /// alone, over TLS alone.
 pub async fn start(options: Options) -> Result<Running, String> {
@@ -230,7 +230,7 @@ pub async fn start(options: Options) -> Result<Running, String> {
         }
     };
     // Every repository the git adapter opens in this process is confined to the root: none is
-    // found by searching upwards (ADR-0039).
+    // found by searching upwards (ADR-0037).
     ocelli_git::confine::confine_to(root.path());
     let script_hashes = web::file("index.html")
         .map(|html| web::inline_script_hashes(&String::from_utf8_lossy(html)))
@@ -384,13 +384,13 @@ fn refuse(status: StatusCode, why: &'static str) -> Response {
     (status, why).into_response()
 }
 
-/// Answers one request, after the checks of ADR-0038 and with the headers of ADR-0037 and
-/// ADR-0038 on every answer.
+/// Answers one request, after the checks of ADR-0036 and with the headers of ADR-0035 and
+/// ADR-0036 on every answer.
 async fn handle(State(server): State<Arc<Server>>, request: Request) -> Response {
     let host = header_str(request.headers(), header::HOST).map(str::to_string);
     // On the loopback addresses the names of the machine itself; over TLS a name the
     // certificate carries. Any other is what a page reaching the server through DNS rebinding
-    // sends (ADR-0038).
+    // sends (ADR-0036).
     let named = host.as_deref().is_some_and(|host| match &server.tls {
         None => auth::loopback_host(host),
         Some(tls) => auth::host_name(host).is_some_and(|name| tls.names(name)),
@@ -430,7 +430,7 @@ fn header_str(headers: &HeaderMap, name: header::HeaderName) -> Option<&str> {
 }
 
 /// The request to `host`, a name of the machine itself, checked for its origin and its session
-/// before anything is served or read (ADR-0038).
+/// before anything is served or read (ADR-0036).
 async fn admit(server: &Server, host: &str, request: Request) -> Response {
     let own = auth::own_origin(host, server.tls.is_some());
     let origin = header_str(request.headers(), header::ORIGIN);
@@ -443,7 +443,7 @@ async fn admit(server: &Server, host: &str, request: Request) -> Response {
     let path = request.uri().path().to_string();
     if let Some(token) = auth::query_param(request.uri().query(), "token") {
         // The right token is answered at once; a wrong one waits for its turn, one at a time for
-        // the whole server, and then for what the wrong ones before it earned (ADR-0038).
+        // the whole server, and then for what the wrong ones before it earned (ADR-0036).
         return match server.gate.exchange(token) {
             auth::Exchange::Session(id) => Response::builder()
                 .status(StatusCode::SEE_OTHER)
@@ -505,7 +505,7 @@ async fn admit(server: &Server, host: &str, request: Request) -> Response {
     if path == "/ws" {
         // A handshake must name its origin, and it must be the server's own: a WebSocket is not
         // bound by the same-origin policy, and the browser sends the cookie whatever page opens
-        // it (ADR-0038).
+        // it (ADR-0036).
         if origin.is_none() {
             return refuse(
                 StatusCode::FORBIDDEN,
@@ -556,7 +556,7 @@ mod tests {
     }
 
     #[test]
-    // Verifies: ADR-0039
+    // Verifies: ADR-0037
     fn the_server_root_is_required() {
         assert_eq!(Options::parse(args(&["ocelli-server"])).unwrap_err(), USAGE);
         assert_eq!(
@@ -584,7 +584,7 @@ mod tests {
     }
 
     #[test]
-    // Verifies: ADR-0037
+    // Verifies: ADR-0035
     fn writes_are_allowed_only_by_the_switch_given_at_the_start() {
         let allowed = |list: &[&str]| {
             let mut all = vec!["ocelli-server"];
@@ -599,7 +599,7 @@ mod tests {
     }
 
     #[test]
-    // Verifies: ADR-0038
+    // Verifies: ADR-0036
     fn a_named_address_takes_its_port_or_the_one_given_and_a_certificate_comes_with_its_key() {
         let listen = |list: &[&str]| {
             let mut all = vec!["ocelli-server", "--root", "/r"];

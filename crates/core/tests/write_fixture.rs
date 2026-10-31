@@ -1,4 +1,4 @@
-//! Verifies: ADR-0033
+//! Verifies: ADR-0031
 //!
 //! The web interface hands the core a `Write` as JSON from a union it keeps by hand in
 //! `src-web/src/writes.ts`, and nothing but this pair of tests compares the two. This test writes
@@ -235,12 +235,12 @@ fn the_file_fixture_is_what_the_core_writes() {
     }
 }
 
-/// The core's answers as the desktop host sends them (ADR-0036): the transfers of refs that offer
+/// The core's answers as the desktop host sends them (ADR-0022): the transfers of refs that offer
 /// a fetch and a push and refuse a pull, and the operations a commit offers beside a refusal, the
 /// fixture `offers.json` the web interface's `writes.test.ts` reads against its types. It holds
 /// the shape of the answers only; which answer the refs give is the core's own tests'.
 #[test]
-// Verifies: ADR-0036
+// Verifies: ADR-0022
 fn the_offers_fixture_is_what_the_core_writes() {
     use ocelli_core::model::{LocalBranch, RepoRefs};
     let refs = RepoRefs {

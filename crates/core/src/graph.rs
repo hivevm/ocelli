@@ -9,7 +9,7 @@ pub fn build_graph(commits: Vec<CommitData>) -> Graph {
     chunk.graph(&layout)
 }
 
-/// A commit graph laid out chunk by chunk (ADR-0015). Each chunk is laid out with both of
+/// A commit graph laid out chunk by chunk (ADR-0013). Each chunk is laid out with both of
 /// Vigier's phases, rows via the temporal topological sort over the chunk alone and lanes via
 /// straight branches carried on from the chunks before, and placed below them. A chunk holds
 /// commits the walk yields after every commit of the chunks before it, so each of its commits is
@@ -20,7 +20,7 @@ pub fn build_graph(commits: Vec<CommitData>) -> Graph {
 /// The layout keeps its nodes in an index arena for the whole load, every reference between them
 /// an index, and finds a commit by its SHA through one index keyed by the SHA's first eight bytes;
 /// a node keeps only its place, its first parent, and its SHA as twenty bytes, so a load costs no
-/// allocation per commit once its chunk is handed over (ADR-0015).
+/// allocation per commit once its chunk is handed over (ADR-0013).
 #[derive(Debug, Default)]
 pub struct Layout {
     nodes: Vec<Node>,
@@ -37,7 +37,7 @@ pub struct Layout {
     /// The next row free below the chunks laid out.
     next_row: i32,
     lanes: Lanes,
-    /// Whether lane 0 is the main line's alone (ADR-0032).
+    /// Whether lane 0 is the main line's alone (ADR-0014).
     main_line: bool,
     /// The SHA of the next commit on the main line, the first parent of the last one laid out.
     main_next: Option<String>,
@@ -65,7 +65,7 @@ struct Chunk {
     commits: Vec<CommitData>,
     parents: Vec<Vec<usize>>,
     children: Vec<Vec<usize>>,
-    /// The track of each merge out of the main line, by its parent and child (ADR-0030).
+    /// The track of each merge out of the main line, by its parent and child (ADR-0015).
     tracks: HashMap<(usize, usize), i32>,
 }
 
@@ -149,7 +149,7 @@ fn index_key(sha: &[u8; 20]) -> u64 {
 pub struct LaidChunk {
     pub commits: Vec<LaidCommit>,
     pub edges: Vec<Edge>,
-    /// The chunk's late children (ADR-0015) as rows of a parent laid out before and of its child
+    /// The chunk's late children (ADR-0013) as rows of a parent laid out before and of its child
     /// in this chunk: the parent gains a child, and the edge between them is among `edges`.
     pub late_children: Vec<(i32, i32)>,
 }
@@ -232,7 +232,7 @@ impl Layout {
         Self::default()
     }
 
-    /// A layout that keeps lane 0 for the main line from `tip` down (ADR-0032).
+    /// A layout that keeps lane 0 for the main line from `tip` down (ADR-0014).
     pub fn with_main_line(tip: String) -> Self {
         Self {
             main_line: true,
@@ -356,11 +356,11 @@ impl Layout {
         }
         // A parent arriving in a later chunk joins its child after the parents laid out with it:
         // the child's lines are drawn already, and its first line stays the branch it was laid
-        // out on (ADR-0015). A child with no parent laid out takes the first to arrive in commit
+        // out on (ADR-0013). A child with no parent laid out takes the first to arrive in commit
         // order as the branch it continues.
         for (child, parents) in arrived {
             // A main-line commit waits for its first parent alone, so another parent arriving
-            // first leaves it waiting (ADR-0032).
+            // first leaves it waiting (ADR-0014).
             let first_parent = self.orphans.get(&child).and_then(|shas| {
                 shas.iter().find_map(|sha| {
                     parents
@@ -378,7 +378,7 @@ impl Layout {
             let i = first + k;
             for parent_sha in &chunk.commits[k].parent_shas {
                 match self.find(parent_sha) {
-                    // A parent laid out before makes this commit a late child (ADR-0015): it is
+                    // A parent laid out before makes this commit a late child (ADR-0013): it is
                     // laid out in its chunk, below its parent.
                     Some(p) => {
                         chunk.parents[k].push(p);
@@ -401,7 +401,7 @@ impl Layout {
 
     /// Which commits of the chunk are on the main line: the next one expected, and from it each
     /// first parent in commit order found in the chunk. A first parent laid out before its child,
-    /// a late child's, ends the main line there (ADR-0032).
+    /// a late child's, ends the main line there (ADR-0014).
     fn follow_main_line(&mut self, chunk: &Chunk) -> Vec<bool> {
         let mut on_main = vec![false; chunk.commits.len()];
         if self.main_next.is_none() {
@@ -422,7 +422,7 @@ impl Layout {
             self.main_next = chunk.commits[k].parent_shas.first().cloned();
             // The main line continues through its first parent alone: until that parent is laid
             // out, no other parent is the branch the commit continues, so its edge stays a merge
-            // and the main line's edge, once it arrives, a branch edge down lane 0 (ADR-0032).
+            // and the main line's edge, once it arrives, a branch edge down lane 0 (ADR-0014).
             let i = chunk.first + k;
             if let Some(parent) = &self.main_next
                 && self.find(parent).is_none()
@@ -467,7 +467,7 @@ impl Layout {
 /// Returns an empty string for empty emails. Uses `d=404` so the image request
 /// fails when no Gravatar exists, letting the frontend fall back to initials.
 /// The URL is only a local computation; whether it is ever dereferenced is the
-/// frontend's opt-in avatar setting (ADR-0023).
+/// frontend's opt-in avatar setting (ADR-0025).
 fn gravatar_url(email: &str) -> String {
     use sha2::{Digest, Sha256};
     let normalized = email.trim().to_lowercase();
@@ -504,7 +504,7 @@ fn temporal_topological_sort(nodes: &mut [Node], chunk: &Chunk, next_row: &mut i
     // Only the chunk's commits are explored: the chunks before have their rows, which stay.
     let mut explored = vec![false; chunk.commits.len()];
     // Reused across every start commit: allocating it per start would make the
-    // pass O(n · starts) instead of the near-linear cost ADR-0015 states. Safe to
+    // pass O(n · starts) instead of the near-linear cost ADR-0013 states. Safe to
     // share, because a completed traversal leaves a row assigned on every node it
     // marked, and only nodes still lacking a row are ever pushed again.
     let mut expanded = vec![false; chunk.commits.len()];
@@ -591,9 +591,9 @@ fn assign_counter(
 /// the chunks before.
 ///
 /// With `main`, which commits of the chunk are on the main line, lane 0 is the main line's alone:
-/// its commits take it, and it is forbidden to every other commit (ADR-0032).
+/// its commits take it, and it is forbidden to every other commit (ADR-0014).
 ///
-/// Returns the track each merge out of the main line runs up (ADR-0030).
+/// Returns the track each merge out of the main line runs up (ADR-0015).
 fn straight_branches(
     nodes: &mut [Node],
     chunk: &Chunk,
@@ -610,7 +610,7 @@ fn straight_branches(
         start_row: col_start_row,
         last_used_row,
     } = lanes;
-    // The main line's lane is the first one opened (ADR-0032).
+    // The main line's lane is the first one opened (ADR-0014).
     if main.is_some() && active_branches.is_empty() {
         free_lane(
             active_branches,
@@ -656,7 +656,7 @@ fn straight_branches(
             col_start_row[0] = nodes[c_idx].row;
             nodes[c_idx].col = 0;
             // Each merge out of the main line runs up a track of its own: the first lane from 1
-            // on that J(c) leaves free over its rows, used over them from now on (ADR-0030).
+            // on that J(c) leaves free over its rows, used over them from now on (ADR-0015).
             for &t in &merge_children {
                 let mut taken = compute_forbidden(
                     nodes,
@@ -686,7 +686,7 @@ fn straight_branches(
 
         let c_row = nodes[c_idx].row;
         last_used_row[nodes[c_idx].col as usize] = c_row;
-        // A late child's first parent stands above it (ADR-0015): its line runs up to that parent,
+        // A late child's first parent stands above it (ADR-0013): its line runs up to that parent,
         // not down, so its lane is free below it.
         let first_parent = nodes[c_idx].first_parent;
         if first_parent != NO_NODE && (first_parent as usize) < chunk.first {
@@ -804,7 +804,7 @@ pub(crate) mod tests {
 
     /// A ─ B ─ C, newest first. Rows must run 0, 1, 2 and all share one column.
     #[test]
-    // Verifies: ADR-0015, G-1, G-2
+    // Verifies: ADR-0013, G-1, G-2
     fn linear_history_is_one_straight_column() {
         let g = build_graph(vec![
             commit("A", 300, &["B"]),
@@ -822,7 +822,7 @@ pub(crate) mod tests {
 
     /// Every parent must sit below each of its children, for every edge.
     #[test]
-    // Verifies: ADR-0015, G-10
+    // Verifies: ADR-0013, G-5
     fn parents_are_always_below_their_children() {
         // M merges F into main; main is B ─ C, feature is F ─ C.
         let g = build_graph(vec![
@@ -846,7 +846,7 @@ pub(crate) mod tests {
 
     /// Independent commits are ordered by committer date, newest at the top.
     #[test]
-    // Verifies: ADR-0015, G-10
+    // Verifies: ADR-0013, G-5
     fn independent_tips_are_ordered_by_committer_date() {
         // Two disconnected chains. The newer tip must come first.
         let g = build_graph(vec![
@@ -887,9 +887,9 @@ pub(crate) mod tests {
         );
     }
 
-    /// G-15: the same input always yields the same layout.
+    /// G-8: the same input always yields the same layout.
     #[test]
-    // Verifies: ADR-0015, G-15
+    // Verifies: ADR-0013, G-8
     fn layout_is_deterministic() {
         let fixture = || {
             vec![
@@ -932,7 +932,7 @@ pub(crate) mod tests {
     /// A merge parent must not land in the column its own branch line occupies,
     /// so the two branch lines stay separate columns.
     #[test]
-    // Verifies: ADR-0015
+    // Verifies: ADR-0013
     fn merge_puts_the_second_parent_in_its_own_column() {
         let g = build_graph(vec![
             commit("M", 500, &["B", "F"]),
@@ -956,7 +956,7 @@ pub(crate) mod tests {
     /// `is_branch` marks exactly the first-parent edges; everything else is a
     /// MERGE edge. `min_row`/`max_row` must span the two endpoints.
     #[test]
-    // Verifies: ADR-0030
+    // Verifies: ADR-0015
     fn edges_distinguish_branch_from_merge_and_span_their_rows() {
         let g = build_graph(vec![
             commit("M", 500, &["B", "F"]),
@@ -988,7 +988,7 @@ pub(crate) mod tests {
     /// Parents outside the loaded set are ignored rather than panicking — that is
     /// what makes a chunk whose parents are still to come safe.
     #[test]
-    // Verifies: ADR-0015
+    // Verifies: ADR-0013
     fn unknown_parents_are_dropped() {
         let g = build_graph(vec![
             commit("A", 200, &["B"]),
@@ -1007,7 +1007,7 @@ pub(crate) mod tests {
     /// including parents outside the loaded set — and the SHAs of its loaded
     /// children, newest (lowest row) first.
     #[test]
-    // Verifies: ADR-0015, G-12
+    // Verifies: ADR-0013, G-9
     fn nodes_carry_parents_and_children() {
         // M merges F into main; main is B ─ C, feature is F ─ C.
         // C additionally records a parent that was not loaded.
@@ -1040,7 +1040,7 @@ pub(crate) mod tests {
 
     /// The working-directory node has no object id, so it must not show a short sha.
     #[test]
-    // Verifies: ADR-0024
+    // Verifies: ADR-0018
     fn working_directory_node_has_no_short_sha() {
         let mut wip = commit("WORKING_DIRECTORY", 900, &["A"]);
         wip.kind = CommitKind::Working;
@@ -1059,7 +1059,7 @@ pub(crate) mod tests {
     /// The avatar URL uses Gravatar's SHA-256 identifier of the trimmed,
     /// lowercased address; an empty address yields no URL at all.
     #[test]
-    // Verifies: ADR-0023
+    // Verifies: ADR-0025
     fn gravatar_url_hashes_normalized_email_with_sha256() {
         // SHA-256 of "gravatar@example.com".
         assert_eq!(
@@ -1071,7 +1071,7 @@ pub(crate) mod tests {
     }
 
     /// The cells an edge's vertical segment runs through, endpoints excluded,
-    /// following the specification's edge shapes (ADR-0030): a BRANCH edge
+    /// following the specification's edge shapes (ADR-0015): a BRANCH edge
     /// runs vertically in the child's column, a MERGE edge in the parent's.
     fn vertical_cells(e: &Edge) -> Vec<(i32, i32)> {
         e.route()
@@ -1094,7 +1094,7 @@ pub(crate) mod tests {
     /// merge child and `c` — as in Pvigier's reference implementation — not
     /// only the columns still active.
     #[test]
-    // Verifies: ADR-0015, ADR-0030, G-9
+    // Verifies: ADR-0013, ADR-0015, G-4
     fn a_merge_edge_never_runs_through_another_commit() {
         let g = build_graph(vec![
             commit("init", 1, &[]),
@@ -1120,11 +1120,11 @@ pub(crate) mod tests {
     }
 
     /// The same property over many generated histories, for every edge: with
-    /// shapes chosen by edge type (ADR-0030), each vertical run lies in a
+    /// shapes chosen by edge type (ADR-0015), each vertical run lies in a
     /// column the layout keeps clear — a BRANCH edge in its child's active
     /// line, a MERGE edge in the parent's column guarded by J(c).
     #[test]
-    // Verifies: ADR-0015, ADR-0030, G-9
+    // Verifies: ADR-0013, ADR-0015, G-4
     fn generated_histories_keep_every_edge_clear_of_commits() {
         // xorshift — deterministic, and no dependency for a test.
         let mut seed: u64 = 0x9e37_79b9_7f4a_7c15;
@@ -1177,7 +1177,7 @@ pub(crate) mod tests {
         }
     }
 
-    // ── Chunk by chunk (ADR-0015) ────────────────────────────────────────────
+    // ── Chunk by chunk (ADR-0013) ────────────────────────────────────────────
 
     /// A generated history, newest first: every commit before its parents, as the walk yields
     /// them, so that consecutive slices are chunks.
@@ -1301,7 +1301,7 @@ pub(crate) mod tests {
     }
 
     #[test]
-    // Verifies: ADR-0015
+    // Verifies: ADR-0013
     fn the_first_chunk_lays_out_exactly_as_it_does_alone() {
         for seed in 1..60u64 {
             let history = generated_history(seed, 150);
@@ -1329,7 +1329,7 @@ pub(crate) mod tests {
     }
 
     #[test]
-    // Verifies: ADR-0015
+    // Verifies: ADR-0013
     fn adding_a_chunk_moves_nothing_already_laid_out() {
         for seed in 1..60u64 {
             let history = generated_history(seed, 150);
@@ -1357,7 +1357,7 @@ pub(crate) mod tests {
     }
 
     #[test]
-    // Verifies: ADR-0015
+    // Verifies: ADR-0013
     fn a_first_parent_arriving_later_joins_as_a_further_parent() {
         // `m` merges `topic` into a main line whose parent `main` lies in the next chunk.
         let mut layout = Chunked::new();
@@ -1395,7 +1395,7 @@ pub(crate) mod tests {
     }
 
     #[test]
-    // Verifies: ADR-0015
+    // Verifies: ADR-0013
     fn a_late_child_is_laid_out_below_its_parent_without_moving_anything() {
         // `late` sits on `p` but is dated before it, so the walk yields it in the next chunk.
         let mut layout = Layout::new();
@@ -1429,7 +1429,7 @@ pub(crate) mod tests {
     }
 
     #[test]
-    // Verifies: ADR-0015, G-2
+    // Verifies: ADR-0013, G-2
     fn a_late_child_frees_its_lane_below_it() {
         // `late` on `p` is laid out in the next chunk; `side`, a tip below it, takes the lane
         // the late child leaves behind.
@@ -1455,7 +1455,7 @@ pub(crate) mod tests {
     }
 
     #[test]
-    // Verifies: ADR-0015
+    // Verifies: ADR-0013
     fn late_children_of_one_parent_come_newest_first() {
         let mut layout = Layout::new();
         layout.lay_out(vec![commit("p", 5, &[])]);
@@ -1472,7 +1472,7 @@ pub(crate) mod tests {
     }
 
     #[test]
-    // Verifies: ADR-0015
+    // Verifies: ADR-0013
     fn a_chunk_laid_out_reads_back_as_the_graph_built_whole() {
         // The chunks the front ends take in carry what build_graph returns: every node with its
         // children and every edge, whichever way a single chunk is read.
@@ -1507,7 +1507,7 @@ pub(crate) mod tests {
     }
 
     #[test]
-    // Verifies: ADR-0015
+    // Verifies: ADR-0013
     fn a_sha_is_found_only_as_the_same_string() {
         let lower = "0123456789abcdef0123456789abcdef01234567";
         let upper = lower.to_uppercase();
@@ -1555,7 +1555,7 @@ pub(crate) mod tests {
     }
 
     #[test]
-    // Verifies: ADR-0032, ADR-0015
+    // Verifies: ADR-0014, ADR-0013
     fn a_main_line_whose_tip_arrives_later_keeps_the_lane_free_above_it() {
         // Newer work on a side branch comes first; the main line's tip only in the next chunk.
         let mut chunked = Chunked {
@@ -1574,11 +1574,11 @@ pub(crate) mod tests {
     }
 
     #[test]
-    // Verifies: ADR-0015, ADR-0032, ADR-0030, G-3, G-9, G-10
+    // Verifies: ADR-0013, ADR-0014, ADR-0015, G-3, G-4, G-5
     fn every_layout_keeps_its_rows_parents_edges_and_main_line() {
         // Over both generators, in one chunk and in several, with and without a main line: rows
         // run 0..n; a parent stands below its children and no edge runs through a commit, but
-        // for the edge down to a late child, which G-9 and G-10 except; with a main line, lane 0
+        // for the edge down to a late child, which G-4 and G-5 except; with a main line, lane 0
         // holds its commits alone and each of its edges runs straight down lane 0.
         let (mut late_children, mut main_edges) = (0, 0);
         for seed in 1..60u64 {
@@ -1664,7 +1664,7 @@ pub(crate) mod tests {
     }
 
     #[test]
-    // Verifies: ADR-0032, ADR-0015
+    // Verifies: ADR-0014, ADR-0013
     fn a_main_line_parent_arriving_after_another_keeps_the_main_line_straight() {
         // `m` on the main line merges `topic`, laid out with it, and its first parent `main`
         // arrives in the next chunk: the main line's edge runs down lane 0, and topic's edge
