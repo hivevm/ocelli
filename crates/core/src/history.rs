@@ -596,7 +596,7 @@ mod tests {
     }
 
     #[test]
-    // Verifies: ADR-0019, ADR-0020, G-7
+    // Verifies: ADR-draft-row-window-margin, ADR-0020, G-7
     fn a_window_holds_exactly_its_rows_and_every_edge_crossing_them() {
         let mut long = 0;
         for seed in 1..30u64 {
@@ -637,7 +637,7 @@ mod tests {
     }
 
     #[test]
-    // Verifies: ADR-0019, ADR-0013
+    // Verifies: ADR-draft-row-window-margin, ADR-0013
     fn the_history_grows_by_chunks_without_changing_a_row_read_before() {
         let commits = generated_history(7, 300);
         let mut h = History::new();
@@ -683,7 +683,7 @@ mod tests {
     }
 
     #[test]
-    // Verifies: ADR-0019, G-11
+    // Verifies: ADR-draft-row-window-margin, G-11
     fn a_blank_query_matches_nothing() {
         let h = searchable();
         assert!(h.search("").is_empty());
@@ -691,7 +691,7 @@ mod tests {
     }
 
     #[test]
-    // Verifies: ADR-0019, G-11
+    // Verifies: ADR-draft-row-window-margin, G-11
     fn search_matches_message_author_committer_sha_and_refs_case_insensitively() {
         let h = searchable();
         assert_eq!(found(&h, "HEADER"), ["c0ffee1"]);
@@ -703,13 +703,13 @@ mod tests {
     }
 
     #[test]
-    // Verifies: ADR-0019, G-11
+    // Verifies: ADR-draft-row-window-margin, G-11
     fn search_results_run_newest_first() {
         assert_eq!(found(&searchable(), ":"), ["deadbee", "abc1234", "c0ffee1"]);
     }
 
     #[test]
-    // Verifies: ADR-0019, G-11
+    // Verifies: ADR-draft-row-window-margin, G-11
     fn search_covers_every_chunk_laid_out() {
         let commits = generated_history(3, 90);
         let h = history(&commits.chunks(30).map(<[_]>::to_vec).collect::<Vec<_>>());
@@ -746,7 +746,7 @@ mod tests {
     }
 
     #[test]
-    // Verifies: ADR-0019, G-10
+    // Verifies: ADR-draft-row-window-margin, G-10
     fn ancestors_follow_every_parent_line_and_include_the_start() {
         let h = diamond();
         assert_eq!(
@@ -761,14 +761,14 @@ mod tests {
     }
 
     #[test]
-    // Verifies: ADR-0019, G-10
+    // Verifies: ADR-draft-row-window-margin, G-10
     fn parents_not_laid_out_are_skipped() {
         let h = history(&[vec![commit("A", 1, &["missing"])]]);
         assert_eq!(shas(&h, h.ancestors(0)), ["A"]);
     }
 
     #[test]
-    // Verifies: ADR-0019, G-10
+    // Verifies: ADR-draft-row-window-margin, G-10
     fn descendants_follow_child_links_up_to_the_tips() {
         let h = diamond();
         assert_eq!(shas(&h, h.descendants(at(&h, "C"))), ["B", "C", "F", "M"]);
@@ -781,7 +781,7 @@ mod tests {
     }
 
     #[test]
-    // Verifies: ADR-0019, G-10
+    // Verifies: ADR-draft-row-window-margin, G-10
     fn lineage_is_ancestors_and_descendants_without_siblings() {
         let h = diamond();
         assert_eq!(
@@ -792,7 +792,7 @@ mod tests {
     }
 
     #[test]
-    // Verifies: ADR-0019, G-11, G-10
+    // Verifies: ADR-draft-row-window-margin, G-11, G-10
     fn the_terminal_applications_cases_hold_over_the_core() {
         // a ← b ← d (merge of b and c), a ← c, and e on top of c (unmerged).
         let mut c = commit("c", 3, &["a"]);
@@ -818,7 +818,7 @@ mod tests {
     }
 
     #[test]
-    // Verifies: ADR-0019, G-11, G-10
+    // Verifies: ADR-draft-row-window-margin, G-11, G-10
     fn search_and_lineage_grown_by_a_chunk_equal_them_computed_afresh() {
         for seed in 1..20u64 {
             let commits = generated_history(seed, 120);
@@ -837,7 +837,7 @@ mod tests {
     }
 
     #[test]
-    // Verifies: ADR-0019, G-10
+    // Verifies: ADR-draft-row-window-margin, G-10
     fn lineage_reaches_into_chunks_laid_out_later() {
         let h = history(&[
             vec![commit("c", 3, &["b"])],
@@ -868,7 +868,7 @@ mod tests {
     }
 
     #[test]
-    // Verifies: ADR-0019, ADR-0013, G-10
+    // Verifies: ADR-draft-row-window-margin, ADR-0013, G-10
     fn lineages_grown_over_late_children_equal_them_computed_afresh() {
         let mut late = 0;
         for seed in 1..30u64 {
@@ -903,7 +903,7 @@ mod tests {
     }
 
     #[test]
-    // Verifies: ADR-0019, ADR-0020, G-7
+    // Verifies: ADR-draft-row-window-margin, ADR-0020, G-7
     fn a_window_looks_at_the_edges_near_it_not_at_every_long_one() {
         // A main line of 20 000 commits with a branch forked off every tenth and merged back two
         // hundred commits above: thousands of long edges, few of them near any one window.
@@ -935,7 +935,7 @@ mod tests {
     }
 
     #[test]
-    // Verifies: ADR-0019
+    // Verifies: ADR-draft-row-window-margin
     fn a_window_names_the_lanes_its_nodes_and_edges_reach() {
         // d merges c, whose lane is 1; the window of d's row alone reaches it by the edge.
         let h = history(&[vec![

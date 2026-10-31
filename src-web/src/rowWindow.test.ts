@@ -1,4 +1,4 @@
-// Verifies: ADR-0019, ADR-0020, G-7
+// Verifies: ADR-draft-row-window-margin, ADR-0020, G-7
 import { describe, expect, test } from 'bun:test';
 import { windowToAsk } from './rowWindow.ts';
 

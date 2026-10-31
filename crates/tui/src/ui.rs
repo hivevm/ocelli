@@ -1429,7 +1429,7 @@ mod tests {
     }
 
     #[test]
-    // Verifies: ADR-0019
+    // Verifies: ADR-draft-row-window-margin
     fn older_history_with_more_lanes_moves_nothing_until_scrolled_to() {
         use crate::app::tests::commit;
         use crate::loader::Msg;

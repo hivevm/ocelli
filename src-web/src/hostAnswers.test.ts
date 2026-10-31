@@ -1,4 +1,4 @@
-// Verifies: ADR-0019
+// Verifies: ADR-draft-row-window-margin
 import { describe, expect, test } from 'bun:test';
 import { Newest } from './hostAnswers.ts';
 

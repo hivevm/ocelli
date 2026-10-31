@@ -596,7 +596,7 @@ mod tests {
     }
 
     #[test]
-    // Verifies: ADR-0016, ADR-0019, ADR-0035, G-17
+    // Verifies: ADR-0016, ADR-draft-row-window-margin, ADR-0035, G-17
     fn a_load_reports_each_chunk_the_refs_after_the_first_and_the_end() {
         let fake = Fake {
             chunks: vec![three(9), three(6)],
