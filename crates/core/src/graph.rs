@@ -822,7 +822,7 @@ pub(crate) mod tests {
 
     /// Every parent must sit below each of its children, for every edge.
     #[test]
-    // Verifies: ADR-0015, G-10
+    // Verifies: ADR-0015, G-5
     fn parents_are_always_below_their_children() {
         // M merges F into main; main is B ─ C, feature is F ─ C.
         let g = build_graph(vec![
@@ -846,7 +846,7 @@ pub(crate) mod tests {
 
     /// Independent commits are ordered by committer date, newest at the top.
     #[test]
-    // Verifies: ADR-0015, G-10
+    // Verifies: ADR-0015, G-5
     fn independent_tips_are_ordered_by_committer_date() {
         // Two disconnected chains. The newer tip must come first.
         let g = build_graph(vec![
@@ -887,9 +887,9 @@ pub(crate) mod tests {
         );
     }
 
-    /// G-15: the same input always yields the same layout.
+    /// G-8: the same input always yields the same layout.
     #[test]
-    // Verifies: ADR-0015, G-15
+    // Verifies: ADR-0015, G-8
     fn layout_is_deterministic() {
         let fixture = || {
             vec![
@@ -1007,7 +1007,7 @@ pub(crate) mod tests {
     /// including parents outside the loaded set — and the SHAs of its loaded
     /// children, newest (lowest row) first.
     #[test]
-    // Verifies: ADR-0015, G-12
+    // Verifies: ADR-0015, G-9
     fn nodes_carry_parents_and_children() {
         // M merges F into main; main is B ─ C, feature is F ─ C.
         // C additionally records a parent that was not loaded.
@@ -1094,7 +1094,7 @@ pub(crate) mod tests {
     /// merge child and `c` — as in Pvigier's reference implementation — not
     /// only the columns still active.
     #[test]
-    // Verifies: ADR-0015, ADR-0030, G-9
+    // Verifies: ADR-0015, ADR-0030, G-4
     fn a_merge_edge_never_runs_through_another_commit() {
         let g = build_graph(vec![
             commit("init", 1, &[]),
@@ -1124,7 +1124,7 @@ pub(crate) mod tests {
     /// column the layout keeps clear — a BRANCH edge in its child's active
     /// line, a MERGE edge in the parent's column guarded by J(c).
     #[test]
-    // Verifies: ADR-0015, ADR-0030, G-9
+    // Verifies: ADR-0015, ADR-0030, G-4
     fn generated_histories_keep_every_edge_clear_of_commits() {
         // xorshift — deterministic, and no dependency for a test.
         let mut seed: u64 = 0x9e37_79b9_7f4a_7c15;
@@ -1574,11 +1574,11 @@ pub(crate) mod tests {
     }
 
     #[test]
-    // Verifies: ADR-0015, ADR-0032, ADR-0030, G-3, G-9, G-10
+    // Verifies: ADR-0015, ADR-0032, ADR-0030, G-3, G-4, G-5
     fn every_layout_keeps_its_rows_parents_edges_and_main_line() {
         // Over both generators, in one chunk and in several, with and without a main line: rows
         // run 0..n; a parent stands below its children and no edge runs through a commit, but
-        // for the edge down to a late child, which G-9 and G-10 except; with a main line, lane 0
+        // for the edge down to a late child, which G-4 and G-5 except; with a main line, lane 0
         // holds its commits alone and each of its edges runs straight down lane 0.
         let (mut late_children, mut main_edges) = (0, 0);
         for seed in 1..60u64 {

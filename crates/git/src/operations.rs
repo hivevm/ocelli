@@ -1,4 +1,4 @@
-//! The writes of G-5 and G-6 with git2: merge, rebase, cherry-pick, revert, and reset from a
+//! The writes of G-13 and G-14 with git2: merge, rebase, cherry-pick, revert, and reset from a
 //! clean tree, stopping on a conflict in `git`'s own state; and resolving such a conflict file
 //! by file, then continuing or aborting the operation, whoever started it. No hook and no program
 //! the repository names runs (ADR-0033).

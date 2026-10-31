@@ -7,7 +7,7 @@
 
 ## Context
 
-G-4, G-5, G-6, and G-7 write to a repository: tags, stashes, the index, commits, branches, the
+G-12, G-13, G-14, and G-16 write to a repository: tags, stashes, the index, commits, branches, the
 history operations merge, rebase, cherry-pick, revert, and reset, and the resolution of a
 conflict one of them stopped on. The developer knows `git`, and the repository is one `git`
 works on before and after Ocelli: a write that does otherwise than `git` surprises the developer
@@ -16,7 +16,7 @@ or leaves a state `git` cannot carry on with.
 Q-4 asks that opening a repository runs no code the repository brings, and a write is one more
 way to run it: `git` runs hooks, the programs its configuration names, a merge tool or an editor,
 and a signing program where `commit.gpgSign`, `tag.gpgSign`, or `tag.forceSignAnnotated` asks
-for one. Q-6 asks that no work is lost by accident: `git` itself drops a stopped operation with
+for one. Q-7 asks that no work is lost by accident: `git` itself drops a stopped operation with
 `git stash`, and deletes an ignored file a switch puts something in the place of. An ignored
 file is often the developer's own: a local configuration, a build's output, or a note kept out of
 the history on purpose.
@@ -220,7 +220,7 @@ rebase step; applying a stash by hand where libgit2 refuses; `git stash push` of
 - **Carrying uncommitted changes along as `git` does** — less friction, but a conflict then mixes
   the developer's own changes with the operation's, and aborting it cannot tell them apart.
 - **Running the operations in memory and refusing every conflict** — never leaves a stopped
-  state, but nothing that conflicts could be merged or rebased from Ocelli, which G-6 asks for.
+  state, but nothing that conflicts could be merged or rebased from Ocelli, which G-14 asks for.
 - **A state of Ocelli's own for a stopped operation** — free of `git`'s file formats, but `git`
   could not carry on with it, nor Ocelli with one `git` started.
 - **An editor of conflicts in Ocelli, or the configured merge tool** — hunk by hunk where the
@@ -257,7 +257,7 @@ rebase step; applying a stash by hand where libgit2 refuses; `git stash push` of
 - Positive: one decision binds every writer module; a developer who knows `git` finds its
   behaviour, and every departure is listed in one place; writes run no code of the repository
   (Q-4); no write lands on a state the developer did not see, stops halfway, deletes a file no
-  commit holds, or drops an operation in progress (Q-6); a stopped operation is one `git` and
+  commit holds, or drops an operation in progress (Q-7); a stopped operation is one `git` and
   Ocelli both carry on with; after a commit the commit just made is in view.
 - Negative / trade-offs: hooks a team relies on do not run; a repository that signs every commit
   cannot commit from Ocelli; uncommitted changes are committed or stashed before an operation; a

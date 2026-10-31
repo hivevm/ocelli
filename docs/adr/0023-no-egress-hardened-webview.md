@@ -9,7 +9,7 @@
 
 Ocelli reads a repository from disk through `git2` ([ADR-0019](0019-git2-repository-reader.md)),
 and reaches the network only where the developer asks it to: fetching, pulling, and pushing to a
-remote repository through the developer's own Git setup (G-4, Constraints). Nothing else Ocelli
+remote repository through the developer's own Git setup (G-12, Constraints). Nothing else Ocelli
 shows needs the network, with one exception worth keeping: avatars of a commit's author and
 committer, which Gravatar serves for the hash of an email address.
 

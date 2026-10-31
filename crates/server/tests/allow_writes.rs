@@ -280,7 +280,7 @@ async fn told_of_a_write(tab: &mut Tab) -> bool {
 }
 
 #[tokio::test]
-// Verifies: ADR-0037, ADR-0033, G-8
+// Verifies: ADR-0037, ADR-0033, G-18
 async fn two_tabs_writing_to_one_repository_write_in_turn_and_the_other_tabs_on_it_load_again() {
     let tree = Tree::new("two-tabs-writing");
     let root = tree.root();
@@ -410,7 +410,7 @@ fn a_write_the_desktop_answers_and_the_server_answers_otherwise_or_not_at_all_is
 }
 
 #[tokio::test]
-// Verifies: ADR-0037, G-8, Q-5
+// Verifies: ADR-0037, G-18, Q-5
 async fn with_allow_writes_the_server_answers_every_write_the_desktop_answers_and_without_it_none()
 {
     // One example of every write the core takes, as the web interface sends it: the core's
@@ -536,7 +536,7 @@ fn with_programs(base: &Path, port: u16, tools: &Path) -> programs::Markers {
 }
 
 /// The programs the writes of the test of Q-4 would run where `git` performed them, each by the
-/// marker it leaves. The credential helper is left to the test of Q-7 in `transfers.rs`, over a
+/// marker it leaves. The credential helper is left to the test of Q-6 in `transfers.rs`, over a
 /// transport that asks for credentials, which neither of these does.
 #[cfg(unix)]
 const WOULD_RUN: &[&str] = &[

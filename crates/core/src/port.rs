@@ -348,7 +348,7 @@ mod tests {
     }
 
     #[test]
-    // Verifies: ADR-0034, Q-6
+    // Verifies: ADR-0034, Q-7
     fn each_write_that_discards_work_names_what_it_discards() {
         assert_eq!(create().discards(), None);
         let stash = Write::CreateStash {
@@ -432,7 +432,7 @@ mod tests {
     }
 
     #[test]
-    // Verifies: ADR-0034, Q-6
+    // Verifies: ADR-0034, Q-7
     fn a_write_that_discards_work_without_a_confirmation_never_reaches_the_repository() {
         let writer = Recorder::default();
         let repo = Path::new("/repo");

@@ -7,7 +7,7 @@
 
 ## Context
 
-The terminal application is one of Ocelli's three front ends (G-8). Many of the moments the
+The terminal application is one of Ocelli's three front ends (G-18). Many of the moments the
 specification's Problem describes arise in a terminal: over SSH, in a container, in a Dev
 Container like this repository's own, where no WebView is available. There the developer falls
 back to the `git log --graph` the specification calls unreadable.
@@ -68,10 +68,10 @@ that `ocelli-core` lays out, unchanged.
 6. **No request of its own** ([ADR-0023](0023-no-egress-hardened-webview.md)): a terminal shows no
    avatars, so the one opt-in exception does not arise.
 
-**Out of scope:** the editing operations (G-4 to G-7) and their keys, which
+**Out of scope:** the editing operations (G-12 to G-14 and G-16) and their keys, which
 [ADR-0033](0033-writes-what-git-writes.md) and
 [ADR-0034](0034-discarding-work-only-after-confirmation.md) decide and which the terminal offers
-like every front end (G-8); a non-interactive printer of the commit graph; packaging `ocelli-cli`.
+like every front end (G-18); a non-interactive printer of the commit graph; packaging `ocelli-cli`.
 
 ## Alternatives considered
 
@@ -79,7 +79,7 @@ like every front end (G-8); a non-interactive printer of the commit graph; packa
   application, but a second layout next to ADR-0015 draws a different commit graph for the same
   repository, and GPL-3.0 code cannot enter an MIT code base.
 - **A non-interactive printer like `git log --graph`, with Ocelli's layout** — simple, no event
-  loop, but no commit detail, no diff, and no navigation, which G-12 asks for; it remains a cheap
+  loop, but no commit detail, no diff, and no navigation, which G-9 asks for; it remains a cheap
   addition on the same rasteriser.
 - **A subcommand of the desktop binary** — the binary links webkit2gtk, so it cannot start on a
   headless machine, the very place the terminal application is for.

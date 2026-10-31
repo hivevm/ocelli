@@ -3,7 +3,7 @@
 //! sidebar, graph with lineage highlight, search, commit detail with
 //! parent/child links, flat or tree file list, unified or side-by-side diff,
 //! theme switch, open and refresh — with guitar-style keys (ADR-0028). Every
-//! key reads but the writes (ADR-0033, ADR-0035), the G-4 to G-7 operations; one that
+//! key reads but the writes (ADR-0033, ADR-0035), the G-12 to G-14 and G-16 operations; one that
 //! discards work runs only once the developer has answered `y` (ADR-0034). The keys are here; the
 //! requests they build and the one write that runs are in [`crate::writes`].
 
@@ -155,7 +155,7 @@ pub struct Search {
     pub pos: Option<usize>,
 }
 
-/// The tag asked for after `t` (G-7): its name, then its message.
+/// The tag asked for after `t` (G-16): its name, then its message.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TagPrompt {
     pub sha: String,
@@ -164,7 +164,7 @@ pub struct TagPrompt {
     pub message: Option<String>,
 }
 
-/// The stash asked for after `s` (G-7): its message, and whether the untracked
+/// The stash asked for after `s` (G-16): its message, and whether the untracked
 /// files go with it.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct StashPrompt {
@@ -852,7 +852,7 @@ impl App {
     }
 
     /// `w` in the sidebar: switches to a local branch, or to a remote one
-    /// through a local branch tracking it (G-4).
+    /// through a local branch tracking it (G-12).
     fn start_switch(&mut self) {
         let Some(item) = self.sidebar_item() else {
             return;
@@ -951,7 +951,7 @@ impl App {
         self.queue(write, Confirmation::Absent);
     }
 
-    /// The operation of G-5 the commit `sha` offers that `wanted` picks, as the core decides,
+    /// The operation of G-13 the commit `sha` offers that `wanted` picks, as the core decides,
     /// or `None` after saying why there is none.
     fn history_operation(&mut self, sha: &str, wanted: fn(&Write) -> bool) -> Option<Write> {
         let operations = self.refs_answer_with(|refs| refs.history_operations(sha));
@@ -1838,7 +1838,7 @@ pub(crate) mod tests {
     }
 
     #[test]
-    // Verifies: ADR-0033, G-7
+    // Verifies: ADR-0033, G-16
     fn t_asks_for_a_name_then_a_message_and_hands_the_tag_to_the_event_loop() {
         let mut app = loaded_app();
         press(&mut app, KeyCode::Char('j'));
@@ -1976,7 +1976,7 @@ pub(crate) mod tests {
     }
 
     #[test]
-    // Verifies: ADR-0034, Q-6
+    // Verifies: ADR-0034, Q-7
     fn d_on_a_tag_asks_and_deletes_it_only_on_an_explicit_yes() {
         let mut app = loaded_app();
         on_the_tag(&mut app);
@@ -1993,7 +1993,7 @@ pub(crate) mod tests {
     }
 
     #[test]
-    // Verifies: ADR-0034, Q-6
+    // Verifies: ADR-0034, Q-7
     fn any_other_answer_keeps_the_tag_and_writes_nothing() {
         for answer in [
             KeyCode::Char('n'),
@@ -2021,7 +2021,7 @@ pub(crate) mod tests {
     }
 
     #[test]
-    // Verifies: ADR-0033, G-7
+    // Verifies: ADR-0033, G-16
     fn s_asks_for_a_message_and_the_untracked_switch_and_stashes() {
         let mut app = loaded_app();
         press(&mut app, KeyCode::Char('s'));
@@ -2062,7 +2062,7 @@ pub(crate) mod tests {
     }
 
     #[test]
-    // Verifies: ADR-0034, G-7
+    // Verifies: ADR-0034, G-16
     fn a_applies_the_selected_stash_and_p_and_d_ask_first() {
         let mut app = on_a_stash();
         press(&mut app, KeyCode::Char('a'));
@@ -2102,7 +2102,7 @@ pub(crate) mod tests {
     }
 
     #[test]
-    // Verifies: ADR-0034, G-7
+    // Verifies: ADR-0034, G-16
     fn no_key_held_with_ctrl_or_alt_writes_or_asks() {
         let on_the_commit = || {
             let mut app = loaded_app();
@@ -2201,7 +2201,7 @@ pub(crate) mod tests {
     }
 
     #[test]
-    // Verifies: ADR-0033, G-4
+    // Verifies: ADR-0033, G-12
     fn a_and_u_stage_and_unstage_the_file_under_the_cursor() {
         let mut app = on_the_working_node();
         app.focus = Focus::Files;
@@ -2239,7 +2239,7 @@ pub(crate) mod tests {
     }
 
     #[test]
-    // Verifies: ADR-0033, G-4
+    // Verifies: ADR-0033, G-12
     fn c_on_the_working_node_commits_the_index_on_its_parent() {
         let mut app = on_the_working_node();
         press(&mut app, KeyCode::Char('c'));
@@ -2284,7 +2284,7 @@ pub(crate) mod tests {
     }
 
     #[test]
-    // Verifies: ADR-0033, G-4
+    // Verifies: ADR-0033, G-12
     fn b_asks_for_a_branch_at_the_commit_switched_to_unless_turned_off() {
         let mut app = loaded_app();
         press(&mut app, KeyCode::Char('j'));
@@ -2305,7 +2305,7 @@ pub(crate) mod tests {
     }
 
     #[test]
-    // Verifies: ADR-0033, G-4
+    // Verifies: ADR-0033, G-12
     fn w_switches_to_a_branch_a_remote_branch_or_a_commit() {
         let mut app = loaded_app();
         press(&mut app, KeyCode::Char('w'));
@@ -2337,7 +2337,7 @@ pub(crate) mod tests {
     }
 
     #[test]
-    // Verifies: ADR-0034, Q-6
+    // Verifies: ADR-0034, Q-7
     fn d_deletes_a_merged_branch_and_asks_first_for_one_that_is_not() {
         let delete = |merged| Write::DeleteBranch {
             name: "feat/x".into(),
@@ -2365,7 +2365,7 @@ pub(crate) mod tests {
     }
 
     #[test]
-    // Verifies: ADR-0035, G-4
+    // Verifies: ADR-0035, G-12
     fn f_fetches_the_default_remote_shows_its_progress_and_esc_cancels_it() {
         let mut app = loaded_app();
         press(&mut app, KeyCode::Char('f'));
@@ -2393,7 +2393,7 @@ pub(crate) mod tests {
     }
 
     #[test]
-    // Verifies: ADR-0035, G-4
+    // Verifies: ADR-0035, G-12
     fn capital_u_pulls_the_checked_out_branch_where_it_has_an_upstream() {
         let mut app = loaded_app();
         app.data.as_mut().unwrap().locals[0].upstream = Some("origin/main".into());
@@ -2413,7 +2413,7 @@ pub(crate) mod tests {
     }
 
     #[test]
-    // Verifies: ADR-0035, G-4
+    // Verifies: ADR-0035, G-12
     fn capital_p_pushes_the_checked_out_branch_where_a_remote_takes_it() {
         let mut app = loaded_app();
         press(&mut app, KeyCode::Char('P'));
@@ -2462,7 +2462,7 @@ pub(crate) mod tests {
     }
 
     #[test]
-    // Verifies: ADR-0033, G-5
+    // Verifies: ADR-0033, G-13
     fn the_checked_out_commit_offers_only_a_revert_and_a_reset() {
         let mut app = loaded_app();
         let row = app.data.as_ref().unwrap().row_of("d").unwrap();
@@ -2558,7 +2558,7 @@ pub(crate) mod tests {
     }
 
     #[test]
-    // Verifies: ADR-0033, G-6
+    // Verifies: ADR-0033, G-14
     fn the_conflicts_resolve_continue_and_abort_after_a_confirmation() {
         let conflict = ocelli_core::model::Conflict {
             path: "f".into(),
@@ -2654,7 +2654,7 @@ pub(crate) mod tests {
     }
 
     #[test]
-    // Verifies: ADR-0016, ADR-0031, G-13
+    // Verifies: ADR-0016, ADR-0031, G-17
     fn a_history_arriving_in_chunks_grows_below_what_is_shown() {
         let (mut app, mut layout) = chunked_app();
         assert_eq!(app.status, "3 commits in 1 chunk — loading older history…");
@@ -2699,7 +2699,7 @@ pub(crate) mod tests {
     }
 
     #[test]
-    // Verifies: ADR-0016, G-13
+    // Verifies: ADR-0016, G-17
     fn a_load_failing_before_its_first_chunk_says_so() {
         let mut app = App::new("/repo".into(), Glyphs::Unicode);
         app.on_msg(load_ended(Err("not a repository".into())));
@@ -2708,7 +2708,7 @@ pub(crate) mod tests {
     }
 
     #[test]
-    // Verifies: ADR-0016, G-13
+    // Verifies: ADR-0016, G-17
     fn a_load_stopped_by_an_error_keeps_what_has_arrived_and_says_so() {
         let (mut app, _) = chunked_app();
         app.on_msg(load_ended(Err("disk gone".into())));
@@ -2717,7 +2717,7 @@ pub(crate) mod tests {
     }
 
     #[test]
-    // Verifies: ADR-0031, G-16
+    // Verifies: ADR-0031, G-11
     fn search_reaches_the_chunks_arriving_after_it() {
         let (mut app, mut layout) = chunked_app();
         press(&mut app, KeyCode::Char('/'));
@@ -2732,7 +2732,7 @@ pub(crate) mod tests {
     }
 
     #[test]
-    // Verifies: ADR-0031, G-16
+    // Verifies: ADR-0031, G-11
     fn a_search_typed_while_loading_finds_the_first_chunk() {
         let mut layout = Layout::new();
         let mut app = App::new("/repo".into(), Glyphs::Unicode);
@@ -2745,7 +2745,7 @@ pub(crate) mod tests {
     }
 
     #[test]
-    // Verifies: ADR-0031, G-17
+    // Verifies: ADR-0031, G-10
     fn the_lineage_reaches_the_chunks_arriving_after_the_selection() {
         let (mut app, mut layout) = chunked_app();
         assert_eq!(app.lineage.as_ref().unwrap().rows().len(), 3);

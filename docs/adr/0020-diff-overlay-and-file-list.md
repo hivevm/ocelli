@@ -8,7 +8,7 @@
 ## Context
 
 When the developer selects a commit, Ocelli shows its changed files, and the diff of a changed file
-on request (G-12). In practice that is a loop, not a single view: **pick a file, read it, pick the
+on request (G-9). In practice that is a loop, not a single view: **pick a file, read it, pick the
 next.** Every layout question here follows from that loop.
 
 Two forces bear on it. **Where the diff appears:** a panel pinned to the bottom of the window,
@@ -19,7 +19,7 @@ commit that touches many files in deep directories, since paths share long prefi
 gives no sense of where a change is concentrated; a tree shows that structure, but a flat list is
 faster to scan for small changes, which are the common case.
 
-The same loop has to work in the web interface and in the terminal application (G-8), whose
+The same loop has to work in the web interface and in the terminal application (G-18), whose
 runtimes offer different means: the one a DOM and a canvas, the other a grid of cells.
 
 ## Decision

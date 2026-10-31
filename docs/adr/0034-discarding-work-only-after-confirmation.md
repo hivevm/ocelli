@@ -7,14 +7,14 @@
 
 ## Context
 
-Q-6 asks that an operation that discards work cannot happen by accident: dropping a stash, a hard
+Q-7 asks that an operation that discards work cannot happen by accident: dropping a stash, a hard
 reset, a force push, deleting a branch that is not merged runs only after the developer confirms
-it. G-7 brings the first of them. Two front ends call the same writes through the core's writer
+it. G-16 brings the first of them. Two front ends call the same writes through the core's writer
 port ([ADR-0033](0033-writes-what-git-writes.md)); were each to decide for itself which writes
 need a confirmation, the two would drift, and a third, the remote server, would have to learn the
 list again.
 
-Of the writes of G-7, dropping a stash, applying a stash and dropping it after, and deleting a tag
+Of the writes of G-16, dropping a stash, applying a stash and dropping it after, and deleting a tag
 discard work: a deleted tag comes back only by its SHA, and an annotated one loses its message.
 
 ## Decision
@@ -24,8 +24,8 @@ that does only together with the developer's **confirmation**, which every front
 words that name what is lost before it calls the write.
 
 - **The core decides which.** A write's kind says whether it discards work; dropping a stash,
-  applying and dropping one, and deleting a tag do; the writes of G-4 and G-5 join the list as they
-  come.
+  applying and dropping one, and deleting a tag do; the writes of G-12 and G-13 join the list as
+  they come.
 - **The core refuses without it.** A write that discards work and comes without a confirmation is
   refused before it reaches the repository, so a front end that forgets to ask cannot discard
   anything.
@@ -46,17 +46,17 @@ words that name what is lost before it calls the write.
 
 ## Sources / Prior art
 
-- Q-6 of the specification, which names the operations.
+- Q-7 of the specification, which names the operations.
 - `git stash drop` and `git tag -d`, which ask nothing and lose what they remove from reach —
   <https://git-scm.com/docs/git-stash>, <https://git-scm.com/docs/git-tag>
 
 ## Consequences
 
-- Positive: no front end can discard work without asking (Q-6); which writes discard work is
+- Positive: no front end can discard work without asking (Q-7); which writes discard work is
   said once; the dialog and the prompt name what is lost.
 - Negative / trade-offs: one more step for the writes that discard work; the core's write
   requests carry a confirmation.
-- Follow-ups: the writes of G-4 and G-5 named as they come.
+- Follow-ups: the writes of G-12 and G-13 named as they come.
 
 ## Enforcement
 

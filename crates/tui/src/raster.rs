@@ -417,7 +417,7 @@ mod tests {
     }
 
     #[test]
-    // Verifies: ADR-0017, G-14
+    // Verifies: ADR-0017, G-7
     fn long_edges_are_drawn_in_a_window_far_from_both_ends() {
         // A side branch whose fork lies 75 rows below its tip, beyond the
         // span the core buckets edges by.
@@ -469,7 +469,7 @@ mod tests {
     }
 
     #[test]
-    // Verifies: ADR-0030, G-9
+    // Verifies: ADR-0030, G-4
     fn a_merge_out_of_the_main_line_runs_up_its_track() {
         // `m` (lane 0, row 2) is merged into `f` (lane 1, row 0) past the main line's `n` (lane 0,
         // row 1); the edge leaves lane 0 at m's row, runs up track 2, and turns to f.
@@ -512,7 +512,7 @@ mod tests {
     }
 
     #[test]
-    // Verifies: ADR-0017, G-14
+    // Verifies: ADR-0017, G-7
     fn a_window_past_the_end_is_empty() {
         let g = fork_and_merge();
         assert!(render(&g, 4, 5, Glyphs::Unicode).is_empty());

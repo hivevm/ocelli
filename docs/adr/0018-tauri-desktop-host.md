@@ -7,7 +7,7 @@
 
 ## Context
 
-The desktop application is one of Ocelli's three front ends (G-8) and runs on Linux, macOS, and
+The desktop application is one of Ocelli's three front ends (G-18) and runs on Linux, macOS, and
 Windows (Constraints). It needs fast, direct access to the local repository, a drawing surface
 flexible enough for the commit graph with its overlays, and installers a developer runs without a
 separate runtime. Being lighter than an Electron application is half of the problem Ocelli solves:

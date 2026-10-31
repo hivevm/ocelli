@@ -52,7 +52,7 @@ to invent.
   interface, and the terminal application.
   _Avoid:_ client, UI, frontend.
 - **History operation** — a merge, rebase, cherry-pick, revert, or reset of the checked-out
-  branch, offered on a commit of the commit graph (G-5); one stopped on a conflict is an operation
+  branch, offered on a commit of the commit graph (G-13); one stopped on a conflict is an operation
   in progress.
   _Avoid:_ action.
 - **Host** — what serves the web interface its commands and events: the desktop host or the

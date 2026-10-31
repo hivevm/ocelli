@@ -3,20 +3,20 @@
 - **Status:** 🟢 accepted
 - **Date:** 2026-10-10
 - **Deciders:** Markus Brigl
-- **Applies to:** the remote server's crate and binary `ocelli-server`, the command handling the desktop host in `src-tauri/` and the remote server share in `crates/commands`, the transport through which `src-web/` reaches either host, the fixtures of the wire format in `crates/core/tests/fixtures/` and `crates/server/tests/fixtures/`, the `--allow-writes` switch, how `crates/server/src/socket.rs` answers `write_discards`, `perform_write`, and `cancel_write` and what it does when a tab closes, the turns of a repository's writes and the registry of open repositories in `crates/server/src/turns.rs`, and the tests of Q-4, Q-5, Q-6, and Q-7 against the remote server
+- **Applies to:** the remote server's crate and binary `ocelli-server`, the command handling the desktop host in `src-tauri/` and the remote server share in `crates/commands`, the transport through which `src-web/` reaches either host, the fixtures of the wire format in `crates/core/tests/fixtures/` and `crates/server/tests/fixtures/`, the `--allow-writes` switch, how `crates/server/src/socket.rs` answers `write_discards`, `perform_write`, and `cancel_write` and what it does when a tab closes, the turns of a repository's writes and the registry of open repositories in `crates/server/src/turns.rs`, and the tests of Q-4, Q-5, Q-7, and Q-6 against the remote server
 
 ## Context
 
-G-8 asks for the commit graph and its operations in three front ends, the web interface served
-by the remote server among them, and G-4 to G-7 in every one of them; G-13 asks that a fetch,
-pull, or push reports its progress and that a fetch, and a pull while it fetches, can be stopped.
-The Constraints describe the remote server as VS Code's remote development does: it runs next to
-the repository, and the developer's browser talks to it. The desktop host answers the web
-interface through Tauri commands and events ([ADR-0018](0018-tauri-desktop-host.md)): the core
-keeps the history in the host and the web interface reads windows of rows, searches, and selects
-([ADR-0031](0031-front-ends-read-row-windows.md)), the host sends the answers the core decides
-from the refs ([ADR-0036](0036-desktop-host-answers-what-the-core-decides.md)), and writes go
-through the core's port ([ADR-0033](0033-writes-what-git-writes.md)).
+G-18 asks for the commit graph and its operations in three front ends, the web interface served by
+the remote server among them, and G-12 to G-14 and G-16 in every one of them; G-17 asks that a
+fetch, pull, or push reports its progress and that a fetch, and a pull while it fetches, can be
+stopped. The Constraints describe the remote server as VS Code's remote development does: it runs
+next to the repository, and the developer's browser talks to it. The desktop host answers the web
+interface through Tauri commands and events ([ADR-0018](0018-tauri-desktop-host.md)): the core keeps
+the history in the host and the web interface reads windows of rows, searches, and selects
+([ADR-0031](0031-front-ends-read-row-windows.md)), the host sends the answers the core decides from
+the refs ([ADR-0036](0036-desktop-host-answers-what-the-core-decides.md)), and writes go through the
+core's port ([ADR-0033](0033-writes-what-git-writes.md)).
 [ADR-0008](0008-toolchain-rust-and-typescript.md) writes the servers in Rust, and
 [ADR-0009](0009-ports-and-adapters.md) makes every front end an adapter of `core`.
 
@@ -47,7 +47,7 @@ reaches it: authentication ([ADR-0038](0038-remote-server-localhost-tls-session-
 and the server root ([ADR-0039](0039-git-adapter-confined-to-the-server-root.md)) narrow
 what a stolen session reaches, and a server that writes widens what it can do there: a commit,
 a reset, a push to a remote with the developer's credentials. Q-4 forbids running a
-program a repository names, Q-6 discarding work without confirmation, Q-7 a repository obtaining
+program a repository names, Q-7 discarding work without confirmation, Q-6 a repository obtaining
 the developer's credentials. The server serves one developer (Non-Goals) and runs under their
 account, as VS Code's remote server does.
 
@@ -100,7 +100,7 @@ commands and confirmations, one write per repository at a time.
 - **As the user it runs as.** A write records the identity of the repository's configuration as
   the server's account reads it (ADR-0033). A fetch, pull, or push authenticates with the SSH
   agent of the server's environment and the credential helpers of that account's global and
-  system configuration, never the repository's (ADR-0035, Q-7). The browser hands over no
+  system configuration, never the repository's (ADR-0035, Q-6). The browser hands over no
   identity, key, password, or helper, and the server asks it for none.
 - **The desktop host's commands.** `write_discards`, then `perform_write` with `confirmed`, cross
   the WebSocket with the names and payloads the desktop host's Tauri commands carry; the shared
@@ -109,7 +109,7 @@ commands and confirmations, one write per repository at a time.
   logic of its own.
 - **Progress and stop.** A transfer reports its progress to the tab that started it as
   `write-progress` events; `cancel_write` from that tab stops its fetch, or its pull while it
-  fetches (G-13). A push offers no stop, as in the desktop.
+  fetches (G-17). A push offers no stop, as in the desktop.
 - **One write per repository.** The process holds a turn for each repository, keyed by its
   canonical common directory, so that a worktree and the working directory it belongs to count as
   one. A tab's write waits for a write of another tab to the same repository to end, and then
@@ -169,7 +169,7 @@ working-directory node's author, which stays absent in the browser (ADR-0039).
 - **A confirmation token of the server's own for each write** — a second proof beside the session
   cookie, but whoever holds the session receives the token through the same socket; it guards
   nothing the cookie and the Origin check do not, and the desktop's confirmation already keeps
-  work from being discarded by accident (Q-6).
+  work from being discarded by accident (Q-7).
 - **One writing tab only** — no ordering to decide, but a developer with two tabs on one
   repository finds one of them read-only for no reason they can see, and a lost tab holds the
   write until the server notices; the turn and the check of what a write expects order two tabs
@@ -181,7 +181,7 @@ working-directory node's author, which stays absent in the browser (ADR-0039).
   window, but a waiting write would then land after nobody can see it, and a long fetch would
   hold the repository's turn from the tabs still open; a local write already running and a push
   finish, since neither can be stopped safely.
-- **Local writes only, without transfers** — no credentials touched on the server, but G-8 asks
+- **Local writes only, without transfers** — no credentials touched on the server, but G-18 asks
   for fetch, pull, and push in the browser, and the developer would leave for a terminal on the
   server to do what the desktop does in a click.
 
@@ -212,9 +212,9 @@ working-directory node's author, which stays absent in the browser (ADR-0039).
 
 ## Consequences
 
-- Positive: G-8's web interface runs against a repository on another machine with the desktop's
+- Positive: G-18's web interface runs against a repository on another machine with the desktop's
   answers, checks, and confirmations, from one implementation of the commands; a command added
-  for one host reaches the other, and G-13's progress and stop reach the tab that started the
+  for one host reaches the other, and G-17's progress and stop reach the tab that started the
   transfer.
 - Positive: the server builds without WebKit and runs on a machine without a display; Q-2's
   windows of rows cross the network as they cross Tauri's IPC, a screenful at a time.
@@ -224,10 +224,10 @@ working-directory node's author, which stays absent in the browser (ADR-0039).
   root, and the bound keeps a session from tying up the blocking pool with waiting writes.
 - Positive (Q-4): the server's writes are the git adapter's, which run no program the repository
   names; the server adds none.
-- Positive (Q-6): a write that discards work runs only with the confirmation the shared `Host`
+- Positive (Q-7): a write that discards work runs only with the confirmation the shared `Host`
   checks, whatever tab or transport sends it; a second tab's write cannot land on a state the
   first changed, nor a closed tab's waiting write on a state nobody sees.
-- Positive (Q-7): the browser never holds a credential; the repository's own helper does not run,
+- Positive (Q-6): the browser never holds a credential; the repository's own helper does not run,
   as in the desktop.
 - Negative / trade-offs: every open tab holds a laid-out history in the server's memory, so a
   developer with many tabs on a large repository pays for each, up to the bound on tabs; a
@@ -235,7 +235,7 @@ working-directory node's author, which stays absent in the browser (ADR-0039).
 - Negative / trade-offs (Q-5): with the switch, whoever holds a session writes and pushes with the
   developer's credentials, and a confirmation is a click the session can send; the switch, the
   cookie, and the root are the whole of what stands in the way.
-- Negative / trade-offs (Q-7): a server started without an SSH agent in its environment, as a
+- Negative / trade-offs (Q-6): a server started without an SSH agent in its environment, as a
   service usually is, cannot authenticate over SSH; the developer starts it where the agent runs,
   or uses HTTPS with a global helper.
 - Negative / trade-offs (Q-5): a remote on the server's machine outside its root, which the
@@ -312,11 +312,11 @@ a repository made by `git` below its root where it writes:
   as the shared `Host` leaves it, and the load after the commit selects it; branches, stashes,
   tags, the history operations, and resolving, continuing, and aborting a stopped operation
   through the WebSocket each end as the desktop leaves them, and each write that discards work
-  is refused without `confirmed` and performed with it (Q-6);
+  is refused without `confirmed` and performed with it (Q-7);
 - in `crates/server/tests/transfers.rs`: fetching, pulling, and pushing end as the desktop leaves
   them and report `write-progress` to the tab that started them; a fetch and a pull's fetch stop
   on `cancel_write`; a tab closed while it fetches stops the fetch and gives the repository's turn
-  back; a repository's own credential helper does not run (Q-7); a remote on this machine is
+  back; a repository's own credential helper does not run (Q-6); a remote on this machine is
   fetched from and pushed to below the server root and refused outside it, by its path, by a
   `file://` address, and through `insteadOf` and `pushInsteadOf`;
 - in `crates/server/tests/hostile_commands.rs`: every command of the shared list, sent at the

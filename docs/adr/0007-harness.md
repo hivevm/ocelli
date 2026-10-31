@@ -16,7 +16,7 @@ without the maintainer, or which parts are never worked without the maintainer.
 
 The specification's *Threats & Forbidden Actions* name three places where a wrong change does
 real harm: the remote server and its authentication (Q-5), anything that could run code a
-repository brings (Q-4), and the operations that discard work (Q-6). A one-person project
+repository brings (Q-4), and the operations that discard work (Q-7). A one-person project
 starts with the smallest harness and grows it when the work does.
 
 ## Decision

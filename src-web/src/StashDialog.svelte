@@ -1,5 +1,5 @@
 <script lang="ts">
-  // Describes a new stash (G-7): a message, and whether the untracked files go with the changes;
+  // Describes a new stash (G-16): a message, and whether the untracked files go with the changes;
   // ignored files never do. A refusal, such as nothing to stash, is said here.
   import Dialog from './Dialog.svelte';
   import { stashRequest, type Write } from './writes.ts';

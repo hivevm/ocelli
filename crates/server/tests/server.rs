@@ -31,7 +31,7 @@ use tokio::net::TcpStream;
 use tokio_tungstenite::tungstenite::Message;
 
 #[tokio::test]
-// Verifies: ADR-0037, ADR-0038, ADR-0039, G-8
+// Verifies: ADR-0037, ADR-0038, ADR-0039, G-18
 async fn the_printed_url_opens_the_repository_at_the_root_and_its_rows_arrive_as_the_desktop_reads_them()
  {
     let tree = Tree::new("tracer");
@@ -1104,7 +1104,7 @@ async fn sessions_become(running: &Running, n: usize) {
 }
 
 #[tokio::test]
-// Verifies: ADR-0037, G-8
+// Verifies: ADR-0037, G-18
 async fn two_tabs_on_two_repositories_each_show_their_own_and_a_selection_stays_in_its_tab() {
     let tree = Tree::new("two-tabs");
     let root = tree.root();
@@ -1199,7 +1199,7 @@ async fn a_tab_closed_or_dropped_during_a_load_has_its_session_dropped() {
 }
 
 #[tokio::test]
-// Verifies: ADR-0037, ADR-0036, ADR-0031, G-8
+// Verifies: ADR-0037, ADR-0036, ADR-0031, G-18
 async fn each_read_the_browser_asks_is_answered_as_the_desktop_host_answers_it() {
     let tree = Tree::new("same-answers");
     let root = tree.root();

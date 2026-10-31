@@ -126,7 +126,7 @@ mod tests {
     use super::*;
 
     #[test]
-    // Verifies: G-13
+    // Verifies: G-17
     fn queued_requests_collapse_to_the_newest_of_each_kind() {
         let (tx, rx) = channel();
         for sha in ["a", "b", "c"] {

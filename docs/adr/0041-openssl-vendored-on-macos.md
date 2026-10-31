@@ -76,7 +76,7 @@ learns of a vulnerability in the OpenSSL it ships (see Follow-ups).
 
 - Positive: the macOS application, `ocelli-cli`, and `ocelli-server` start on any supported Mac,
   and the `x86_64-apple-darwin` leg builds on `macos-latest` as ADR-0025 has it. SSH remotes keep
-  working as ADR-0035 decides (Q-4, Q-7 unchanged).
+  working as ADR-0035 decides (Q-4, Q-6 unchanged).
 - Negative / trade-offs: Ocelli ships its own OpenSSL on macOS, and a fix to OpenSSL reaches
   macOS users only with an Ocelli release that updates `openssl-src`. A macOS build compiles
   OpenSSL, which takes longer and needs `perl` and `make` on the build machine. OpenSSL 3 is under

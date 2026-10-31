@@ -20,9 +20,9 @@
     onJumpToRow: (row: number) => void;
     /** The ref chips of `node`, each with what it offers. */
     chips: Chip[];
-    /** The operations of G-5 the commit offers on the checked-out branch, as the core decides. */
+    /** The operations of G-13 the commit offers on the checked-out branch, as the core decides. */
     operations: Write[];
-    /** Performs a write on `node` (G-7), asking first where it discards work (ADR-0034);
+    /** Performs a write on `node` (G-16), asking first where it discards work (ADR-0034);
         resolves with why it was refused, or null. */
     onWrite: (write: Write) => Promise<string | null>;
   }
@@ -34,7 +34,7 @@
   // The reset's mode, mixed as git's default.
   let resetMode = $state<ResetMode>('mixed');
 
-  /** Runs an operation of G-5 the core offered, a reset in the mode chosen (ADR-0033). */
+  /** Runs an operation of G-13 the core offered, a reset in the mode chosen (ADR-0033). */
   function run(action: Write): void {
     void write(action.kind === 'reset' ? { ...action, mode: resetMode } : action);
   }

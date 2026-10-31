@@ -7,7 +7,7 @@
 
 ## Context
 
-G-9 asks that an edge between lanes is drawn as an orthogonal L-shape whose bend follows its type,
+G-4 asks that an edge between lanes is drawn as an orthogonal L-shape whose bend follows its type,
 a branch edge bending at its parent's row and a merge edge at its child's row, and that no edge
 runs through a commit it does not join. Which of the two segments comes first decides which lane
 the vertical run occupies, and so whether it can cross a commit.
@@ -76,12 +76,12 @@ edges.
 - **Routing around occupied cells** (channel routing) — avoids every overlap, but needs a routing
   pass with its own complexity and gives up the two-segment shape that makes an edge traceable.
 - **Three segments for every merge to the right** (out, up, back in) — avoids the commit, but
-  breaks the L-shape G-9 asks for and costs a lane of room where J(c) already keeps the parent's
+  breaks the L-shape G-4 asks for and costs a lane of room where J(c) already keeps the parent's
   lane clear; only a merge out of the main line, whose parent's lane is not the layout's to keep
   clear, takes them.
 - **A merge out of the main line riding up lane 0** — the main line stays as it is, but the edge
   runs over the main line's commits, and which of them was merged cannot be read off the graph.
-- **Accepting the overlap** — contradicts G-9.
+- **Accepting the overlap** — contradicts G-4.
 
 ## Sources / Prior art
 

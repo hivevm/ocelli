@@ -1,4 +1,4 @@
-//! The shared list of commands (ADR-0037, G-8): each host answers the commands the list gives it
+//! The shared list of commands (ADR-0037, G-18): each host answers the commands the list gives it
 //! and no other, the web interface sends no command the list does not name and listens for no
 //! event the hosts do not report, and the server's own events are its alone. The commands are
 //! read off the sources of the web interface, the desktop host, and the server's dispatch, and the
@@ -135,7 +135,7 @@ fn uncovered(
 
 /// What the web interface asks for that the hosts do not carry: each command it sends that the
 /// shared list does not name, and each event it listens for that the shared commands, which both
-/// hosts carry, never report (G-8, ADR-0037).
+/// hosts carry, never report (G-18, ADR-0037).
 ///
 /// The check decides existence only: that each host answers the commands the list gives it is
 /// decided by `uncovered`, and that each answer is the desktop host's for the same repository by
@@ -262,7 +262,7 @@ fn a_command_one_host_answers_and_the_other_or_the_list_does_not_is_named() {
 }
 
 #[test]
-// Verifies: G-8, ADR-0037
+// Verifies: G-18, ADR-0037
 fn the_existence_check_names_each_command_and_event_of_the_web_interface_no_host_carries() {
     let listened = set(&["history-grew", "set-status"]);
     let reported = set(&["history-grew", "set-status", "write-progress"]);
@@ -335,7 +335,7 @@ fn after() { match y { "nor_this" => 2 } }
 }
 
 #[tokio::test]
-// Verifies: G-8, ADR-0037
+// Verifies: G-18, ADR-0037
 async fn both_hosts_answer_the_shared_list_of_commands_and_the_web_interface_sends_no_other() {
     let repo = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
     let web = sources(&repo.join("src-web/src"), |p| {

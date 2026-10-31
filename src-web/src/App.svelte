@@ -140,7 +140,7 @@
   const selectedChips = $derived(
     selectedNode ? commitChips(selectedNode.refs, repoRefs, selectedNode.sha) : [],
   );
-  // The operations of G-5 the selected commit offers on the checked-out branch, as the host's
+  // The operations of G-13 the selected commit offers on the checked-out branch, as the host's
   // answer to selecting it says (ADR-0033, ADR-0036).
   let offered = $state<Offered | null>(null);
   // Whether the refs of the load on screen have arrived, after which every commit has its
@@ -373,7 +373,7 @@
     await invoke('open_repo', { path }).catch((e: unknown) => { status = 'Error: ' + e; });
   }
 
-  /** Performs a write (G-7), asking first where the core says it discards work: the reload
+  /** Performs a write (G-16), asking first where the core says it discards work: the reload
       after it shows the result, the commit selected again. Resolves with why the host refused
       it, or null once written or kept. */
   async function performWrite(write: Write): Promise<string | null> {

@@ -10,7 +10,7 @@
 `core` reaches a repository only through its ports ([ADR-0009](0009-ports-and-adapters.md)); the
 reading port is the trait `RepositoryReader` in `crates/core/src/port.rs`, and something has to
 implement it. Loading a repository is I/O-bound and takes noticeable time, chunk after chunk over
-the whole history ([ADR-0016](0016-history-loads-in-chunks.md)), and G-13 requires that the front
+the whole history ([ADR-0016](0016-history-loads-in-chunks.md)), and G-17 requires that the front
 end keeps responding and reports progress while it runs. Q-4 requires that showing a repository
 starts no program the repository names, such as `core.fsmonitor`, a hook, or a filter driver.
 
@@ -25,9 +25,9 @@ reporting progress through a callback the port takes, and have every front end c
 thread that draws: the desktop host on Tokio's blocking pool through `tokio::task::spawn_blocking`,
 the terminal application on a `std::thread` of its own.
 
-**Out of scope:** the operations that write (G-4 to G-7), which may reach a repository through
-other means behind ports of their own, which is [ADR-0033](0033-writes-what-git-writes.md); the
-remote server's threading.
+**Out of scope:** the operations that write (G-12 to G-14 and G-16), which may reach a repository
+through other means behind ports of their own, which is [ADR-0033](0033-writes-what-git-writes.md);
+the remote server's threading.
 
 ## Alternatives considered
 
@@ -38,7 +38,7 @@ remote server's threading.
   `core.fsmonitor` and other configured programs, which Q-4 forbids unless every call overrides
   them.
 - **Calling `git2` directly in the async task or the event loop** — least code, but it blocks a
-  runtime worker or the drawing thread for the whole load, the failure G-13 rules out.
+  runtime worker or the drawing thread for the whole load, the failure G-17 rules out.
 - **A Tokio channel in the port for progress** — the shape of the desktop host's runtime, but it
   pulls Tokio into `core`, which ADR-0009 keeps free of technology; a callback serves both hosts.
 
@@ -55,7 +55,7 @@ remote server's threading.
 ## Consequences
 
 - Positive: `git2` is proven and covers everything the viewer reads; the front ends stay
-  responsive while a repository loads (G-13); `core` stays free of Tokio; libgit2 starts no hook,
+  responsive while a repository loads (G-17); `core` stays free of Tokio; libgit2 starts no hook,
   external filter driver, or file-system monitor, which is the ground Q-4 stands on.
 - Negative / trade-offs: a blocking task costs a pool slot, negligible for a load; the progress
   callback runs on the loading thread, so each host carries it to its drawing thread itself;

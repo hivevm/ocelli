@@ -127,7 +127,7 @@ mod tests {
     }
 
     #[test]
-    // Verifies: ADR-0035, G-4
+    // Verifies: ADR-0035, G-12
     fn a_pull_and_a_push_are_those_of_the_checked_out_branch_where_a_remote_takes_them() {
         let pull = Write::Pull {
             branch: "main".into(),
@@ -170,7 +170,7 @@ mod tests {
     }
 
     #[test]
-    // Verifies: ADR-0035, G-13
+    // Verifies: ADR-0035, G-17
     fn a_fetch_and_a_pull_can_be_stopped_a_push_and_a_local_write_cannot() {
         let fetch = Write::Fetch { remote: "o".into() };
         let pull = Write::Pull {

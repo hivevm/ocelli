@@ -382,7 +382,7 @@ pub struct DiffLine {
     pub new_lineno: Option<u32>,
 }
 
-/// How much of a file's uncommitted change the index holds (G-4).
+/// How much of a file's uncommitted change the index holds (G-12).
 #[derive(Debug, Serialize, Clone, Copy, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub enum Staged {

@@ -573,7 +573,7 @@ fn working(app: &App) -> bool {
         .is_some_and(|f| f.sha == ocelli_core::model::WORKDIR_SHA)
 }
 
-/// How much of a file's change is staged: all, part, or none (G-4).
+/// How much of a file's change is staged: all, part, or none (G-12).
 fn staged_mark(p: &Palette, glyphs: Glyphs, staged: Staged) -> Span<'static> {
     let (unicode, ascii, colour) = match staged {
         Staged::Yes => ("● ", "[x] ", p.accent),
@@ -837,7 +837,7 @@ fn draw_prompt(frame: &mut Frame, text: &str, p: &Palette, main: Rect) {
     draw_dialog(frame, p, main, " Open repository ".to_string(), lines);
 }
 
-/// The tag prompt (G-7): the name, then the message, the line being typed
+/// The tag prompt (G-16): the name, then the message, the line being typed
 /// carrying the cursor.
 fn draw_tag_prompt(frame: &mut Frame, tag: &TagPrompt, p: &Palette, main: Rect) {
     let typing_name = tag.message.is_none();
@@ -879,7 +879,7 @@ fn draw_confirm(frame: &mut Frame, write: &Write, p: &Palette, main: Rect) {
     draw_dialog(frame, p, main, " Discard? ".to_string(), lines);
 }
 
-/// The stash prompt (G-7): the message, and whether the untracked files go
+/// The stash prompt (G-16): the message, and whether the untracked files go
 /// with the changes.
 fn draw_stash_prompt(frame: &mut Frame, stash: &StashPrompt, p: &Palette, main: Rect) {
     let untracked = if stash.untracked { "[x]" } else { "[ ]" };
@@ -1150,7 +1150,7 @@ mod tests {
     }
 
     #[test]
-    // Verifies: G-12
+    // Verifies: G-9
     fn the_detail_pane_shows_the_commit_and_its_links() {
         let mut app = loaded_app();
         let text = screen(&mut app, 160, 20).join("\n");

@@ -7,7 +7,7 @@
 
 ## Context
 
-G-4 ends with fetch, pull, and push, Ocelli's first traffic to a remote repository. The
+G-12 ends with fetch, pull, and push, Ocelli's first traffic to a remote repository. The
 specification counts the developer's credentials (SSH keys, credential helpers) among the assets,
 and a repository's configuration, the remote, and the network to it as untrusted. It asks that no
 credential goes anywhere but to the remote it belongs to (Q-4 and the threats); Ocelli keeps none
@@ -166,8 +166,8 @@ refused update.
   developer's own tools.
 - **Trust on first use for SSH hosts** — less friction, but the first connection is the one an
   attacker on the network intercepts.
-- **Pull by merge or rebase as configured** — what `git pull` does, but it brings G-5's merge and
-  rebase, and their conflicts (G-6), into G-4.
+- **Pull by merge or rebase as configured** — what `git pull` does, but it brings G-13's merge and
+  rebase, and their conflicts (G-14), into G-12.
 - **A stop for a push, and a refused pull that undoes its fetch** — what a reader might expect,
   but libgit2 cannot stop a push once its objects are sent, and `git` keeps the fetch. Both go
   against the conventions that a write does what `git` does and that a control offers no stop it
@@ -250,7 +250,7 @@ refused update.
 - Negative / trade-offs: native TLS and SSH libraries join the build and its supply chain; a
   developer whose SSH key is not in an agent, or whose host is not in `known_hosts`, has to set
   that up first; a credential helper set per repository does not work; pulling a branch that has
-  diverged needs `git` until G-5.
+  diverged needs `git` until G-13.
 - Negative / trade-offs: a push that `update_tips` does not confirm opens a second connection to
   the remote, asking for credentials again, and writes and removes a scratch reference under
   `refs/ocelli/`; one whose configured addresses `insteadOf` would all lead elsewhere is reported
@@ -261,7 +261,7 @@ refused update.
   authority or only in the system's `known_hosts`, and one whose HTTPS remote is named by an IP
   address or an internationalised name must use `git` or SSH; a revoked key is refused for every
   host, a stricter rule than `ssh`'s.
-- Follow-ups: force push with a lease and a confirmation; merging and rebasing on pull with G-5;
+- Follow-ups: force push with a lease and a confirmation; merging and rebasing on pull with G-13;
   proxies from the developer's own setup; SSH certificates; the reason of a refused update, should
   git2 hand it over in bytes.
 

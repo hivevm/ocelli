@@ -160,7 +160,7 @@ mod tests {
     }
 
     #[test]
-    // Verifies: ADR-0035, G-13
+    // Verifies: ADR-0035, G-17
     fn a_fetch_and_a_pull_can_be_stopped_and_a_push_cannot() {
         let mut one = OneWrite::default();
         assert!(!one.cancel(), "nothing runs to stop");

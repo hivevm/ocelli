@@ -1,4 +1,4 @@
-//! Verifies: ADR-0035, Q-7
+//! Verifies: ADR-0035, Q-6
 //!
 //! A fetch sends a credential only over an encrypted connection to the host it belongs to. A
 //! local server asks every request for credentials and records whether any came; the developer's

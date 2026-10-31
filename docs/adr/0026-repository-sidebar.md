@@ -7,10 +7,10 @@
 
 ## Context
 
-G-11 shows every local branch, remote branch, and tag as a ref chip on the commit it points at.
+G-6 shows every local branch, remote branch, and tag as a ref chip on the commit it points at.
 That answers *which refs does this commit carry*. It does not answer the inverse, *which refs
 exist, and where is one of them*: a branch whose tip lies a thousand rows down is invisible until
-the developer scrolls onto it, and search (G-16) answers a lookup by name, not the question of
+the developer scrolls onto it, and search (G-11) answers a lookup by name, not the question of
 what there is. Every comparable client answers it with a panel on the left listing local
 branches, remote branches, worktrees, and tags.
 
@@ -57,10 +57,9 @@ reveals and selects the commit it points at.
 4. **Sections are collapsible and counted**, so that a repository with 300 remote branches does not
    push the tags out of view.
 
-**Out of scope:** the operations on refs, creating, switching, and deleting branches and tags
-(G-4, G-7), which [ADR-0033](0033-writes-what-git-writes.md) decides; submodules and what switching
-the viewed repository involves, which [ADR-0027](0027-submodules-and-repository-switching.md)
-decides.
+**Out of scope:** the operations on refs, creating, switching, and deleting branches and tags (G-12,
+G-16), which [ADR-0033](0033-writes-what-git-writes.md) decides; submodules and what switching the
+viewed repository involves, which [ADR-0027](0027-submodules-and-repository-switching.md) decides.
 
 ## Alternatives considered
 

@@ -34,7 +34,7 @@ impl Window {
     }
 }
 
-/// A commit's lineage (G-17): the rows of the commit and its ancestors, and of the commit and its
+/// A commit's lineage (G-10): the rows of the commit and its ancestors, and of the commit and its
 /// descendants, kept apart so the lineage can grow with the chunks laid out after it.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Lineage {
@@ -420,7 +420,7 @@ impl History {
             .map(|&k| &self.edges[k as usize])
     }
 
-    /// Rows of the commits matching `query`, newest first (G-16).
+    /// Rows of the commits matching `query`, newest first (G-11).
     ///
     /// A case-insensitive substring test over what a row shows: message, author, committer,
     /// SHA, and ref names. A blank query matches nothing; an empty result means "no search
@@ -464,7 +464,7 @@ impl History {
         rows.iter().collect()
     }
 
-    /// The commit's lineage: itself, its ancestors, and its descendants (G-17).
+    /// The commit's lineage: itself, its ancestors, and its descendants (G-10).
     pub fn lineage(&self, row: usize) -> Lineage {
         let mut lineage = Lineage {
             ancestors: RowSet::new(self.rows.len()),
@@ -596,7 +596,7 @@ mod tests {
     }
 
     #[test]
-    // Verifies: ADR-0031, ADR-0017, G-14
+    // Verifies: ADR-0031, ADR-0017, G-7
     fn a_window_holds_exactly_its_rows_and_every_edge_crossing_them() {
         let mut long = 0;
         for seed in 1..30u64 {
@@ -657,7 +657,7 @@ mod tests {
         }
     }
 
-    // ── Search (G-16) ──────────────────────────────────────────────────────────────────────
+    // ── Search (G-11) ──────────────────────────────────────────────────────────────────────
 
     fn found(h: &History, query: &str) -> Vec<String> {
         h.search(query)
@@ -683,7 +683,7 @@ mod tests {
     }
 
     #[test]
-    // Verifies: ADR-0031, G-16
+    // Verifies: ADR-0031, G-11
     fn a_blank_query_matches_nothing() {
         let h = searchable();
         assert!(h.search("").is_empty());
@@ -691,7 +691,7 @@ mod tests {
     }
 
     #[test]
-    // Verifies: ADR-0031, G-16
+    // Verifies: ADR-0031, G-11
     fn search_matches_message_author_committer_sha_and_refs_case_insensitively() {
         let h = searchable();
         assert_eq!(found(&h, "HEADER"), ["c0ffee1"]);
@@ -703,13 +703,13 @@ mod tests {
     }
 
     #[test]
-    // Verifies: ADR-0031, G-16
+    // Verifies: ADR-0031, G-11
     fn search_results_run_newest_first() {
         assert_eq!(found(&searchable(), ":"), ["deadbee", "abc1234", "c0ffee1"]);
     }
 
     #[test]
-    // Verifies: ADR-0031, G-16
+    // Verifies: ADR-0031, G-11
     fn search_covers_every_chunk_laid_out() {
         let commits = generated_history(3, 90);
         let h = history(&commits.chunks(30).map(<[_]>::to_vec).collect::<Vec<_>>());
@@ -721,7 +721,7 @@ mod tests {
         assert_eq!(h.search("commit").len(), 90);
     }
 
-    // ── Lineage (G-17) ─────────────────────────────────────────────────────────────────────
+    // ── Lineage (G-10) ─────────────────────────────────────────────────────────────────────
 
     fn shas(h: &History, rows: HashSet<usize>) -> Vec<String> {
         let mut out: Vec<String> = rows.into_iter().map(|r| h.node(r).sha.clone()).collect();
@@ -746,7 +746,7 @@ mod tests {
     }
 
     #[test]
-    // Verifies: ADR-0031, G-17
+    // Verifies: ADR-0031, G-10
     fn ancestors_follow_every_parent_line_and_include_the_start() {
         let h = diamond();
         assert_eq!(
@@ -761,14 +761,14 @@ mod tests {
     }
 
     #[test]
-    // Verifies: ADR-0031, G-17
+    // Verifies: ADR-0031, G-10
     fn parents_not_laid_out_are_skipped() {
         let h = history(&[vec![commit("A", 1, &["missing"])]]);
         assert_eq!(shas(&h, h.ancestors(0)), ["A"]);
     }
 
     #[test]
-    // Verifies: ADR-0031, G-17
+    // Verifies: ADR-0031, G-10
     fn descendants_follow_child_links_up_to_the_tips() {
         let h = diamond();
         assert_eq!(shas(&h, h.descendants(at(&h, "C"))), ["B", "C", "F", "M"]);
@@ -781,7 +781,7 @@ mod tests {
     }
 
     #[test]
-    // Verifies: ADR-0031, G-17
+    // Verifies: ADR-0031, G-10
     fn lineage_is_ancestors_and_descendants_without_siblings() {
         let h = diamond();
         assert_eq!(
@@ -792,7 +792,7 @@ mod tests {
     }
 
     #[test]
-    // Verifies: ADR-0031, G-16, G-17
+    // Verifies: ADR-0031, G-11, G-10
     fn the_terminal_applications_cases_hold_over_the_core() {
         // a ← b ← d (merge of b and c), a ← c, and e on top of c (unmerged).
         let mut c = commit("c", 3, &["a"]);
@@ -818,7 +818,7 @@ mod tests {
     }
 
     #[test]
-    // Verifies: ADR-0031, G-16, G-17
+    // Verifies: ADR-0031, G-11, G-10
     fn search_and_lineage_grown_by_a_chunk_equal_them_computed_afresh() {
         for seed in 1..20u64 {
             let commits = generated_history(seed, 120);
@@ -837,7 +837,7 @@ mod tests {
     }
 
     #[test]
-    // Verifies: ADR-0031, G-17
+    // Verifies: ADR-0031, G-10
     fn lineage_reaches_into_chunks_laid_out_later() {
         let h = history(&[
             vec![commit("c", 3, &["b"])],
@@ -849,7 +849,7 @@ mod tests {
     }
 
     #[test]
-    // Verifies: ADR-0015, G-17
+    // Verifies: ADR-0015, G-10
     fn a_late_child_joins_its_parents_children_and_lineage() {
         let mut h = History::new();
         h.add_chunk(vec![commit("tip", 4, &["p"]), commit("p", 3, &["base"])]);
@@ -868,7 +868,7 @@ mod tests {
     }
 
     #[test]
-    // Verifies: ADR-0031, ADR-0015, G-17
+    // Verifies: ADR-0031, ADR-0015, G-10
     fn lineages_grown_over_late_children_equal_them_computed_afresh() {
         let mut late = 0;
         for seed in 1..30u64 {
@@ -903,7 +903,7 @@ mod tests {
     }
 
     #[test]
-    // Verifies: ADR-0031, ADR-0017, G-14
+    // Verifies: ADR-0031, ADR-0017, G-7
     fn a_window_looks_at_the_edges_near_it_not_at_every_long_one() {
         // A main line of 20 000 commits with a branch forked off every tenth and merged back two
         // hundred commits above: thousands of long edges, few of them near any one window.

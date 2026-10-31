@@ -14,7 +14,7 @@ use serde::Serialize;
 use std::sync::{Arc, RwLock};
 
 /// The rows of one window, as the web interface draws them. With a commit selected, `lit_nodes`
-/// and `lit_edges` say which of the window's nodes and edges belong to its lineage (G-17); the
+/// and `lit_edges` say which of the window's nodes and edges belong to its lineage (G-10); the
 /// rest is dimmed.
 #[derive(Debug, Serialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
@@ -69,7 +69,7 @@ pub struct Selected {
 }
 
 /// The rows matching a search, newest first, and the nodes of the first `limit` of them, which
-/// the results panel lists (G-16).
+/// the results panel lists (G-11).
 #[derive(Debug, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct Found {
@@ -350,7 +350,7 @@ pub(crate) mod tests {
     }
 
     #[test]
-    // Verifies: ADR-0031, G-14
+    // Verifies: ADR-0031, G-7
     fn a_window_reads_the_rows_of_every_chunk_appended() {
         let session = Session::default();
         let mut layout = Layout::new();
@@ -423,7 +423,7 @@ pub(crate) mod tests {
     }
 
     #[test]
-    // Verifies: ADR-0031, G-17
+    // Verifies: ADR-0031, G-10
     fn the_lineage_lights_the_window_and_grows_with_the_chunks() {
         let session = Session::default();
         let mut layout = Layout::new();
@@ -450,7 +450,7 @@ pub(crate) mod tests {
     }
 
     #[test]
-    // Verifies: ADR-0031, G-17
+    // Verifies: ADR-0031, G-10
     fn the_relatives_of_the_selection_gain_their_rows_as_they_arrive() {
         let session = Session::default();
         let mut layout = Layout::new();
@@ -472,7 +472,7 @@ pub(crate) mod tests {
     }
 
     #[test]
-    // Verifies: ADR-0031, G-16
+    // Verifies: ADR-0031, G-11
     fn a_search_finds_every_row_and_lists_the_first_ones() {
         let session = Session::default();
         let mut layout = Layout::new();
@@ -487,7 +487,7 @@ pub(crate) mod tests {
     }
 
     #[test]
-    // Verifies: ADR-0031, G-16
+    // Verifies: ADR-0031, G-11
     fn a_search_asked_again_as_the_history_grows_finds_what_a_fresh_one_does() {
         let session = Session::default();
         let mut layout = Layout::new();

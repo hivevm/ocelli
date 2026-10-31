@@ -69,7 +69,7 @@ golden path and the test pattern an agent copies from are named here.
   edges crossing it, search, and lineage ([ADR-0031](adr/0031-front-ends-read-row-windows.md)).
   `transfer.rs` decides the fetch, pull, and push of the checked-out branch the refs make possible,
   or why there is none, and which transfer can be stopped, and `operations.rs` which operations of
-  G-5 a commit offers on the checked-out branch, for both front ends to draw; the shared `Host`
+  G-13 a commit offers on the checked-out branch, for both front ends to draw; the shared `Host`
   of `ocelli-commands` sends these answers to the web interface in both hosts, which restates
   none of them
   ([ADR-0036](adr/0036-desktop-host-answers-what-the-core-decides.md)).
@@ -83,7 +83,7 @@ golden path and the test pattern an agent copies from are named here.
   [ADR-0016](adr/0016-history-loads-in-chunks.md),
   [ADR-0024](adr/0024-synthetic-nodes-in-the-first-chunk.md)); the walk runs in commit-date order
   and turns libgit2's object cache off for the whole process. `operations.rs` holds the history
-  operations of G-5 from a clean tree, stopping on a conflict in git's own state, and
+  operations of G-13 from a clean tree, stopping on a conflict in git's own state, and
   `conflicts.rs` resolves such a conflict file by file and continues or aborts the operation;
   the refs carry the operation in progress with its conflicts, read in `refs.rs` from git's
   state whoever started it. `GitWriter` implements the writer port in `write.rs`, which

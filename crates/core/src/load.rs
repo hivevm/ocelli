@@ -247,7 +247,7 @@ mod tests {
     }
 
     #[test]
-    // Verifies: ADR-0016, ADR-0015, G-13
+    // Verifies: ADR-0016, ADR-0015, G-17
     fn a_load_hands_over_each_chunk_laid_out_the_refs_with_the_first_and_its_end() {
         let fake = Fake {
             chunks: vec![three(9), three(6)],
@@ -263,7 +263,7 @@ mod tests {
     }
 
     #[test]
-    // Verifies: ADR-0016, G-13
+    // Verifies: ADR-0016, G-17
     fn the_status_counts_the_chunks_while_loading() {
         let mut session = LoadSession::new();
         session.append(Layout::new().lay_out(three(9)));
@@ -275,7 +275,7 @@ mod tests {
     }
 
     #[test]
-    // Verifies: ADR-0016, G-13
+    // Verifies: ADR-0016, G-17
     fn a_walk_failing_after_the_first_chunk_keeps_it_and_says_why() {
         let fake = Fake {
             chunks: vec![three(9)],

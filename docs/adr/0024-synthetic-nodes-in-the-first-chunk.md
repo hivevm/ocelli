@@ -18,8 +18,8 @@ history are not commits in that sense:
 
 Leaving both out keeps every node a commit, but hides a dirty working directory in the very view
 meant to answer "where am I", and stashed work does not exist there. The glossary already names a
-**working-directory node** at the top of the commit graph, and G-15 excepts its row from the
-determinism of the layout. Ocelli also creates, applies, and drops stashes (G-7), which wants the
+**working-directory node** at the top of the commit graph, and G-8 excepts its row from the
+determinism of the layout. Ocelli also creates, applies, and drops stashes (G-16), which wants the
 stashes to be somewhere the developer can select them.
 
 The layout is a pure function that reads no clock ([ADR-0010](0010-functional-core-layout.md)), so
@@ -53,7 +53,7 @@ a lane in the commit graph like a commit and carry a `kind` that tells them apar
   load, and count towards its size of `CHUNK_COMMITS`; the newest walked commits that make room
   for them open the second chunk, so no walked commit is lost to them.
 
-**Out of scope:** the operations on stashes and on the working directory (G-4, G-7), which
+**Out of scope:** the operations on stashes and on the working directory (G-12, G-16), which
 [ADR-0033](0033-writes-what-git-writes.md) and
 [ADR-0034](0034-discarding-work-only-after-confirmation.md) decide; worktrees and submodules, which
 are repository state rather than history ([ADR-0026](0026-repository-sidebar.md),
@@ -91,12 +91,12 @@ are repository state rather than history ([ADR-0026](0026-repository-sidebar.md)
 
 - Positive: the two states a developer looks for are where they look, in topological relation to
   the commits they belong to; the diff path is uniform, so selecting any node behaves the same;
-  the kind keeps them honest; stash internals stay out of the graph; the stash operations of G-7
+  the kind keeps them honest; stash internals stay out of the graph; the stash operations of G-16
   have a node to act on.
 - Negative / trade-offs: a node is no longer always a commit, so every consumer handles `kind`, and
   code that expects an object id special-cases the sentinel; the working-directory node's timestamp
   comes from the clock, so its row is the one part of the layout that is not a function of
-  repository state (G-15 records the exception); a repository gains or loses that row without any
+  repository state (G-8 records the exception); a repository gains or loses that row without any
   commit changing.
 - Follow-ups: the glossary gains *synthetic node* and *stash node*.
 

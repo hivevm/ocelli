@@ -217,7 +217,7 @@ mod tests {
     }
 
     #[test]
-    // Verifies: ADR-0037, ADR-0039, Q-7
+    // Verifies: ADR-0037, ADR-0039, Q-6
     fn a_transfer_s_progress_names_no_credential_and_no_path_on_the_server() {
         for (said, read) in [
             (

@@ -20,7 +20,7 @@ WebView meet neither; the drawing already touches only the rows in view
 
 We will keep the laid-out commit graph in the core, in the process of the front end's host, and
 have each front end read only the **window of rows** it draws, with the edges that cross it, while
-the **core searches** the graph (G-16) and **computes lineage** (G-17) for every front end.
+the **core searches** the graph (G-11) and **computes lineage** (G-10) for every front end.
 
 - The desktop host offers the window, the search, and the lineage as Tauri commands; the web
   interface keeps no more than the rows it draws and asks again as the view scrolls or a chunk
@@ -31,8 +31,8 @@ the **core searches** the graph (G-16) and **computes lineage** (G-17) for every
   rows, the search results, and the lineage highlight are the same.
 
 **Out of scope:** the remote server's protocol, which reads the same core and which
-[ADR-0037](0037-remote-server-websocket-per-tab.md) decides (G-8); the caching of windows in the web
-interface; the commit detail and the diff, which are read per commit.
+[ADR-0037](0037-remote-server-websocket-per-tab.md) decides (G-18); the caching of windows in the
+web interface; the commit detail and the diff, which are read per commit.
 
 ## Alternatives considered
 

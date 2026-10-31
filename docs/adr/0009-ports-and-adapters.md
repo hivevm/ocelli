@@ -9,8 +9,8 @@
 
 Ocelli puts several technologies behind the same behaviour. Three front ends drive it: the
 desktop application, the remote server with its web interface, and the terminal application
-(G-8). On the other side, reading a history and rewriting it may want different means: a Git
-library reads fast, while rebase, cherry-pick, and conflict resolution (G-5, G-6) are what `git`
+(G-18). On the other side, reading a history and rewriting it may want different means: a Git
+library reads fast, while rebase, cherry-pick, and conflict resolution (G-13, G-14) are what `git`
 itself does best. And Q-4 asks that showing a repository runs no program the repository names,
 which is a property of how the repository is reached, and must be held at one place.
 

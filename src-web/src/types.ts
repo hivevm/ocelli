@@ -75,7 +75,7 @@ export interface Selected {
   generation: number;
   node: NodeJson;
   relatives: Relative[];
-  /** The operations of G-5 the commit offers on the checked-out branch, as the core decides them
+  /** The operations of G-13 the commit offers on the checked-out branch, as the core decides them
       (ADR-0033, ADR-0036); null for a stash or the working directory, and until the load's refs
       are read. */
   operations: Offered | null;

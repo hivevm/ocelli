@@ -33,7 +33,7 @@ keeps the commits it has reached ordered by committer date, and yields each once
 children has been yielded. The first chunk is laid out and shown as soon as it is read, the stash
 and working-directory nodes ride with it
 ([ADR-0024](0024-synthetic-nodes-in-the-first-chunk.md)), and every further chunk is read on a
-background thread and appended until the walk ends, with the progress reported (G-13) and a load
+background thread and appended until the walk ends, with the progress reported (G-17) and a load
 of another repository cancelling the walk of the previous one (a new load session). A commit
 yielded after its parent, a **late child**, is laid out as
 [ADR-0015](0015-layout-after-pvigier-by-chunk.md) decides.

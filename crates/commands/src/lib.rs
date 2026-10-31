@@ -306,7 +306,7 @@ impl Host {
         write.discards()
     }
 
-    /// Performs `write` (G-7): a write that discards work only where the developer `confirmed`
+    /// Performs `write` (G-16): a write that discards work only where the developer `confirmed`
     /// it in the web interface's dialog, which the core decides (ADR-0034). A write refused
     /// changes nothing and says why; the web interface reloads after a write done, the commit
     /// selected again, or the commit the write made, which this returns (ADR-0033).
@@ -596,7 +596,7 @@ mod tests {
     }
 
     #[test]
-    // Verifies: ADR-0016, ADR-0031, ADR-0037, G-13
+    // Verifies: ADR-0016, ADR-0031, ADR-0037, G-17
     fn a_load_reports_each_chunk_the_refs_after_the_first_and_the_end() {
         let fake = Fake {
             chunks: vec![three(9), three(6)],
@@ -618,7 +618,7 @@ mod tests {
     }
 
     #[test]
-    // Verifies: ADR-0016, G-13
+    // Verifies: ADR-0016, G-17
     fn a_walk_failing_after_the_first_chunk_keeps_it_and_says_so() {
         let fake = Fake {
             chunks: vec![three(9)],
@@ -633,7 +633,7 @@ mod tests {
     }
 
     #[test]
-    // Verifies: ADR-0016, G-13
+    // Verifies: ADR-0016, G-17
     fn a_walk_failing_before_the_first_chunk_is_an_error() {
         let fake = Fake {
             walk_fails: true,

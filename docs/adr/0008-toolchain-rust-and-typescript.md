@@ -10,7 +10,7 @@
 The specification asks for a commit graph that stays usable at one million commits (Q-2), for a
 desktop application far lighter than an Electron one (Q-3), and for the same commit graph and
 operations in three front ends: the desktop application, the web interface served by a remote
-server, and the terminal application (G-8), on Linux, macOS, and Windows.
+server, and the terminal application (G-18), on Linux, macOS, and Windows.
 
 The project's earlier code base on `main` (GitGraph) built a viewer on Rust with a TypeScript
 interface in Tauri, on Bun, with a terminal front end on ratatui sharing the Rust layout. It shows
@@ -18,7 +18,7 @@ that the layout runs in Rust and that one Rust core serves two front ends.
 
 Two front ends draw in a browser engine: the desktop application in the system's WebView, the
 web interface in the developer's browser. One web interface can serve both; a second one is the
-duplication G-8 would have to keep in step.
+duplication G-18 would have to keep in step.
 
 ## Decision
 
@@ -77,7 +77,7 @@ remote server's protocol, which is ADR-0037; a second package manager, which the
 ## Consequences
 
 - Positive: one Rust core behind every front end, measured once for Q-2; one web interface for
-  two front ends, which halves what G-8 keeps in step; the earlier layout code is reusable.
+  two front ends, which halves what G-18 keeps in step; the earlier layout code is reusable.
 - Negative / trade-offs: two languages and two lockfiles; a three-platform build job costs CI
   minutes on every push; whether a system WebView meets Q-3 is measured on Linux only, by
   `scripts/measure-memory.sh`.

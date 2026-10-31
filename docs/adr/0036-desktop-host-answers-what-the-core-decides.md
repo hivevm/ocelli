@@ -10,7 +10,7 @@
 The core decides which fetch, pull, and push the refs make possible, or why there is none, and
 which of them can be stopped while it runs (`RepoRefs::fetch`, `pull`, `push`, and
 `Write::can_stop` in `crates/core/src/transfer.rs`,
-[ADR-0035](0035-remotes-through-libgit2-transports.md)), and which history operations of G-5 a
+[ADR-0035](0035-remotes-through-libgit2-transports.md)), and which history operations of G-13 a
 commit offers on the checked-out branch (`RepoRefs::history_operations` in
 `crates/core/src/operations.rs`, [ADR-0033](0033-writes-what-git-writes.md)). The terminal
 application calls these directly. The web interface restates both in TypeScript,

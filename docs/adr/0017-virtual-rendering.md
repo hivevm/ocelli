@@ -13,7 +13,7 @@ million commits (Q-2) it is millions of pixels. Drawing every commit and every e
 frame costs `O(n)` per frame and cannot hold 60 frames per second on a dense graph, although
 almost all of that work is invisible.
 
-G-14 asks that only the rows in view and the edges that cross them are drawn, and Q-2 that
+G-7 asks that only the rows in view and the edges that cross them are drawn, and Q-2 that
 scrolling never waits more than 100 ms for the next screen.
 
 ## Decision

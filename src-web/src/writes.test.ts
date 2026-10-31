@@ -1,4 +1,4 @@
-// Verifies: ADR-0033, ADR-0034, ADR-0036, G-7, Q-6
+// Verifies: ADR-0033, ADR-0034, ADR-0036, G-16, Q-7
 import { describe, expect, test } from 'bun:test';
 import { join } from 'node:path';
 import type { Conflict, FileChange, Offered, Operation, Staging, Transfer, Transfers } from './types.ts';

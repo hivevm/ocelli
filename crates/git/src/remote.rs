@@ -1063,7 +1063,7 @@ mod tests {
     }
 
     #[test]
-    // Verifies: ADR-0035, Q-7
+    // Verifies: ADR-0035, Q-6
     fn a_line_break_in_the_user_name_is_refused_before_a_helper_is_asked() {
         use git2::CredentialType as Kind;
         for user in ["victim\nhost=evil.example", "victim\rx", "victim\0x"] {
@@ -1092,7 +1092,7 @@ mod tests {
     use super::{decode_base64, revoked_in, ssh_host, vouched_elsewhere};
 
     #[test]
-    // Verifies: ADR-0035, Q-7
+    // Verifies: ADR-0035, Q-6
     fn a_helper_answers_only_for_a_plainly_named_domain_over_https() {
         for fine in [
             "https://example.org/repo.git",

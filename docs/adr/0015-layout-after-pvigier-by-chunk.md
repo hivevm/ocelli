@@ -11,8 +11,8 @@ The core challenge of a commit graph is placing commits in two dimensions: every
 **row** (its place in time) and a **lane** (its branch), such that the picture reads at a glance.
 The specification makes this a success criterion several times over: each branch in one lane
 (G-2), every commit above its parents and ordered by committer date where the topology leaves the
-order open (G-10), no edge through a commit it does not join (G-9), and the same rows and lanes
-for the same repository state (G-15). Both axes need a tie-breaker the developer sees: a commit
+order open (G-5), no edge through a commit it does not join (G-4), and the same rows and lanes
+for the same repository state (G-8). Both axes need a tie-breaker the developer sees: a commit
 graph has no unique topological order, and several free lanes may be available for a branch.
 
 Pierre Vigier's *Commit Graph Drawing Algorithms* answers both in two phases. Vigier accepts edge
@@ -152,7 +152,7 @@ ADR-0016; the history the front ends read, which is
 
 - Positive: a published, proven algorithm instead of trial and error; straight branches by
   construction (G-2); a deterministic, date-consistent order with the newest commits on top
-  (G-10, G-15); the first chunk is laid out exactly as a load of it alone, so the reference tests
+  (G-5, G-8); the first chunk is laid out exactly as a load of it alone, so the reference tests
   hold for every load; rows and lanes already shown never move as further chunks arrive; the
   layout of a load holds a few allocations per chunk rather than several per commit, and hands
   back all it held at the end of the load; `core` gains no dependency and no `unsafe`.
@@ -160,7 +160,7 @@ ADR-0016; the history the front ends read, which is
   measured, not guaranteed; across chunks the layout is an extension of Vigier's, not his: an old
   parent of a commit near the end of a chunk appears in the next chunk rather than directly below
   it, so a merge edge can reach across a chunk boundary; a late child stands below its parent,
-  against G-10, with an edge running down to it, which the edge shapes of ADR-0030 do not keep
+  against G-5, with an edge running down to it, which the edge shapes of ADR-0030 do not keep
   clear of commits; carrying the lane state is state in the core; the algorithm reads as index
   arithmetic, and an index carries no guarantee beyond the bounds check; the layout and the
   history each hold an index of the load's SHAs, one on the loading thread and one where the front

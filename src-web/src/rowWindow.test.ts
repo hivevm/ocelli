@@ -1,4 +1,4 @@
-// Verifies: ADR-0031, ADR-0017, G-14
+// Verifies: ADR-0031, ADR-0017, G-7
 import { describe, expect, test } from 'bun:test';
 import { windowToAsk } from './rowWindow.ts';
 
