@@ -199,7 +199,7 @@ jobs:
           RELEASE_ID: ${{ needs.version.outputs.release-id }}
           VERSION: ${{ needs.version.outputs.version }}
         run: |
-          name="Ocelli_${VERSION}_x86_64.flatpak"
+          name="Ocelli-${VERSION}.flatpak"
           mv Ocelli.flatpak "$name"
 
           # The asset API has no equivalent of `gh release upload --clobber`
