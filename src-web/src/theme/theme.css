@@ -4,7 +4,7 @@
  * This file is self-contained and framework-agnostic: drop it into any project,
  * import it once, and reference the tokens as `var(--token)` from component
  * styles. Canvas or other imperative renderers read the same values from
- * `palette.ts`, which mirrors this file (ADR-0021).
+ * `palette.ts`, which mirrors this file (ADR-0024).
  *
  * Sections
  *   1. Reset          — box model and margin/padding zeroing

@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
 #
-# Self-test of scripts/check-devcontainer-toolchain.sh. Verifies: ADR-0011
+# Self-test of scripts/check-devcontainer-toolchain.sh. Verifies: ADR-0009
 #
 # Each case builds a fixture under a temporary directory, a devcontainer.json, a Dockerfile, and a
 # rust-toolchain.toml as this repository has them, runs the check against it, and asserts the exit
 # code and, for a failing case, the message that names the violation. The baseline passes; every
-# other case breaks one thing ADR-0011 decides.
+# other case breaks one thing ADR-0009 decides.
 #
 # Usage:
 #     scripts/test-check-devcontainer-toolchain.sh
@@ -29,7 +29,7 @@ fixture() {
   cat > "$dir/.devcontainer/devcontainer.json" <<'JSON'
 {
   "name": "fixture",
-  // Built from the Dockerfile (ADR-0011).
+  // Built from the Dockerfile (ADR-0009).
   "build": {
     "dockerfile": "Dockerfile"
   },

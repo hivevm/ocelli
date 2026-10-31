@@ -1,4 +1,4 @@
-//! The repository ports of `ocelli-core` implemented with git2 (ADR-0009, ADR-0019, ADR-0033).
+//! The repository ports of `ocelli-core` implemented with git2 (ADR-0008, ADR-0017, ADR-0031).
 //! git2 runs no hooks, no `core.fsmonitor`, and no external diff or filter driver, so reading or
 //! writing a repository starts no program the repository names (Q-4).
 
@@ -64,7 +64,7 @@ impl RepositoryReader for GitReader {
     }
 }
 
-/// The git2 implementation of [`RepositoryWriter`] (ADR-0033).
+/// The git2 implementation of [`RepositoryWriter`] (ADR-0031).
 #[derive(Debug, Default, Clone, Copy)]
 pub struct GitWriter;
 

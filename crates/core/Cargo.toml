@@ -1,6 +1,6 @@
 [package]
 name = "ocelli-core"
-description = "Ocelli's core: the commit graph, its layout, and the repository port (ADR-0009)"
+description = "Ocelli's core: the commit graph, its layout, and the repository port (ADR-0008)"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true

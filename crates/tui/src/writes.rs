@@ -1,4 +1,4 @@
-//! The terminal application's side of a write (ADR-0033), following the web interface's
+//! The terminal application's side of a write (ADR-0031), following the web interface's
 //! `writes.ts`: the requests built from what the developer typed, and the one write that runs at
 //! a time. [`App`](crate::app::App) keeps the keys that start a write and hands each to
 //! [`OneWrite::queue`], the only way into the slot the event loop takes it from.
@@ -75,9 +75,9 @@ pub struct OneWrite {
     /// Whether a write runs: no second one starts until its result is in.
     running: bool,
     /// Whether the write that runs is a transfer, after which the repository is read again
-    /// even where it is refused (ADR-0035).
+    /// even where it is refused (ADR-0034).
     transferring: bool,
-    /// Whether the write that runs can be stopped, as the core says (ADR-0035).
+    /// Whether the write that runs can be stopped, as the core says (ADR-0034).
     cancellable: bool,
     /// Asks the event loop to stop the write that runs.
     cancel: bool,
@@ -160,7 +160,7 @@ mod tests {
     }
 
     #[test]
-    // Verifies: ADR-0035, G-17
+    // Verifies: ADR-0034, G-17
     fn a_fetch_and_a_pull_can_be_stopped_and_a_push_cannot() {
         let mut one = OneWrite::default();
         assert!(!one.cancel(), "nothing runs to stop");

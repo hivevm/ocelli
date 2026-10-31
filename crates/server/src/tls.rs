@@ -1,4 +1,4 @@
-//! TLS on an address the developer names with `--listen` (ADR-0038): through rustls with its
+//! TLS on an address the developer names with `--listen` (ADR-0036): through rustls with its
 //! defaults, TLS 1.2 and 1.3, with the certificate and key the developer gives, or a self-signed
 //! certificate made on the first start for the host name and the address listened on, kept with
 //! its key in the user's configuration directory readable by the developer's account alone, and
@@ -118,7 +118,7 @@ impl Tls {
 
     /// Whether the certificate is valid for `name`, the name part of a request's `Host`: an
     /// address, an IPv6 one in brackets, or a DNS name. A name the certificate does not carry is
-    /// what a page reaching the server through DNS rebinding sends (ADR-0038).
+    /// what a page reaching the server through DNS rebinding sends (ADR-0036).
     pub fn names(&self, name: &str) -> bool {
         let name = name
             .strip_prefix('[')
@@ -237,7 +237,7 @@ mod tests {
     use super::*;
 
     #[test]
-    // Verifies: ADR-0038
+    // Verifies: ADR-0036
     fn the_fingerprint_is_the_sha_256_of_the_certificate_as_browsers_show_it() {
         let print = fingerprint(b"abc");
         assert_eq!(

@@ -1,4 +1,4 @@
-//! Verifies: ADR-draft-merge-editor, ADR-0037
+//! Verifies: ADR-0031, ADR-0035
 //!
 //! git2 panics in places, and a release build aborts on a panic, every tab of the remote server
 //! with it. Each place of the locked git2's source outside its tests that panics by itself, an
@@ -749,7 +749,7 @@ fn stash_not_utf8(dir: &Path) {
 }
 
 #[test]
-// Verifies: ADR-draft-merge-editor, ADR-0037
+// Verifies: ADR-0031, ADR-0035
 fn a_stash_message_that_is_not_utf8_is_read_and_dropped_without_a_panic() {
     let scratch = Scratch::new("stash");
     let dir = scratch.0.join("repo");
@@ -812,7 +812,7 @@ fn panics_in<T>(f: impl FnOnce() -> T) -> Option<T> {
 }
 
 #[test]
-// Verifies: ADR-draft-merge-editor, ADR-0037
+// Verifies: ADR-0031, ADR-0035
 fn a_configuration_key_without_a_value_is_refused_as_git_refuses_it_without_a_panic() {
     let scratch = Scratch::new("valueless");
     let dir = scratch.0.join("repo");
@@ -992,7 +992,7 @@ fn push_main(dir: &Path, served: std::thread::JoinHandle<()>) -> anyhow::Result<
 }
 
 #[test]
-// Verifies: ADR-0035, ADR-0037
+// Verifies: ADR-0034, ADR-0035
 fn a_remote_refusing_a_push_with_a_reason_not_utf8_is_told_without_a_panic() {
     let scratch = Scratch::new("push-refused");
     let (url, served) = remote_answering(b"ng refs/heads/main \xff\xfe declined\n", None, 2, None);
@@ -1003,7 +1003,7 @@ fn a_remote_refusing_a_push_with_a_reason_not_utf8_is_told_without_a_panic() {
 }
 
 #[test]
-// Verifies: ADR-0035
+// Verifies: ADR-0034
 fn a_push_a_hook_refuses_says_what_the_hook_said_and_not_to_pull() {
     let scratch = Scratch::new("push-hook");
     let (url, served) = remote_answering(
@@ -1022,7 +1022,7 @@ fn a_push_a_hook_refuses_says_what_the_hook_said_and_not_to_pull() {
 }
 
 #[test]
-// Verifies: ADR-0035, ADR-0037
+// Verifies: ADR-0034, ADR-0035
 fn side_band_text_not_utf8_and_with_control_characters_is_told_without_a_panic() {
     let scratch = Scratch::new("push-told");
     let (url, served) = remote_answering(
@@ -1040,7 +1040,7 @@ fn side_band_text_not_utf8_and_with_control_characters_is_told_without_a_panic()
 }
 
 #[test]
-// Verifies: ADR-0035
+// Verifies: ADR-0034
 fn a_push_the_remote_reports_taken_moves_the_remote_tracking_branch_and_the_upstream() {
     let scratch = Scratch::new("push-taken");
     // One connection: the remote-tracking branch libgit2 moves tells the push was taken.
@@ -1059,7 +1059,7 @@ fn a_push_the_remote_reports_taken_moves_the_remote_tracking_branch_and_the_upst
 }
 
 #[test]
-// Verifies: ADR-0035
+// Verifies: ADR-0034
 fn a_push_no_fetch_refspec_maps_is_confirmed_by_reading_the_remote_again() {
     let scratch = Scratch::new("push-unmapped");
     let (url, served) = remote_answering(b"ok refs/heads/main\n", None, 2, None);
@@ -1077,7 +1077,7 @@ fn a_push_no_fetch_refspec_maps_is_confirmed_by_reading_the_remote_again() {
 }
 
 #[test]
-// Verifies: ADR-0035
+// Verifies: ADR-0034
 fn a_push_a_negative_fetch_refspec_leaves_untracked_is_confirmed_by_reading_the_remote_again() {
     let scratch = Scratch::new("push-negative");
     let (url, served) = remote_answering(b"ok refs/heads/main\n", None, 2, None);
@@ -1091,7 +1091,7 @@ fn a_push_a_negative_fetch_refspec_leaves_untracked_is_confirmed_by_reading_the_
 }
 
 #[test]
-// Verifies: ADR-0035
+// Verifies: ADR-0034
 fn a_push_refused_where_no_fetch_refspec_maps_reads_as_refused() {
     let scratch = Scratch::new("push-unmapped-refused");
     let (url, served) = remote_answering(b"ng refs/heads/main stale info\n", None, 2, None);
@@ -1109,7 +1109,7 @@ fn a_push_refused_where_no_fetch_refspec_maps_reads_as_refused() {
 }
 
 #[test]
-// Verifies: ADR-0035
+// Verifies: ADR-0034
 fn a_push_whose_branch_another_push_moved_on_is_not_confirmed_and_not_called_refused() {
     let scratch = Scratch::new("push-overtaken");
     pushing_to(&scratch.0, "git://127.0.0.1:9/repo");
@@ -1130,7 +1130,7 @@ fn a_push_whose_branch_another_push_moved_on_is_not_confirmed_and_not_called_ref
 }
 
 #[test]
-// Verifies: ADR-0035, ADR-0039
+// Verifies: ADR-0034, ADR-0037
 fn the_read_back_reads_the_address_pushed_to_however_insteadof_would_rewrite_it_again() {
     let scratch = Scratch::new("push-insteadof");
     let root = scratch.0.join("root");
@@ -1178,7 +1178,7 @@ fn the_read_back_reads_the_address_pushed_to_however_insteadof_would_rewrite_it_
 }
 
 #[test]
-// Verifies: ADR-0035
+// Verifies: ADR-0034
 fn a_push_the_remote_refuses_for_a_branch_it_has_reads_as_refused_with_what_it_said() {
     let scratch = Scratch::new("push-refused-held");
     pushing_to(&scratch.0, "git://127.0.0.1:9/repo");
@@ -1221,7 +1221,7 @@ fn with_submodule(dir: &Path, extra: &[u8]) {
 }
 
 #[test]
-// Verifies: ADR-0037
+// Verifies: ADR-0035
 fn submodules_are_listed_as_configured_and_on_windows_only_where_every_path_is_utf8() {
     let scratch = Scratch::new("submodule-paths");
     let plain = scratch.0.join("plain");
@@ -1251,7 +1251,7 @@ fn submodules_are_listed_as_configured_and_on_windows_only_where_every_path_is_u
 }
 
 #[test]
-// Verifies: ADR-0037
+// Verifies: ADR-0035
 fn a_working_tree_whose_link_is_not_utf8_is_left_out_on_windows_alone() {
     let scratch = Scratch::new("worktree-path");
     let dir = scratch.0.join("repo");
@@ -1406,7 +1406,7 @@ fn takes_a_name_not_utf8(dir: &Path) -> bool {
 }
 
 #[test]
-// Verifies: ADR-draft-merge-editor, ADR-0037
+// Verifies: ADR-0031, ADR-0035
 fn a_switch_and_a_fast_forward_write_a_name_not_utf8_or_refuse_it_without_a_panic() {
     let scratch = Scratch::new("checkout-not-utf8");
     let dir = scratch.0.join("repo");
@@ -1480,7 +1480,7 @@ fn a_switch_and_a_fast_forward_write_a_name_not_utf8_or_refuse_it_without_a_pani
 }
 
 #[test]
-// Verifies: ADR-draft-merge-editor
+// Verifies: ADR-0031
 fn an_operation_sees_a_name_not_utf8_at_its_start_and_its_abort_puts_it_back() {
     let scratch = Scratch::new("abort-not-utf8");
     if !takes_a_name_not_utf8(&scratch.0) {
@@ -1533,7 +1533,7 @@ fn an_operation_sees_a_name_not_utf8_at_its_start_and_its_abort_puts_it_back() {
 }
 
 #[test]
-// Verifies: ADR-draft-merge-editor
+// Verifies: ADR-0031
 fn a_stash_sees_what_is_in_its_way_under_a_name_not_utf8() {
     let scratch = Scratch::new("stash-not-utf8");
     if !takes_a_name_not_utf8(&scratch.0) {
@@ -1615,7 +1615,7 @@ fn a_stash_sees_what_is_in_its_way_under_a_name_not_utf8() {
 }
 
 #[test]
-// Verifies: ADR-draft-merge-editor, ADR-0037
+// Verifies: ADR-0031, ADR-0035
 fn a_name_not_utf8_is_never_acted_on_by_its_lossy_reading_and_unnamable_ones_refuse_an_abort() {
     let scratch = Scratch::new("index-not-utf8");
     let dir = scratch.0.join("repo");
@@ -1683,7 +1683,7 @@ fn a_name_not_utf8_is_never_acted_on_by_its_lossy_reading_and_unnamable_ones_ref
 }
 
 #[test]
-// Verifies: ADR-draft-merge-editor
+// Verifies: ADR-0031
 fn a_switch_to_a_name_longer_than_any_file_system_takes_writes_nothing() {
     let scratch = Scratch::new("long-name");
     let dir = scratch.0.join("repo");
@@ -1709,7 +1709,7 @@ fn a_switch_to_a_name_longer_than_any_file_system_takes_writes_nothing() {
 
 #[test]
 #[cfg(target_os = "linux")]
-// Verifies: ADR-draft-merge-editor
+// Verifies: ADR-0031
 fn a_link_whose_target_is_not_utf8_is_hashed_as_git_hashes_it() {
     use std::os::unix::ffi::OsStrExt;
     let scratch = Scratch::new("link-target");

@@ -73,7 +73,7 @@
 #      exists, a trailing '/' meaning a directory. The block is written by hand and nothing else
 #      tells a reader that one of its lines has gone stale. A path with a '*' matches at least one
 #      file, and docs/plan/ may be absent, since open work lives there only while there is some
-#      (ADR-0006). The reverse holds for the top level only: every tracked top-level file and
+#      (ADR-0004). The reverse holds for the top level only: every tracked top-level file and
 #      directory is named, by itself or by a path under it. Below it the block is a tour of the
 #      parts a newcomer needs, not a file listing.
 #  11. Skill pointer integrity: every skill under .agents/skills/ (a directory with a SKILL.md)
@@ -1113,7 +1113,7 @@ check_project_layout() {
       compgen -G "$ROOT/$path" >/dev/null \
         || add_error "README.md: Project Layout lists '$path', which matches nothing in this repository"
     elif [[ "$path" == */ ]]; then
-      # Open work lives under docs/plan/ only while there is some (ADR-0006).
+      # Open work lives under docs/plan/ only while there is some (ADR-0004).
       [[ -d "$ROOT/${path%/}" || "$path" == "docs/plan/" ]] \
         || add_error "README.md: Project Layout lists '$path', which is not a directory of this repository"
     else

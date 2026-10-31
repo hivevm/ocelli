@@ -1,6 +1,6 @@
 //! What a write checks before it changes anything: that the repository still holds what the
 //! developer saw, that nothing is in progress that the write would mix with, that an identity
-//! is configured and no signature is asked for (ADR-0033). Each check is written once here, for
+//! is configured and no signature is asked for (ADR-0031). Each check is written once here, for
 //! the local writes, the transfers, and the operations alike, with the wrappers through which
 //! alone a git2 method that would panic on a string is called (`clippy.toml`).
 
@@ -17,7 +17,7 @@ pub(crate) const NO_IDENTITY: &str =
     "no identity is configured to write with: set user.name and user.email";
 
 /// Refuses `what` where the configuration's `key` asks `git` to sign it, which Ocelli cannot
-/// (ADR-0033).
+/// (ADR-0031).
 pub(crate) fn refuse_where_signing_is_asked(
     repo: &Repository,
     key: &str,
@@ -62,7 +62,7 @@ fn names_git(name: &str) -> bool {
 }
 
 /// Refuses unless `path`'s content, where `side` of [`crate::git::shown`] reads it, is still the
-/// one `expected` names (ADR-0033).
+/// one `expected` names (ADR-0031).
 pub(crate) fn as_shown(
     repo: &Repository,
     path: &str,
@@ -571,7 +571,7 @@ mod tests {
     use super::{lock_ref, repository_path, set_target, valid_ref_name};
 
     #[test]
-    // Verifies: ADR-draft-merge-editor
+    // Verifies: ADR-0031
     fn a_reference_name_with_a_nul_is_no_name_and_reaches_no_panic() {
         assert!(valid_ref_name("refs/heads/topic"));
         for name in ["refs/heads/a\0b", "\0", "refs/tags/v1\0"] {
@@ -594,7 +594,7 @@ mod tests {
     }
 
     #[test]
-    // Verifies: ADR-draft-merge-editor
+    // Verifies: ADR-0031
     fn a_transaction_refuses_a_nul_before_git2_sees_it() {
         let scratch =
             Scratch(std::env::temp_dir().join(format!("ocelli-guard-nul-{}", std::process::id())));
@@ -610,7 +610,7 @@ mod tests {
     }
 
     #[test]
-    // Verifies: ADR-draft-merge-editor, ADR-0039
+    // Verifies: ADR-0031, ADR-0037
     fn a_path_is_taken_only_as_plain_names_below_the_working_directory_outside_any_git() {
         for plain in [
             "f",

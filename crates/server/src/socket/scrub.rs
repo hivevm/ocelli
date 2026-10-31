@@ -1,4 +1,4 @@
-//! What reaches the browser from the server's tabs, scrubbed (ADR-0039, ADR-0037): no path
+//! What reaches the browser from the server's tabs, scrubbed (ADR-0037, ADR-0035): no path
 //! outside the server root leaves the server, the paths of the sidebar's rows sent relative to it,
 //! or empty where they lie outside; what git says is replaced; and a transfer's progress names no
 //! credential and no path on the server.
@@ -9,7 +9,7 @@ use serde_json::Value;
 use std::path::Path;
 
 /// What the failure of a write the git adapter reported says in the browser, its refusals
-/// included: its words may name a path on the server (ADR-0039).
+/// included: its words may name a path on the server (ADR-0037).
 pub const WRITE_FAILED: &str =
     "The write was refused or failed: reload to see the repository as it is";
 
@@ -18,7 +18,7 @@ pub const READ_FAILED: &str = "Reading the repository failed";
 
 /// The failure of a command that reached the repository as the browser may read it, decided by
 /// its kind: Ocelli's own refusals and that no repository is open as they are, and anything git
-/// said, which may name a path on the server, as `READ_FAILED` (ADR-0039).
+/// said, which may name a path on the server, as `READ_FAILED` (ADR-0037).
 pub fn scrub(error: HostError) -> String {
     match error {
         HostError::NoRepository | HostError::Refused(_) => error.to_string(),
@@ -39,7 +39,7 @@ pub fn scrub_write(error: HostError) -> String {
 /// host, and path but not the user name and password it may carry, and a word that names a path
 /// on the server, absolute or with a backslash, reads `<path>`. The git adapter's progress names
 /// the remote and counts objects; what a repository's configuration names is untrusted, so what
-/// may reach the words is scrubbed here (ADR-0039, ADR-0037).
+/// may reach the words is scrubbed here (ADR-0037, ADR-0035).
 pub fn scrub_progress(text: &str) -> String {
     let scrubbed: Vec<String> = text.split(' ').map(scrub_word).collect();
     scrubbed.join(" ")
@@ -86,7 +86,7 @@ fn scrub_status(status: &mut Value) {
 
 /// The payload of `event` with no path outside the server root: the sidebar's working trees,
 /// submodules, and parent row carry their path relative to it, or none where they lie outside,
-/// which shows the row without its switch, the web interface saying why (ADR-0039); a status
+/// which shows the row without its switch, the web interface saying why (ADR-0037); a status
 /// line says what git said only as `READ_FAILED`.
 pub fn outbound(root: &Root, event: &str, payload: &mut Value) {
     let relative = |value: &mut Value| {
@@ -128,7 +128,7 @@ mod tests {
     use serde_json::json;
 
     #[test]
-    // Verifies: ADR-0039
+    // Verifies: ADR-0037
     fn the_sidebar_s_paths_leave_the_server_relative_to_the_root_or_not_at_all() {
         let tree = Tree::new("refs");
         let root = Root::new(&tree.0.join("root")).unwrap();
@@ -160,7 +160,7 @@ mod tests {
     }
 
     #[test]
-    // Verifies: ADR-0039
+    // Verifies: ADR-0037
     fn what_git_says_reaches_the_browser_only_as_reading_failed() {
         // What git says is replaced whatever its words, Ocelli's own included.
         for said in [
@@ -217,7 +217,7 @@ mod tests {
     }
 
     #[test]
-    // Verifies: ADR-0037, ADR-0039, Q-6
+    // Verifies: ADR-0035, ADR-0037, Q-6
     fn a_transfer_s_progress_names_no_credential_and_no_path_on_the_server() {
         for (said, read) in [
             (

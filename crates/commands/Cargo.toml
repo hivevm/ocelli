@@ -1,6 +1,6 @@
 [package]
 name = "ocelli-commands"
-description = "The commands and events both hosts of the web interface answer, free of any transport (ADR-0037)"
+description = "The commands and events both hosts of the web interface answer, free of any transport (ADR-0035)"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true

@@ -1,9 +1,9 @@
 //! `ocelli-measure`: measures Ocelli's quality goals on a real repository (#11).
 //!
 //! `ocelli-measure crossings PATH` lays out the first chunk of the repository at `PATH` as every
-//! front end does (ADR-0016), its main line in the leftmost lane (ADR-0032), hands git exactly the commits laid out, and prints the number of
+//! front end does (ADR-0016), its main line in the leftmost lane (ADR-0014), hands git exactly the commits laid out, and prints the number of
 //! commits and the edge crossings in Ocelli's layout and in `git log --graph` over them (Q-1).
-//! The stash and working-directory nodes are left out, since git draws neither (ADR-0024).
+//! The stash and working-directory nodes are left out, since git draws neither (ADR-0018).
 //!
 //! `ocelli-measure windows PATH` loads the whole history of the repository at `PATH` as the front
 //! ends do and prints, in milliseconds, how long the first window of rows took and how long the
@@ -29,7 +29,7 @@ const USAGE: &str = "Usage: ocelli-measure crossings PATH | ocelli-measure windo
 /// The measured numbers of one repository.
 struct Crossings {
     commits: usize,
-    /// The main line's tip the layout kept the leftmost lane for (ADR-0032).
+    /// The main line's tip the layout kept the leftmost lane for (ADR-0014).
     main_line: Option<String>,
     ocelli: usize,
     git: usize,
@@ -76,7 +76,7 @@ fn measure_crossings(path: &Path) -> Result<Crossings> {
         .into_iter()
         .filter(|c| c.kind == CommitKind::Commit)
         .collect();
-    // Laid out as the front ends lay it out, the main line in the leftmost lane (ADR-0032).
+    // Laid out as the front ends lay it out, the main line in the leftmost lane (ADR-0014).
     let tip = GitReader
         .load_main_tip(path)
         .with_context(|| format!("cannot read the main line of {}", path.display()))?;

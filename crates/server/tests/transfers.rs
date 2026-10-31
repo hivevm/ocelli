@@ -1,11 +1,11 @@
-//! Fetching, pulling, and pushing through the remote server (ADR-0037, ADR-0035): each made in a
+//! Fetching, pulling, and pushing through the remote server (ADR-0035, ADR-0034): each made in a
 //! tab of a server started with `--allow-writes` and by the shared `Host` as the desktop host
 //! performs it, the two ending alike; a transfer's progress reaches the tab that started it, a
 //! fetch and a pull's fetch stop on `cancel_write` (G-17), and a repository's own credential
 //! helper does not run (Q-6).
 //!
 //! A remote on this machine is reached only where it lies below the server root, since libgit2
-//! opens it in-process (ADR-0039, ADR-0037): the tests' remote lies below it, beside the
+//! opens it in-process (ADR-0037, ADR-0035): the tests' remote lies below it, beside the
 //! repository, and one outside is refused; a remote over the network is the server account's to
 //! reach, with its own credentials. libgit2 reads the developer's global configuration from its search path, which holds
 //! for the whole process: these tests run in a binary of their own, every test setting it first.
@@ -87,7 +87,7 @@ fn remote_with_seed(remote: &Path, seed: &Path) {
 }
 
 #[tokio::test]
-// Verifies: ADR-0037, ADR-0035, G-18, G-16, G-17
+// Verifies: ADR-0035, ADR-0034, G-18, G-16, G-17
 async fn fetching_pulling_and_pushing_in_the_browser_end_as_the_desktop_leaves_them() {
     developer();
     // The seed is the test's own `git`, wherever it lies; the remote lies below the server root,
@@ -194,7 +194,7 @@ async fn fetching_pulling_and_pushing_in_the_browser_end_as_the_desktop_leaves_t
     assert_eq!(rev(&pair.root, "follow"), rev(&seed, "follow"));
 
     // A pull of a branch that has diverged is refused after its fetch moved the remote branch,
-    // and the other tab is told to load again all the same (ADR-0035, ADR-0037).
+    // and the other tab is told to load again all the same (ADR-0034, ADR-0035).
     commit(&seed, "g", "upstream again");
     git(&seed, &["push", "--quiet", "origin", "follow"]);
     pair.on_both(|d| commit(d, "h", "mine on follow"));
@@ -216,7 +216,7 @@ async fn fetching_pulling_and_pushing_in_the_browser_end_as_the_desktop_leaves_t
 }
 
 #[tokio::test]
-// Verifies: ADR-0037, ADR-0039, Q-5
+// Verifies: ADR-0035, ADR-0037, Q-5
 async fn a_remote_on_this_machine_outside_the_root_is_neither_fetched_nor_pushed() {
     developer();
     let tree = Tree::new("transfers-outside");
@@ -393,7 +393,7 @@ async fn progress(tab: &mut Tab, id: u64, n: usize) {
 }
 
 #[tokio::test]
-// Verifies: ADR-0037, ADR-0035, G-17
+// Verifies: ADR-0035, ADR-0034, G-17
 async fn a_fetch_and_a_pull_s_fetch_stop_when_the_browser_cancels_them() {
     developer();
     let (port, closed) = preparing_server();
@@ -458,7 +458,7 @@ async fn a_fetch_and_a_pull_s_fetch_stop_when_the_browser_cancels_them() {
 }
 
 #[tokio::test]
-// Verifies: ADR-0037, G-17
+// Verifies: ADR-0035, G-17
 async fn a_tab_closed_while_it_fetches_stops_the_fetch_and_gives_the_repository_s_turn_back() {
     developer();
     let (port, closed) = preparing_server();
@@ -563,7 +563,7 @@ fn decode(text: &str) -> Vec<u8> {
 }
 
 #[tokio::test]
-// Verifies: ADR-0037, ADR-0035, Q-6
+// Verifies: ADR-0035, ADR-0034, Q-6
 async fn a_fetch_from_the_browser_runs_no_credential_helper_of_the_repository_and_sends_no_secret()
 {
     developer();

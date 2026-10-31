@@ -1,4 +1,4 @@
-//! The writes of G-12 to G-14 and G-16 through the remote server (ADR-0037): each made in a tab of a server
+//! The writes of G-12 to G-14 and G-16 through the remote server (ADR-0035): each made in a tab of a server
 //! started with `--allow-writes` on a repository `git` made, and by the shared `Host` as the
 //! desktop host performs it on the repository's twin, the two ending alike; each that discards
 //! work refused without the developer's confirmation and performed with it (Q-7).
@@ -62,7 +62,7 @@ fn history(root: &Path) {
 }
 
 #[tokio::test]
-// Verifies: ADR-0037, ADR-draft-merge-editor, G-18, G-12
+// Verifies: ADR-0035, ADR-0031, G-18, G-12
 async fn with_allow_writes_staging_unstaging_and_committing_leave_the_repository_as_the_desktop_does()
  {
     let mut pair = Pair::new("staging", |root| {
@@ -94,7 +94,7 @@ async fn with_allow_writes_staging_unstaging_and_committing_leave_the_repository
         git(&pair.root, &["log", "-1", "--format=%an <%ae>"]),
         "Ada <ada@example.invalid>"
     );
-    // The load after the write selects the commit it made, as the desktop's does (ADR-0033).
+    // The load after the write selects the commit it made, as the desktop's does (ADR-0031).
     let here = here.unwrap();
     pair.tab.events.clear();
     let reload = json!({ "path": ".", "select": here });
@@ -116,7 +116,7 @@ async fn with_allow_writes_staging_unstaging_and_committing_leave_the_repository
 }
 
 #[tokio::test]
-// Verifies: ADR-0037, ADR-draft-merge-editor, ADR-0034, G-18, G-12, Q-7
+// Verifies: ADR-0035, ADR-0031, ADR-0033, G-18, G-12, Q-7
 async fn branches_written_in_the_browser_end_as_the_desktop_leaves_them() {
     let mut pair = Pair::new("branches", |root| {
         history(root);
@@ -211,7 +211,7 @@ fn stash(dir: &Path, index: usize) -> String {
 }
 
 #[tokio::test]
-// Verifies: ADR-0037, ADR-draft-merge-editor, ADR-0034, G-18, G-12, Q-7
+// Verifies: ADR-0035, ADR-0031, ADR-0033, G-18, G-12, Q-7
 async fn stashes_and_tags_written_in_the_browser_end_as_the_desktop_leaves_them() {
     let mut pair = Pair::new("stashes-tags", |root| {
         history(root);
@@ -369,7 +369,7 @@ fn on_main(dir: &Path) -> (String, String) {
 }
 
 #[tokio::test]
-// Verifies: ADR-0037, ADR-draft-merge-editor, ADR-0034, G-18, G-13, G-14, Q-7
+// Verifies: ADR-0035, ADR-0031, ADR-0033, G-18, G-13, G-14, Q-7
 async fn history_operations_and_their_conflicts_in_the_browser_end_as_the_desktop_leaves_them() {
     let mut pair = Pair::new("operations", history).await;
     let made = |answer: &Result<Value, String>| {

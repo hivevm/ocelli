@@ -88,7 +88,7 @@ pub async fn server(tree: &Tree) -> Running {
     start_on(tree.root(), Limits::default()).await
 }
 
-/// A server started with `--allow-writes` on `root` (ADR-0037).
+/// A server started with `--allow-writes` on `root` (ADR-0035).
 pub async fn writing_on(root: PathBuf) -> Running {
     writing_within(root, Limits::default()).await
 }
@@ -488,7 +488,7 @@ impl Desktop {
     }
 
     /// The row the load after a write selects, which the web interface starts with the commit
-    /// the write made (ADR-0033).
+    /// the write made (ADR-0031).
     pub async fn reload(&mut self, repo: &Path, select: &str) -> Value {
         let to = Events(self.tx.clone());
         self.host
@@ -510,7 +510,7 @@ impl Desktop {
 
 /// A repository below a writing server's root, open in a tab, and its twin, open in the shared
 /// `Host` as the desktop host holds it: each write made on both, from what each side shows, ends
-/// alike on both (ADR-0037). The twin is copied with `cp`, as the writer's own tests, which run
+/// alike on both (ADR-0035). The twin is copied with `cp`, as the writer's own tests, which run
 /// on unix, copy theirs.
 #[cfg(unix)]
 pub struct Pair {
@@ -620,7 +620,7 @@ impl Pair {
         (here, there)
     }
 
-    /// The write `make` makes, which discards work (ADR-0034): refused on both sides without a
+    /// The write `make` makes, which discards work (ADR-0033): refused on both sides without a
     /// confirmation, nothing changed, and then performed with it, as [`Pair::alike`] performs it.
     /// The server's answer to the confirmed write.
     pub async fn confirmed(&mut self, make: impl Fn(&Path) -> Write) -> Result<Value, String> {

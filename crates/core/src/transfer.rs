@@ -1,7 +1,7 @@
-//! The transfers of the checked-out branch, decided once for both front ends (ADR-0035): which
+//! The transfers of the checked-out branch, decided once for both front ends (ADR-0034): which
 //! fetch, pull, and push the refs a front end holds make possible, or why there is none, and
 //! which write is a transfer and which of those can be stopped while it runs. The desktop host
-//! sends the answers to the web interface as `Transfers`, which it restates none of (ADR-0036).
+//! sends the answers to the web interface as `Transfers`, which it restates none of (ADR-0022).
 
 use crate::model::RepoRefs;
 use crate::port::Write;
@@ -127,7 +127,7 @@ mod tests {
     }
 
     #[test]
-    // Verifies: ADR-0035, G-12
+    // Verifies: ADR-0034, G-12
     fn a_pull_and_a_push_are_those_of_the_checked_out_branch_where_a_remote_takes_them() {
         let pull = Write::Pull {
             branch: "main".into(),
@@ -170,7 +170,7 @@ mod tests {
     }
 
     #[test]
-    // Verifies: ADR-0035, G-17
+    // Verifies: ADR-0034, G-17
     fn a_fetch_and_a_pull_can_be_stopped_a_push_and_a_local_write_cannot() {
         let fetch = Write::Fetch { remote: "o".into() };
         let pull = Write::Pull {
@@ -189,7 +189,7 @@ mod tests {
     }
 
     #[test]
-    // Verifies: ADR-0036, ADR-0035
+    // Verifies: ADR-0022, ADR-0034
     fn the_transfers_serialize_as_a_write_that_says_whether_it_stops_or_a_reason() {
         let tracked = refs(Some(Some("origin/main")), Some("origin")).transfers();
         assert_eq!(

@@ -57,7 +57,7 @@ neutral path — they are deleted then, as the `CLAUDE.md` pointer will be.
 - **One agent's native commands** — Claude Code commands, Cursor rules — put the process in one
   vendor's format, against ADR-0001's reason for one rule file.
 - **A published skills collection or plugin** — brings a process in one piece, with its own
-  artifacts and vocabulary; ADR-0006 declined the same trade for the same reason.
+  artifacts and vocabulary; ADR-0004 declined the same trade for the same reason.
 - **Procedures as plain files under `docs/`, loaded by pointer** — no progressive disclosure and no
   invocation by name; every session pays for all of them or for none.
 - **A copy per agent directory** — `.claude/skills/` and `.agents/skills/` both tracked — is two

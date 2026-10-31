@@ -119,7 +119,7 @@ fn changed_in_the_working_directory(repo: &Repository, paths: &[PathBuf]) -> Res
 /// and the checked-out commit does not hold so, and the working directory has a file the index
 /// does not track in the way: a directory holding one where a file goes, or one where a directory
 /// goes. libgit2 would stop halfway, or a cherry-pick commit without the file, where `git`
-/// refuses for an untracked file and deletes an ignored one; Ocelli keeps both (ADR-0033).
+/// refuses for an untracked file and deletes an ignored one; Ocelli keeps both (ADR-0031).
 pub(crate) fn nothing_untracked_in_the_way(repo: &Repository, files: &[PathBuf]) -> Result<()> {
     let Some(root) = repo.workdir() else {
         return Ok(());

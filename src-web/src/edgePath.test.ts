@@ -1,4 +1,4 @@
-// Verifies: ADR-0030
+// Verifies: ADR-0015
 import { describe, expect, test } from 'bun:test';
 import { roundedPath } from './edgePath.ts';
 

@@ -118,7 +118,7 @@ restates nothing. A rule this file does not state is not a rule of this project.
   ([§5](#5-quality-bar--definition-of-done)). One that constrains future choices becomes an ADR.
 - **Plan work larger than one session in the tree, under `docs/plan/`.** A feature spec is cut
   into tracer-bullet tickets. The change that lands a ticket's work deletes its file
-  ([ADR-0006](docs/adr/0006-feature-layer.md)). Skill: `plan-feature`. The skill `work-tickets`
+  ([ADR-0004](docs/adr/0004-feature-layer.md)). Skill: `plan-feature`. The skill `work-tickets`
   works the tickets, one at a time or in parallel.
 - **Work with the human:** small steps, reasoning surfaced, feedback sought early. A task runs
   unattended only when its ticket answers for all of the following:
@@ -175,7 +175,7 @@ restates nothing. A rule this file does not state is not a rule of this project.
   its tickets touched, the ADRs that bind them, and the criteria they serve. It files what it
   finds as tickets, checks, a `proposed` ADR, or a drafted specification change. With no spec
   open, a revision runs when the revision sensor says it is due
-  ([ADR-0006](docs/adr/0006-feature-layer.md)). A sensor is a script that reports to the reviewer
+  ([ADR-0004](docs/adr/0004-feature-layer.md)). A sensor is a script that reports to the reviewer
   and fails nothing. Skill: `design-revision`.
 - **A mistake a check could have caught becomes a check,** shipped with the fix. A rule in prose
   is the fallback for what no check can decide. The design revision drops what prevented nothing.
@@ -192,7 +192,7 @@ restates nothing. A rule this file does not state is not a rule of this project.
   next one. A standing instruction may cover one push only: the claim on a ticket across clones,
   where the harness ADR grants it. A claim reserves a ticket by creating its branch and
   nothing else; across clones, with an empty commit. The session releases a local claim, a
-  human one on a remote ([ADR-0006](docs/adr/0006-feature-layer.md)). The git hooks
+  human one on a remote ([ADR-0004](docs/adr/0004-feature-layer.md)). The git hooks
   under [`.githooks/`](.githooks/) enforce what a file can of this section and of
   [§5](#5-quality-bar--definition-of-done); what each refuses is under
   [Git hooks](README.md#git-hooks). **An agent never bypasses this repository's hooks:** no

@@ -17,7 +17,7 @@
 # does not fail — nothing in the specification marks the state, so meeting a goal touches the
 # tests, not the constitution.
 #
-# A marker is the word 'Verifies', a colon, and one or more identifiers (ADR-0004, G-1, Q-2,
+# A marker is the word 'Verifies', a colon, and one or more identifiers (ADR-0009, G-1, Q-2,
 # or the draft identifier ADR-draft-<slug> of an ADR that has not reached main, ADR-0002)
 # separated by spaces or commas, in any file git does not ignore that is not Markdown. Markdown
 # is excluded so that the specification and the ADRs can describe markers without being counted

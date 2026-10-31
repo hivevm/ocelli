@@ -32,12 +32,12 @@ export interface Edge {
   isBranch: boolean;
   minRow: number;
   maxRow: number;
-  /** The lane a merge out of the main line runs up between its ends (ADR-0030); absent otherwise. */
+  /** The lane a merge out of the main line runs up between its ends (ADR-0015); absent otherwise. */
   track?: number;
 }
 
 /** Rows `top..top + nodes.length` of the history the host keeps, with every edge crossing them
- *  (ADR-0031). With a commit selected, `litNodes` and `litEdges` say which of them belong to its
+ *  (ADR-0019). With a commit selected, `litNodes` and `litEdges` say which of them belong to its
  *  lineage; null when nothing is selected. */
 export interface RowWindow {
   /** The load the rows belong to; an answer from an older load is dropped. */
@@ -47,7 +47,7 @@ export interface RowWindow {
   lanes: number;
   nodes: NodeJson[];
   edges: Edge[];
-  /** Each edge's corners from its parent to its child, as `[row, lane]` (ADR-0030). */
+  /** Each edge's corners from its parent to its child, as `[row, lane]` (ADR-0015). */
   paths: [number, number][][];
   litNodes: boolean[] | null;
   litEdges: boolean[] | null;
@@ -76,7 +76,7 @@ export interface Selected {
   node: NodeJson;
   relatives: Relative[];
   /** The operations of G-13 the commit offers on the checked-out branch, as the core decides them
-      (ADR-0033, ADR-0036); null for a stash or the working directory, and until the load's refs
+      (ADR-0031, ADR-0022); null for a stash or the working directory, and until the load's refs
       are read. */
   operations: Offered | null;
 }
@@ -85,7 +85,7 @@ export interface Selected {
 export type Offered = { operations: Write[] } | { reason: string };
 
 /** A transfer the refs make possible, with whether it can be stopped while it runs, or why there
-    is none, as the core decides (ADR-0035). */
+    is none, as the core decides (ADR-0034). */
 export type Transfer<K extends 'fetch' | 'pull' | 'push'> =
   | { write: WriteOf<K>; canStop: boolean }
   | { reason: string };
@@ -97,7 +97,7 @@ export interface Transfers {
   push: Transfer<'push'>;
 }
 
-/** The `load-refs` payload: the refs, and the transfers the core decides from them (ADR-0036). */
+/** The `load-refs` payload: the refs, and the transfers the core decides from them (ADR-0022). */
 export interface LoadedRefs {
   refs: RepoRefs;
   transfers: Transfers;
@@ -110,7 +110,7 @@ export interface Found {
   hits: NodeJson[];
 }
 
-/** A folder below the remote server's root, marked where it holds a `.git` (ADR-0039). */
+/** A folder below the remote server's root, marked where it holds a `.git` (ADR-0037). */
 export interface Folder {
   name: string;
   /** Relative to the server root, as `open_repo` and `list_folders` take it. */
@@ -128,7 +128,7 @@ export interface Listing {
   more: boolean;
 }
 
-// ── Repository sidebar (ADR-0026) ──────────────────────────────────────────
+// ── Repository sidebar (ADR-0027) ──────────────────────────────────────────
 // Refs and checkout locations, not history: each entry only carries the commit
 // it resolves to, which is all the sidebar needs to navigate there.
 
@@ -189,7 +189,7 @@ export interface Submodule {
   state: SubmoduleState;
 }
 
-/** What kind of repository the current one sits inside (ADR-0027). */
+/** What kind of repository the current one sits inside (ADR-0028). */
 export type ParentKind = 'superproject' | 'mainWorktree';
 
 export interface ParentRepo {
@@ -272,5 +272,5 @@ export interface Staging {
 
 /** The remote server's own event, `repo-written`: another tab wrote to the repository this tab
     has open, which it loads again; the payload is what the status bar says. The desktop host
-    never sends it (ADR-0037). */
+    never sends it (ADR-0035). */
 export type RepoWritten = string;

@@ -1,6 +1,6 @@
 <script lang="ts">
   // The operation stopped in the repository, whoever started it, and its conflicted files
-  // (ADR-0033): each resolved by ours, theirs, or as the developer edited it, then the operation
+  // (ADR-0031): each resolved by ours, theirs, or as the developer edited it, then the operation
   // continued, or aborted after a confirmation.
   import { operationName, type Take, type Write } from './writes.ts';
   import type { InProgress } from './types.ts';

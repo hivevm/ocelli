@@ -1,4 +1,4 @@
-// Verifies: ADR-draft-merge-editor, ADR-0034, ADR-0036, G-16, Q-7
+// Verifies: ADR-0031, ADR-0033, ADR-0022, G-16, Q-7
 import { describe, expect, test } from 'bun:test';
 import { join } from 'node:path';
 import type { Conflict, FileChange, Offered, Operation, Staging, Transfer, Transfers } from './types.ts';
@@ -229,7 +229,7 @@ describe('the JSON of a file the host sends', () => {
 describe('the JSON of what the host offers', () => {
   // Written by the core's test (crates/core/tests/write_fixture.rs): the transfers of refs that
   // offer a fetch and a push and refuse a pull, and the operations of a commit beside a refusal,
-  // as the host sends them (ADR-0036). This side only draws them, and reads their shape here.
+  // as the host sends them (ADR-0022). This side only draws them, and reads their shape here.
   const fixture = join(import.meta.dir, '..', '..', 'crates', 'core', 'tests', 'fixtures', 'offers.json');
 
   /** The fields of each answer; the types require exactly these. */

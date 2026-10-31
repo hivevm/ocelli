@@ -37,7 +37,7 @@ pub fn load_chunks(
     // setting holds for the whole process: the per-commit reads after it read a commit at a time
     // and gain little from the cache.
     git2::opts::enable_caching(false);
-    // 1. Open the repository: searched for upwards, or, confined, at `repo_path` alone (ADR-0039)
+    // 1. Open the repository: searched for upwards, or, confined, at `repo_path` alone (ADR-0037)
     let repo = crate::confine::open(repo_path)?;
 
     // 2. Collect all refs and map peeled SHA -> Vec<String> ref names
@@ -141,7 +141,7 @@ pub fn load_chunks(
     Ok(())
 }
 
-/// Completes the first chunk with the stash and working-directory nodes (ADR-0024) and returns
+/// Completes the first chunk with the stash and working-directory nodes (ADR-0018) and returns
 /// the walked commits it moves on to the second chunk to stay within [`CHUNK_COMMITS`]. It opens
 /// the repository a second time: the walk holds the first handle, and reading the stash needs one
 /// of its own.
@@ -221,7 +221,7 @@ fn working_dir_node(repo: &Repository) -> Option<CommitData> {
 
     // Author the node with the repo's configured identity, when available. Confined to a server
     // root, it is not read: the configuration libgit2 reads, the developer's global one and the
-    // files a repository's own one includes, lies outside what ADR-0039 confines, and the
+    // files a repository's own one includes, lies outside what ADR-0037 confines, and the
     // identity is the one value of it the node would show.
     let signature = if crate::confine::confined() {
         Err(git2::Error::from_str("not read under confinement"))
@@ -416,7 +416,7 @@ pub(crate) fn index_entry(
 
 /// The blob id `git` gives `path` in the working directory `root`, as `git` reads it: a link as
 /// its target's text, never the file it names, and nothing for a path that passes through a
-/// linked folder, which `git` sees as the link it is and Ocelli never reads through (ADR-0039);
+/// linked folder, which `git` sees as the link it is and Ocelli never reads through (ADR-0037);
 /// nothing for a path that is not there.
 fn working_blob(root: &Path, path: &str) -> Option<git2::Oid> {
     let relative = Path::new(path);
@@ -626,7 +626,7 @@ mod tests {
     /// room is made by moving the oldest walked commits on to the next chunk instead.
     /// This is the regression guard for synthetic nodes being appended past the chunk.
     #[test]
-    // Verifies: ADR-0016, ADR-0024
+    // Verifies: ADR-0016, ADR-0018
     fn the_first_chunk_bounds_the_whole_graph_and_keeps_synthetic_nodes() {
         let mut commits: Vec<CommitData> = (0..CHUNK_COMMITS)
             .map(|i| entry(&format!("c{i}"), CommitKind::Commit))

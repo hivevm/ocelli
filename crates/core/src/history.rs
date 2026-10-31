@@ -1,5 +1,5 @@
-//! The laid-out commit graph as the core keeps it (ADR-0031). The history grows chunk by chunk
-//! (ADR-0015), and the front ends read from it only what they draw, a window of rows with the
+//! The laid-out commit graph as the core keeps it (ADR-0019). The history grows chunk by chunk
+//! (ADR-0013), and the front ends read from it only what they draw, a window of rows with the
 //! edges that cross it, and ask it to search and to compute lineage, so that none of them needs
 //! the whole graph.
 
@@ -103,7 +103,7 @@ impl RowSet {
 const NO_LINK: u32 = u32::MAX;
 
 /// The commit graph laid out so far, with the lookups its reads need. A chunk added never moves
-/// what is laid out before it (ADR-0015), so each lookup only grows.
+/// what is laid out before it (ADR-0013), so each lookup only grows.
 ///
 /// The history is kept compact, for a history of a million commits: the text of a chunk's
 /// commits lies in one buffer, each row holds spans into it, and a node is built only when it is
@@ -121,7 +121,7 @@ pub struct History {
     spans: Vec<Span>,
     /// The rows of every commit's children, which `Row::children` indexes.
     children: Vec<u32>,
-    /// Children laid out after their parent, late children (ADR-0015), by their parent's row.
+    /// Children laid out after their parent, late children (ADR-0013), by their parent's row.
     late: HashMap<u32, Vec<u32>>,
     edges: Vec<Edge>,
     /// Each row's first link to a parent laid out, or [`NO_LINK`]; a link holds a parent's row and
@@ -362,7 +362,7 @@ impl History {
     }
 
     /// The label of a link to the commit `sha`, a parent or a child: its short SHA, or for the
-    /// working-directory node, whose short SHA is empty, its name (ADR-0024). A commit not laid
+    /// working-directory node, whose short SHA is empty, its name (ADR-0018). A commit not laid
     /// out is labelled by its SHA.
     pub fn link_label(&self, sha: &str) -> String {
         match self.row_of(sha).map(|row| &self.rows[row]) {
@@ -479,7 +479,7 @@ impl History {
     /// computed; the cost follows the rows added, not the history.
     ///
     /// A row joins the ancestors when one of its children is an ancestor; its children lie in
-    /// rows above it, so one pass in row order finds them, and where a late child (ADR-0015)
+    /// rows above it, so one pass in row order finds them, and where a late child (ADR-0013)
     /// joins, its parent laid out before brings its own ancestors along. The rows added hold a
     /// descendant only below a late child of a descendant, which brings its own descendants.
     pub fn extend_lineage(&self, lineage: &mut Lineage, from: usize) {
@@ -596,7 +596,7 @@ mod tests {
     }
 
     #[test]
-    // Verifies: ADR-0031, ADR-0017, G-7
+    // Verifies: ADR-0019, ADR-0020, G-7
     fn a_window_holds_exactly_its_rows_and_every_edge_crossing_them() {
         let mut long = 0;
         for seed in 1..30u64 {
@@ -637,7 +637,7 @@ mod tests {
     }
 
     #[test]
-    // Verifies: ADR-0031, ADR-0015
+    // Verifies: ADR-0019, ADR-0013
     fn the_history_grows_by_chunks_without_changing_a_row_read_before() {
         let commits = generated_history(7, 300);
         let mut h = History::new();
@@ -683,7 +683,7 @@ mod tests {
     }
 
     #[test]
-    // Verifies: ADR-0031, G-11
+    // Verifies: ADR-0019, G-11
     fn a_blank_query_matches_nothing() {
         let h = searchable();
         assert!(h.search("").is_empty());
@@ -691,7 +691,7 @@ mod tests {
     }
 
     #[test]
-    // Verifies: ADR-0031, G-11
+    // Verifies: ADR-0019, G-11
     fn search_matches_message_author_committer_sha_and_refs_case_insensitively() {
         let h = searchable();
         assert_eq!(found(&h, "HEADER"), ["c0ffee1"]);
@@ -703,13 +703,13 @@ mod tests {
     }
 
     #[test]
-    // Verifies: ADR-0031, G-11
+    // Verifies: ADR-0019, G-11
     fn search_results_run_newest_first() {
         assert_eq!(found(&searchable(), ":"), ["deadbee", "abc1234", "c0ffee1"]);
     }
 
     #[test]
-    // Verifies: ADR-0031, G-11
+    // Verifies: ADR-0019, G-11
     fn search_covers_every_chunk_laid_out() {
         let commits = generated_history(3, 90);
         let h = history(&commits.chunks(30).map(<[_]>::to_vec).collect::<Vec<_>>());
@@ -746,7 +746,7 @@ mod tests {
     }
 
     #[test]
-    // Verifies: ADR-0031, G-10
+    // Verifies: ADR-0019, G-10
     fn ancestors_follow_every_parent_line_and_include_the_start() {
         let h = diamond();
         assert_eq!(
@@ -761,14 +761,14 @@ mod tests {
     }
 
     #[test]
-    // Verifies: ADR-0031, G-10
+    // Verifies: ADR-0019, G-10
     fn parents_not_laid_out_are_skipped() {
         let h = history(&[vec![commit("A", 1, &["missing"])]]);
         assert_eq!(shas(&h, h.ancestors(0)), ["A"]);
     }
 
     #[test]
-    // Verifies: ADR-0031, G-10
+    // Verifies: ADR-0019, G-10
     fn descendants_follow_child_links_up_to_the_tips() {
         let h = diamond();
         assert_eq!(shas(&h, h.descendants(at(&h, "C"))), ["B", "C", "F", "M"]);
@@ -781,7 +781,7 @@ mod tests {
     }
 
     #[test]
-    // Verifies: ADR-0031, G-10
+    // Verifies: ADR-0019, G-10
     fn lineage_is_ancestors_and_descendants_without_siblings() {
         let h = diamond();
         assert_eq!(
@@ -792,7 +792,7 @@ mod tests {
     }
 
     #[test]
-    // Verifies: ADR-0031, G-11, G-10
+    // Verifies: ADR-0019, G-11, G-10
     fn the_terminal_applications_cases_hold_over_the_core() {
         // a ← b ← d (merge of b and c), a ← c, and e on top of c (unmerged).
         let mut c = commit("c", 3, &["a"]);
@@ -818,7 +818,7 @@ mod tests {
     }
 
     #[test]
-    // Verifies: ADR-0031, G-11, G-10
+    // Verifies: ADR-0019, G-11, G-10
     fn search_and_lineage_grown_by_a_chunk_equal_them_computed_afresh() {
         for seed in 1..20u64 {
             let commits = generated_history(seed, 120);
@@ -837,7 +837,7 @@ mod tests {
     }
 
     #[test]
-    // Verifies: ADR-0031, G-10
+    // Verifies: ADR-0019, G-10
     fn lineage_reaches_into_chunks_laid_out_later() {
         let h = history(&[
             vec![commit("c", 3, &["b"])],
@@ -849,7 +849,7 @@ mod tests {
     }
 
     #[test]
-    // Verifies: ADR-0015, G-10
+    // Verifies: ADR-0013, G-10
     fn a_late_child_joins_its_parents_children_and_lineage() {
         let mut h = History::new();
         h.add_chunk(vec![commit("tip", 4, &["p"]), commit("p", 3, &["base"])]);
@@ -868,7 +868,7 @@ mod tests {
     }
 
     #[test]
-    // Verifies: ADR-0031, ADR-0015, G-10
+    // Verifies: ADR-0019, ADR-0013, G-10
     fn lineages_grown_over_late_children_equal_them_computed_afresh() {
         let mut late = 0;
         for seed in 1..30u64 {
@@ -892,7 +892,7 @@ mod tests {
     }
 
     #[test]
-    // Verifies: ADR-0024
+    // Verifies: ADR-0018
     fn a_link_is_labelled_by_its_short_sha_or_the_working_directorys_name() {
         let mut work = commit("WORKING_DIRECTORY", 9, &["abcdef123456"]);
         work.kind = CommitKind::Working;
@@ -903,7 +903,7 @@ mod tests {
     }
 
     #[test]
-    // Verifies: ADR-0031, ADR-0017, G-7
+    // Verifies: ADR-0019, ADR-0020, G-7
     fn a_window_looks_at_the_edges_near_it_not_at_every_long_one() {
         // A main line of 20 000 commits with a branch forked off every tenth and merged back two
         // hundred commits above: thousands of long edges, few of them near any one window.
@@ -935,7 +935,7 @@ mod tests {
     }
 
     #[test]
-    // Verifies: ADR-0031
+    // Verifies: ADR-0019
     fn a_window_names_the_lanes_its_nodes_and_edges_reach() {
         // d merges c, whose lane is 1; the window of d's row alone reaches it by the edge.
         let h = history(&[vec![

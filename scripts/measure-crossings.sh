@@ -2,7 +2,7 @@
 #
 # Measures Q-1 on the corpus of feature spec #11: for each repository, the edge crossings in
 # Ocelli's layout, by ocelli-measure, against the count recorded for its fixed commit.
-# Verifies: Q-1, ADR-0032
+# Verifies: Q-1, ADR-0014
 #
 # Each repository is fetched at a fixed commit as a single ref, history only and no file contents,
 # so the measurement sees the same commits every week; the ref is checked out, as in a clone, so
@@ -88,7 +88,7 @@ while read -r name url commit recorded; do
     failed+=("$name")
     continue
   fi
-  # A layout without the main line is one no front end shows (ADR-0032): no measurement at all.
+  # A layout without the main line is one no front end shows (ADR-0014): no measurement at all.
   if [[ -z "$main_line" || "$main_line" == none ]]; then
     echo "measure: $name has no main line to lay out, so its layout is not the one the front ends show" >&2
     failed+=("$name")

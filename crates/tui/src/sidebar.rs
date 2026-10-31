@@ -1,7 +1,7 @@
-// Verifies: ADR-0026, ADR-0027
+// Verifies: ADR-0027, ADR-0028
 //! The repository sidebar: what a repository *contains* — the way back to its
 //! parent, local branches, remotes, working trees, tags and submodules
-//! (ADR-0026, ADR-0027, in the terminal form of ADR-0028). It mirrors the
+//! (ADR-0027, ADR-0028, in the terminal form of ADR-0029). It mirrors the
 //! desktop's `RepoSidebar.svelte`: collapsible sections, names grouped into
 //! folders at their slashes, a filter, and a minimised rail of section glyphs.
 //!
@@ -208,7 +208,7 @@ impl Data {
             .submodules
             .iter()
             .map(|s| match s.state {
-                // No working copy to open; initialising one is out of scope (ADR-0027).
+                // No working copy to open; initialising one is out of scope (ADR-0028).
                 SubmoduleState::Uninitialized => item(
                     &s.path,
                     "not initialized",

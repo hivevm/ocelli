@@ -1,4 +1,4 @@
-# Flatpak manifest for Ocelli (ADR-0025), following the Tauri Flatpak guide:
+# Flatpak manifest for Ocelli (ADR-0038), following the Tauri Flatpak guide:
 # the module repacks the .deb produced by `tauri build` instead of rebuilding
 # from source. The release workflow stages that .deb next to this manifest as
 # `ocelli.deb` before invoking flatpak-builder.
@@ -14,12 +14,12 @@ finish-args:
   - --socket=fallback-x11
   - --device=dri
   - --share=ipc
-  # Ocelli opens arbitrary local repositories and writes to them (ADR-0033):
+  # Ocelli opens arbitrary local repositories and writes to them (ADR-0031):
   # host access instead of per-folder portals, which git2 cannot use for
   # whole-tree reads and writes.
   - --filesystem=host
-  # Fetching, pulling, and pushing (ADR-0035), and the opt-in, default-off
-  # Gravatar avatar fetch (ADR-0023), whose WebView CSP allows no other origin.
+  # Fetching, pulling, and pushing (ADR-0034), and the opt-in, default-off
+  # Gravatar avatar fetch (ADR-0025), whose WebView CSP allows no other origin.
   - --share=network
 
 modules:

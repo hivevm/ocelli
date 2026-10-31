@@ -1,4 +1,4 @@
-//! Verifies: ADR-draft-merge-editor
+//! Verifies: ADR-0031
 //!
 //! Every refusal the tests of the writes take goes through `refused` in `support/mod.rs`, which
 //! compares the whole snapshot of the repository before and after, so that none compares less

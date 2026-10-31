@@ -3,7 +3,7 @@
 # Build, test, and lint gate for this repository.
 #
 # AGENTS.md §5 makes a change done only when it builds, its tests pass, and linters and formatters
-# are clean. The commands below are the ones ADR-0008 names and README.md → "Build, Test & Run"
+# are clean. The commands below are the ones ADR-0007 names and README.md → "Build, Test & Run"
 # lists; a command changed there is changed here in the same change.
 #
 # This script exists so that the local gate and CI run one list instead of two. The build job of

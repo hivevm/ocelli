@@ -26,7 +26,7 @@ and the cap on open agent work.
   context, a stronger model where one exists; the parts the specification's *Threats & Forbidden
   Actions* protects get a second reviewer of a different kind and the human who owns the part.
 - **Parallel tickets under a cap**: tickets whose *Mode* allows it run without the human
-  ([ADR-0006](../../../../docs/adr/0006-feature-layer.md)), several at once; a dispatching
+  ([ADR-0004](../../../../docs/adr/0004-feature-layer.md)), several at once; a dispatching
   session claims each from the frontier by creating its branch together with a worktree, or
   a container, of its own, and starts a fresh session of the implementing agent in each; where
   several humans or machines dispatch from clones of their own, the claim is made on the
@@ -76,7 +76,7 @@ the tickets that may be claimed, for the dispatching session.
 ## Alternatives
 
 The three forms above grow into each other. A process-owning framework that brings agents,
-artifacts, and pipeline in one piece is a fourth; ADR-0003 and ADR-0006 decline it for the
+artifacts, and pipeline in one piece is a fourth; ADR-0003 and ADR-0004 decline it for the
 template.
 
 ## Sources

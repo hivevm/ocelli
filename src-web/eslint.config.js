@@ -1,4 +1,4 @@
-// ESLint for the web interface (ADR-0008): the type check is svelte-check's; ESLint holds the
+// ESLint for the web interface (ADR-0007): the type check is svelte-check's; ESLint holds the
 // size and complexity sensors the toolchain ADR names, on TypeScript and Svelte alike.
 import ts from 'typescript-eslint';
 import svelte from 'eslint-plugin-svelte';

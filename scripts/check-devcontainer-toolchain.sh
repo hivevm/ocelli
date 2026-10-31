@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
 #
-# Checks that the Dev Container carries the toolchain ADR-0011 decides:
+# Checks that the Dev Container carries the toolchain ADR-0009 decides:
 #   1. devcontainer.json builds from .devcontainer/Dockerfile instead of naming an image;
 #   2. the Dockerfile starts from mcr.microsoft.com/devcontainers/base:debian and installs the
 #      desktop host's Linux build library WebKitGTK (libwebkit2gtk-4.1-dev);
-#   3. devcontainer.json adds the Rust and the Bun Features (ADR-0008); that they are pinned and
-#      locked is scripts/check-devcontainer.sh's to check (ADR-0004);
+#   3. devcontainer.json adds the Rust and the Bun Features (ADR-0007); that they are pinned and
+#      locked is scripts/check-devcontainer.sh's to check (ADR-0009);
 #   4. rust-toolchain.toml pins a channel.
 # Comment lines ('//' in the JSON, '#' in the Dockerfile) are ignored.
 #

@@ -28,7 +28,7 @@
      *  shows: the most the rows shown in this load have reached. */
     rowCount: number;
     lanes: number;
-    /** The rows last read from the host (ADR-0031); with a commit selected, it says which of
+    /** The rows last read from the host (ADR-0019); with a commit selected, it says which of
      *  them belong to its lineage, and all others are dimmed. */
     view: RowWindow | null;
     /** The load the rows belong to; a new one starts the view at the top again. */
@@ -39,7 +39,7 @@
     theme?: Theme;
     /**
      * The checked-out branch, so its chip can be marked as such. It comes from
-     * the refs payload, which is read together with the graph (ADR-0026), so the
+     * the refs payload, which is read together with the graph (ADR-0027), so the
      * two cannot disagree about which branch that is.
      */
     headRef?: string | null;
@@ -126,7 +126,7 @@
   function nodeY(row: number): number { return row * ROW_HEIGHT + ROW_HEIGHT / 2; }
 
   // ── Rows in view ───────────────────────────────────────────────────────────
-  // Rendering must cost O(visible rows), not O(history) (ADR-0017). The host keeps the
+  // Rendering must cost O(visible rows), not O(history) (ADR-0020). The host keeps the
   // history and answers a window of rows with every edge crossing it, so drawing touches
   // only that window.
   const width = $derived(rowCount === 0 ? EMPTY_GRAPH_WIDTH : graphAreaWidth(lanes - 1));
@@ -244,7 +244,7 @@
     ctx.stroke();
 
     // Edges — orthogonal runs through the corners the core routes, each bend softened by a
-    // short curve (ADR-0030).
+    // short curve (ADR-0015).
     // An edge is drawn when its row span intersects the visible range, so edges
     // running in from off-screen rows are still drawn.
     ctx.lineWidth = LINE_WIDTH;
@@ -270,7 +270,7 @@
 
     ctx!.strokeStyle = branchColor(edge.isBranch ? edge.targetCol : edge.sourceCol);
     ctx!.beginPath();
-    // The core routes the edge through its corners after its type (ADR-0030); the canvas only
+    // The core routes the edge through its corners after its type (ADR-0015); the canvas only
     // softens each bend with a short curve.
     const corners = path.map(([row, lane]) => ({ x: nodeX(lane), y: nodeY(row) - scrollY }));
     for (const step of roundedPath(corners, COL_WIDTH / 2)) {

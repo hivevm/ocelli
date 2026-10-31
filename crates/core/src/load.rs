@@ -1,6 +1,6 @@
 //! A load session (ADR-0016): the history of a repository read chunk by chunk through the
-//! repository port, each chunk laid out as it arrives (ADR-0015) and taken into a [`History`]
-//! (ADR-0031). [`load`] runs one on the thread that reads; [`LoadSession`] is what a front end
+//! repository port, each chunk laid out as it arrives (ADR-0013) and taken into a [`History`]
+//! (ADR-0019). [`load`] runs one on the thread that reads; [`LoadSession`] is what a front end
 //! keeps of it. Both front ends and the measurement load this way, so what a load does, and what
 //! its status line says, exists once.
 
@@ -34,7 +34,7 @@ pub fn load(reader: &impl RepositoryReader, path: &Path, on: &mut dyn FnMut(Even
     // The walk calls the chunk and the progress callbacks one at a time, never one inside the
     // other, so they share `on` and what they know of the load through cells.
     // The main line's tip is named before the walk, so the first chunk is laid out with it
-    // (ADR-0032).
+    // (ADR-0014).
     let tip = match reader.load_main_tip(path) {
         Ok(tip) => tip,
         Err(e) => {
@@ -82,7 +82,7 @@ pub struct LoadSession {
     history: History,
     chunks: usize,
     ended: Option<Result<(), String>>,
-    /// The commit to select again once a chunk lays it out, after a write (ADR-0033).
+    /// The commit to select again once a chunk lays it out, after a write (ADR-0031).
     select_again: Option<String>,
 }
 
@@ -108,7 +108,7 @@ impl LoadSession {
     }
 
     /// Asks for `sha` to be selected again once a chunk lays it out: the commit selected when a
-    /// write was done, which the load after it shows again (ADR-0033).
+    /// write was done, which the load after it shows again (ADR-0031).
     pub fn select_again(&mut self, sha: String) {
         self.select_again = Some(sha);
     }
@@ -247,7 +247,7 @@ mod tests {
     }
 
     #[test]
-    // Verifies: ADR-0016, ADR-0015, G-17
+    // Verifies: ADR-0016, ADR-0013, G-17
     fn a_load_hands_over_each_chunk_laid_out_the_refs_with_the_first_and_its_end() {
         let fake = Fake {
             chunks: vec![three(9), three(6)],
@@ -351,13 +351,13 @@ mod tests {
     }
 
     #[test]
-    // Verifies: ADR-draft-merge-editor
+    // Verifies: ADR-0031
     fn the_commit_to_select_again_is_named_once_its_chunk_lays_it_out() {
         assert_eq!(rows_named("c4", &[9, 6, 3], None), [None, Some(5), None]);
     }
 
     #[test]
-    // Verifies: ADR-draft-merge-editor
+    // Verifies: ADR-0031
     fn the_developers_own_choice_or_the_end_gives_the_commit_up() {
         assert_eq!(rows_named("c4", &[9, 6], Some(1)), [None, None]);
         let mut session = LoadSession::new();

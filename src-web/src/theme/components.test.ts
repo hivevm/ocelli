@@ -1,6 +1,6 @@
-// Verifies: ADR-0021
+// Verifies: ADR-0024
 //
-// Every component style takes its colours from the theme's tokens (ADR-0021), so a theme switch
+// Every component style takes its colours from the theme's tokens (ADR-0024), so a theme switch
 // reaches it. A colour literal in a `<style>` block, or a `var()` naming no token, is a colour
 // the switch never reaches; the palettes' own tests cannot see either. Markup, such as an inline
 // icon's `fill`, and the canvas palettes are outside this test.

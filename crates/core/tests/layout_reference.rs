@@ -1,4 +1,4 @@
-//! Verifies: ADR-0008, ADR-0015, ADR-0030, G-2, G-4, G-5, G-8
+//! Verifies: ADR-0007, ADR-0013, ADR-0015, G-2, G-4, G-5, G-8
 //!
 //! The layout matches the reference implementation: for 500 generated histories, with merges, octopus
 //! merges, several roots, equal commit times, parents outside the loaded set, and stash and

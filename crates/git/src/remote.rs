@@ -1,6 +1,6 @@
 //! The transfers of the repository port, with git2: fetching, pulling, and pushing through
 //! libgit2's own transports, the credentials a remote is given, the host keys it is checked
-//! against, and the server timeouts (ADR-0035). No transfer runs a program the repository names
+//! against, and the server timeouts (ADR-0034). No transfer runs a program the repository names
 //! (Q-4).
 
 use crate::checkout::check_out;
@@ -9,7 +9,7 @@ use anyhow::{Context, Result, bail};
 use git2::{BranchType, ErrorCode, Oid, Repository};
 
 /// Fetches `remote` through libgit2's own transports, as `git fetch <remote>` does, telling
-/// `progress` how far it has come and stopping where it says so (ADR-0035).
+/// `progress` how far it has come and stopping where it says so (ADR-0034).
 pub(crate) fn fetch(
     repo: &Repository,
     name: &str,
@@ -28,7 +28,7 @@ pub(crate) fn fetch(
     fetched.map_err(|e| transfer.refusal(e, &url, "fetching from"))
 }
 
-/// One transfer with a remote, a fetch or a push, through libgit2's own transports (ADR-0035):
+/// One transfer with a remote, a fetch or a push, through libgit2's own transports (ADR-0034):
 /// what it tells `progress`, whether the developer stopped it, and how a failure reads. No
 /// credential helper or command the repository's configuration names runs, and no server is
 /// trusted unseen: libgit2 verifies a certificate against the system's trust store and an SSH
@@ -111,7 +111,7 @@ impl<'p> Transfer<'p> {
             self.tried.borrow_mut().credentials(url, user, allowed)
         });
         // libgit2 checks an SSH host key against the developer's known_hosts after this; a key
-        // that a revoked line lists, which libssh2 does not read, is refused first (ADR-0035).
+        // that a revoked line lists, which libssh2 does not read, is refused first (ADR-0034).
         if self.checks_host_key {
             self.check_host_key(&mut callbacks);
         }
@@ -215,7 +215,7 @@ impl<'p> Transfer<'p> {
 
 /// Pulls the checked-out branch `name`, still at `tip`, as `git pull --ff-only` does: fetches
 /// its upstream's remote and fast-forwards to the upstream, the uncommitted changes carried along;
-/// a branch that has diverged is refused, the fetch kept (ADR-0035).
+/// a branch that has diverged is refused, the fetch kept (ADR-0034).
 pub(crate) fn pull(
     repo: &Repository,
     name: &str,
@@ -270,7 +270,7 @@ pub(crate) fn pull(
 
 /// Pushes the checked-out branch `name`, still at `tip`, as `git push` does, never by force: to
 /// its upstream, or to the default remote under its own name, which then becomes its upstream. A push the remote refuses, one that is not a fast-forward, changes
-/// nothing (ADR-0035).
+/// nothing (ADR-0034).
 pub(crate) fn push(
     repo: &Repository,
     name: &str,
@@ -837,7 +837,7 @@ fn is_ssh(url: &str) -> bool {
 }
 
 /// The ways to authenticate, each tried once: the SSH agent, then the credential helper of the
-/// developer's global and system configuration, never one the repository's own names (ADR-0035).
+/// developer's global and system configuration, never one the repository's own names (ADR-0034).
 #[derive(Default)]
 struct Tried {
     username: bool,
@@ -909,7 +909,7 @@ fn local_user() -> String {
 }
 
 /// The developer's own configuration, global and system, without the repository's: where a
-/// credential helper is looked up (ADR-0035).
+/// credential helper is looked up (ADR-0034).
 pub(crate) fn developers_config() -> std::result::Result<git2::Config, git2::Error> {
     git2::Config::open_default()
 }
@@ -954,7 +954,7 @@ mod tests {
         clippy::disallowed_methods,
         reason = "a test writes and removes a configuration file of its own"
     )]
-    // Verifies: ADR-0035
+    // Verifies: ADR-0034
     fn a_credential_helper_that_runs_nothing_is_found_where_git2_would_run_it() {
         let file = std::env::temp_dir().join(format!("ocelli-helper-{}", std::process::id()));
         let url = "https://e.org/r.git";
@@ -984,7 +984,7 @@ mod tests {
     }
 
     #[test]
-    // Verifies: ADR-0035
+    // Verifies: ADR-0034
     fn the_host_of_an_ssh_address_is_read_decoded_as_libgit2_reads_it() {
         use super::ssh_host_decodes_to_utf8 as utf8;
         assert!(utf8("ssh://git@example.org/r.git"));
@@ -1009,7 +1009,7 @@ mod tests {
     }
 
     #[test]
-    // Verifies: ADR-0035
+    // Verifies: ADR-0034
     fn each_way_to_authenticate_is_tried_once_and_in_turn() {
         use git2::CredentialType as Kind;
         let message = |r: Result<git2::Cred, git2::Error>| r.err().map(|e| e.message().to_string());
@@ -1048,7 +1048,7 @@ mod tests {
     }
 
     #[test]
-    // Verifies: ADR-0035
+    // Verifies: ADR-0034
     fn an_address_is_ssh_by_its_scheme_or_as_scp_writes_it() {
         for ssh in [
             "ssh://git@example.org/r.git",
@@ -1063,7 +1063,7 @@ mod tests {
     }
 
     #[test]
-    // Verifies: ADR-0035, Q-6
+    // Verifies: ADR-0034, Q-6
     fn a_line_break_in_the_user_name_is_refused_before_a_helper_is_asked() {
         use git2::CredentialType as Kind;
         for user in ["victim\nhost=evil.example", "victim\rx", "victim\0x"] {
@@ -1092,7 +1092,7 @@ mod tests {
     use super::{decode_base64, revoked_in, ssh_host, vouched_elsewhere};
 
     #[test]
-    // Verifies: ADR-0035, Q-6
+    // Verifies: ADR-0034, Q-6
     fn a_helper_answers_only_for_a_plainly_named_domain_over_https() {
         for fine in [
             "https://example.org/repo.git",
@@ -1119,7 +1119,7 @@ mod tests {
     }
 
     #[test]
-    // Verifies: ADR-0035
+    // Verifies: ADR-0034
     fn a_host_key_a_revoked_line_lists_is_refused_whatever_its_host_pattern() {
         let key = b"ssh-ed25519 key bytes";
         let encoded = "c3NoLWVkMjU1MTkga2V5IGJ5dGVz";
@@ -1141,7 +1141,7 @@ mod tests {
     }
 
     #[test]
-    // Verifies: ADR-0035
+    // Verifies: ADR-0034
     fn a_refusal_names_where_else_a_host_is_vouched_for() {
         let line = "git.example.org ssh-ed25519 AAAA";
         assert_eq!(
@@ -1187,7 +1187,7 @@ mod tests {
     }
 
     #[test]
-    // Verifies: ADR-0035
+    // Verifies: ADR-0034
     fn every_scheme_libgit2_hands_to_ssh_is_ssh_here_too() {
         for ssh in [
             "SSH://h/r",
@@ -1204,7 +1204,7 @@ mod tests {
     }
 
     #[test]
-    // Verifies: ADR-0035
+    // Verifies: ADR-0034
     fn a_unc_path_is_spelled_as_libgit2_spells_a_remote_it_makes() {
         use super::as_libgit2_makes_it as made;
         assert_eq!(
@@ -1221,7 +1221,7 @@ mod tests {
     }
 
     #[test]
-    // Verifies: ADR-0035
+    // Verifies: ADR-0034
     fn what_a_remote_says_loses_escapes_and_every_invisible_character() {
         use super::cleaned;
         assert_eq!(

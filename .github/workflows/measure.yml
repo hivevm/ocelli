@@ -1,7 +1,7 @@
 name: Measure
 
 # Measures the quality goals the checks cannot hold on every push, because they download, build,
-# and measure for minutes (ADR-0008), weekly and on demand from the Actions tab:
+# and measure for minutes (ADR-0007), weekly and on demand from the Actions tab:
 # - Q-1, the edge crossings in Ocelli's layout on the corpus of feature spec #11 against the count
 #   recorded for each repository's fixed commit, with git's count beside it, by
 #   scripts/measure-crossings.sh.
@@ -12,7 +12,7 @@ name: Measure
 #   application over the empty application, by scripts/measure-memory.sh under a virtual display on
 #   Linux.
 # - The guards of the git adapter, each changed by a mutant the suite must catch, by
-#   scripts/measure-mutants.sh (ADR-0008).
+#   scripts/measure-mutants.sh (ADR-0007).
 # Each job fails when its goal is missed or it cannot measure.
 
 on:
@@ -64,7 +64,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      # The desktop host links against WebKitGTK (ADR-0018); Xvfb is the virtual display.
+      # The desktop host links against WebKitGTK (ADR-0021); Xvfb is the virtual display.
       - name: Install the desktop host's Linux libraries and a virtual display
         run: |
           sudo apt-get update
