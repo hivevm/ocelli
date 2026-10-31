@@ -350,7 +350,7 @@ pub(crate) mod tests {
     }
 
     #[test]
-    // Verifies: ADR-0019, G-7
+    // Verifies: ADR-0040, G-7
     fn a_window_reads_the_rows_of_every_chunk_appended() {
         let session = Session::default();
         let mut layout = Layout::new();
@@ -383,7 +383,7 @@ pub(crate) mod tests {
     }
 
     #[test]
-    // Verifies: ADR-0019, ADR-0016
+    // Verifies: ADR-0040, ADR-0016
     fn a_newer_load_refuses_the_older_ones_chunks_and_replaces_its_history_on_its_first() {
         let session = Session::default();
         let old = session.begin(None);
@@ -423,7 +423,7 @@ pub(crate) mod tests {
     }
 
     #[test]
-    // Verifies: ADR-0019, G-10
+    // Verifies: ADR-0040, G-10
     fn the_lineage_lights_the_window_and_grows_with_the_chunks() {
         let session = Session::default();
         let mut layout = Layout::new();
@@ -450,7 +450,7 @@ pub(crate) mod tests {
     }
 
     #[test]
-    // Verifies: ADR-0019, G-10
+    // Verifies: ADR-0040, G-10
     fn the_relatives_of_the_selection_gain_their_rows_as_they_arrive() {
         let session = Session::default();
         let mut layout = Layout::new();
@@ -472,7 +472,7 @@ pub(crate) mod tests {
     }
 
     #[test]
-    // Verifies: ADR-0019, G-11
+    // Verifies: ADR-0040, G-11
     fn a_search_finds_every_row_and_lists_the_first_ones() {
         let session = Session::default();
         let mut layout = Layout::new();
@@ -487,7 +487,7 @@ pub(crate) mod tests {
     }
 
     #[test]
-    // Verifies: ADR-0019, G-11
+    // Verifies: ADR-0040, G-11
     fn a_search_asked_again_as_the_history_grows_finds_what_a_fresh_one_does() {
         let session = Session::default();
         let mut layout = Layout::new();

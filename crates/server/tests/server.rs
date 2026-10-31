@@ -1199,7 +1199,7 @@ async fn a_tab_closed_or_dropped_during_a_load_has_its_session_dropped() {
 }
 
 #[tokio::test]
-// Verifies: ADR-0035, ADR-0022, ADR-0019, G-18
+// Verifies: ADR-0035, ADR-0022, ADR-0040, G-18
 async fn each_read_the_browser_asks_is_answered_as_the_desktop_host_answers_it() {
     let tree = Tree::new("same-answers");
     let root = tree.root();
