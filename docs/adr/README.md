@@ -126,6 +126,7 @@ is the table a session reads.
 | [0037](0037-git-adapter-confined-to-the-server-root.md) | The git adapter, confined to the server root, opens nothing whose files lie outside it | every path a browser names to `ocelli-server`, the confinement of the git adapter in `crates/git/src/confine.rs` and the reads it changes in `refs.rs` and `git.rs`, the server root and its folder listing in `crates/server/src/root.rs`, the check `Host::guarded` in `crates/commands` makes before every command, what `crates/server/src/socket.rs` lets leave the server, and the sidebar's submodule, worktree, and parent rows it serves | 🟢 |
 | [0038](0038-tag-triggered-release.md) | A pushed version tag builds the installers and a Flatpak into a draft release | `.github/workflows/release.yml` and `flatpak/` | 🟢 |
 | [0039](0039-openssl-vendored-on-macos.md) | On macOS, Ocelli builds OpenSSL into its binaries and links no library outside the system | the OpenSSL that `crates/git/Cargo.toml` links on macOS, `Cargo.lock`, and the macOS linkage check of the `build` job in `.github/workflows/checks.yml` | 🟢 |
+| [draft-row-window-margin](draft-row-window-margin.md) | The core keeps the commit graph, the front ends read windows of rows from it reaching one screen beyond the view, and the core searches it and computes lineage | the commit graph's store in `crates/core`, the desktop host's commands in `src-tauri`, the web interface's graph, search, and lineage in `src-web`, and the terminal application's reads in `crates/tui` | 🟡 |
 
 ### Superseded and rejected
 
