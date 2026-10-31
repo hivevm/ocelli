@@ -125,7 +125,7 @@ is the table a session reads.
 | [0038](0038-tag-triggered-release.md) | A pushed version tag builds the installers and a Flatpak into a draft release | `.github/workflows/release.yml` and `flatpak/` | 🟢 |
 | [0039](0039-openssl-vendored-on-macos.md) | On macOS, Ocelli builds OpenSSL into its binaries and links no library outside the system | the OpenSSL that `crates/git/Cargo.toml` links on macOS, `Cargo.lock`, and the macOS linkage check of the `build` job in `.github/workflows/checks.yml` | 🟢 |
 | [0040](0040-row-window-margin.md) | The core keeps the commit graph, the front ends read windows of rows from it reaching one screen beyond the view, and the core searches it and computes lineage | the commit graph's store in `crates/core`, the desktop host's commands in `src-tauri`, the web interface's graph, search, and lineage in `src-web`, and the terminal application's reads in `crates/tui` | 🟢 |
-| [draft-sidebar-worktrees-filter](draft-sidebar-worktrees-filter.md) | A repository sidebar lists branches, remotes, every worktree, and tags under one filter, and selecting a branch or tag reveals its commit | `src-web/src/RepoSidebar.svelte`, `src-web/src/refTree.ts`, `crates/git/src/refs.rs`, the `RepoRefs` value in `crates/core/src/model.rs`, and `crates/tui/src/sidebar.rs` | 🟢 |
+| [0041](0041-sidebar-worktrees-filter.md) | A repository sidebar lists branches, remotes, every worktree, and tags under one filter, and selecting a branch or tag reveals its commit | `src-web/src/RepoSidebar.svelte`, `src-web/src/refTree.ts`, `crates/git/src/refs.rs`, the `RepoRefs` value in `crates/core/src/model.rs`, and `crates/tui/src/sidebar.rs` | 🟢 |
 
 ### Superseded and rejected
 

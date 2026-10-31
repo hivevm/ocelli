@@ -1,4 +1,4 @@
-# ADR-draft-sidebar-worktrees-filter: A repository sidebar lists branches, remotes, every worktree, and tags under one filter, and selecting a branch or tag reveals its commit
+# ADR-0041: A repository sidebar lists branches, remotes, every worktree, and tags under one filter, and selecting a branch or tag reveals its commit
 
 - **Status:** 🟢 accepted
 - **Date:** 2026-10-31
