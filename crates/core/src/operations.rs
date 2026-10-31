@@ -115,7 +115,7 @@ mod tests {
     }
 
     #[test]
-    // Verifies: ADR-0033, G-13
+    // Verifies: ADR-draft-merge-editor, G-13
     fn a_commit_offers_what_changes_the_checked_out_branch_and_a_merge_is_named_after_its_branch() {
         let refs = RepoRefs {
             locals: vec![local("main", "h", true), local("topic", "t", false)],
@@ -141,7 +141,7 @@ mod tests {
     }
 
     #[test]
-    // Verifies: ADR-0036, ADR-0033
+    // Verifies: ADR-0036, ADR-draft-merge-editor
     fn the_operations_offered_serialize_as_their_writes_or_a_reason() {
         let refs = RepoRefs {
             locals: vec![local("main", "h", true)],

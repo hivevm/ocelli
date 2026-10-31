@@ -351,13 +351,13 @@ mod tests {
     }
 
     #[test]
-    // Verifies: ADR-0033
+    // Verifies: ADR-draft-merge-editor
     fn the_commit_to_select_again_is_named_once_its_chunk_lays_it_out() {
         assert_eq!(rows_named("c4", &[9, 6, 3], None), [None, Some(5), None]);
     }
 
     #[test]
-    // Verifies: ADR-0033
+    // Verifies: ADR-draft-merge-editor
     fn the_developers_own_choice_or_the_end_gives_the_commit_up() {
         assert_eq!(rows_named("c4", &[9, 6], Some(1)), [None, None]);
         let mut session = LoadSession::new();

@@ -571,7 +571,7 @@ mod tests {
     use super::{lock_ref, repository_path, set_target, valid_ref_name};
 
     #[test]
-    // Verifies: ADR-0033
+    // Verifies: ADR-draft-merge-editor
     fn a_reference_name_with_a_nul_is_no_name_and_reaches_no_panic() {
         assert!(valid_ref_name("refs/heads/topic"));
         for name in ["refs/heads/a\0b", "\0", "refs/tags/v1\0"] {
@@ -594,7 +594,7 @@ mod tests {
     }
 
     #[test]
-    // Verifies: ADR-0033
+    // Verifies: ADR-draft-merge-editor
     fn a_transaction_refuses_a_nul_before_git2_sees_it() {
         let scratch =
             Scratch(std::env::temp_dir().join(format!("ocelli-guard-nul-{}", std::process::id())));
@@ -610,7 +610,7 @@ mod tests {
     }
 
     #[test]
-    // Verifies: ADR-0033, ADR-0039
+    // Verifies: ADR-draft-merge-editor, ADR-0039
     fn a_path_is_taken_only_as_plain_names_below_the_working_directory_outside_any_git() {
         for plain in [
             "f",

@@ -1,4 +1,4 @@
-//! Verifies: ADR-0033, ADR-0039, ADR-0037
+//! Verifies: ADR-draft-merge-editor, ADR-0039, ADR-0037
 //!
 //! A write's strings come from the caller, a browser of the remote server among them: names,
 //! ids, messages, paths, and a remote's name. git2 turns some into C strings by unwrapping, and a

@@ -972,7 +972,7 @@ fn run_state(root: &Path, origin: &Path, base: &Base, index: usize) -> Verdicts 
 }
 
 #[test]
-// Verifies: ADR-0033
+// Verifies: ADR-draft-merge-editor
 fn each_write_does_what_git_does_in_every_state_or_an_adr_says_why_not() {
     for (states, writes, _) in DEPARTURES.iter().chain(MISMATCHES) {
         for s in *states {

@@ -1,4 +1,4 @@
-//! Verifies: ADR-0033, ADR-0037
+//! Verifies: ADR-draft-merge-editor, ADR-0037
 //!
 //! git2 panics in places, and a release build aborts on a panic, every tab of the remote server
 //! with it. Each place of the locked git2's source outside its tests that panics by itself, an
@@ -749,7 +749,7 @@ fn stash_not_utf8(dir: &Path) {
 }
 
 #[test]
-// Verifies: ADR-0033, ADR-0037
+// Verifies: ADR-draft-merge-editor, ADR-0037
 fn a_stash_message_that_is_not_utf8_is_read_and_dropped_without_a_panic() {
     let scratch = Scratch::new("stash");
     let dir = scratch.0.join("repo");
@@ -812,7 +812,7 @@ fn panics_in<T>(f: impl FnOnce() -> T) -> Option<T> {
 }
 
 #[test]
-// Verifies: ADR-0033, ADR-0037
+// Verifies: ADR-draft-merge-editor, ADR-0037
 fn a_configuration_key_without_a_value_is_refused_as_git_refuses_it_without_a_panic() {
     let scratch = Scratch::new("valueless");
     let dir = scratch.0.join("repo");
@@ -1406,7 +1406,7 @@ fn takes_a_name_not_utf8(dir: &Path) -> bool {
 }
 
 #[test]
-// Verifies: ADR-0033, ADR-0037
+// Verifies: ADR-draft-merge-editor, ADR-0037
 fn a_switch_and_a_fast_forward_write_a_name_not_utf8_or_refuse_it_without_a_panic() {
     let scratch = Scratch::new("checkout-not-utf8");
     let dir = scratch.0.join("repo");
@@ -1480,7 +1480,7 @@ fn a_switch_and_a_fast_forward_write_a_name_not_utf8_or_refuse_it_without_a_pani
 }
 
 #[test]
-// Verifies: ADR-0033
+// Verifies: ADR-draft-merge-editor
 fn an_operation_sees_a_name_not_utf8_at_its_start_and_its_abort_puts_it_back() {
     let scratch = Scratch::new("abort-not-utf8");
     if !takes_a_name_not_utf8(&scratch.0) {
@@ -1533,7 +1533,7 @@ fn an_operation_sees_a_name_not_utf8_at_its_start_and_its_abort_puts_it_back() {
 }
 
 #[test]
-// Verifies: ADR-0033
+// Verifies: ADR-draft-merge-editor
 fn a_stash_sees_what_is_in_its_way_under_a_name_not_utf8() {
     let scratch = Scratch::new("stash-not-utf8");
     if !takes_a_name_not_utf8(&scratch.0) {
@@ -1615,7 +1615,7 @@ fn a_stash_sees_what_is_in_its_way_under_a_name_not_utf8() {
 }
 
 #[test]
-// Verifies: ADR-0033, ADR-0037
+// Verifies: ADR-draft-merge-editor, ADR-0037
 fn a_name_not_utf8_is_never_acted_on_by_its_lossy_reading_and_unnamable_ones_refuse_an_abort() {
     let scratch = Scratch::new("index-not-utf8");
     let dir = scratch.0.join("repo");
@@ -1683,7 +1683,7 @@ fn a_name_not_utf8_is_never_acted_on_by_its_lossy_reading_and_unnamable_ones_ref
 }
 
 #[test]
-// Verifies: ADR-0033
+// Verifies: ADR-draft-merge-editor
 fn a_switch_to_a_name_longer_than_any_file_system_takes_writes_nothing() {
     let scratch = Scratch::new("long-name");
     let dir = scratch.0.join("repo");
@@ -1709,7 +1709,7 @@ fn a_switch_to_a_name_longer_than_any_file_system_takes_writes_nothing() {
 
 #[test]
 #[cfg(target_os = "linux")]
-// Verifies: ADR-0033
+// Verifies: ADR-draft-merge-editor
 fn a_link_whose_target_is_not_utf8_is_hashed_as_git_hashes_it() {
     use std::os::unix::ffi::OsStrExt;
     let scratch = Scratch::new("link-target");

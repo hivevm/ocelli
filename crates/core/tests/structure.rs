@@ -245,7 +245,7 @@ fn commands_on_the_main_thread(source: &str) -> Vec<String> {
 }
 
 #[test]
-// Verifies: ADR-0019, ADR-0033, G-17
+// Verifies: ADR-0019, ADR-draft-merge-editor, G-17
 fn every_command_that_reads_or_writes_the_repository_runs_off_the_main_thread() {
     let source = read("../../src-tauri/src/commands.rs");
     assert_eq!(commands_on_the_main_thread(&source), Vec::<String>::new());

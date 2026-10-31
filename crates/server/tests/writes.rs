@@ -62,7 +62,7 @@ fn history(root: &Path) {
 }
 
 #[tokio::test]
-// Verifies: ADR-0037, ADR-0033, G-18, G-12
+// Verifies: ADR-0037, ADR-draft-merge-editor, G-18, G-12
 async fn with_allow_writes_staging_unstaging_and_committing_leave_the_repository_as_the_desktop_does()
  {
     let mut pair = Pair::new("staging", |root| {
@@ -116,7 +116,7 @@ async fn with_allow_writes_staging_unstaging_and_committing_leave_the_repository
 }
 
 #[tokio::test]
-// Verifies: ADR-0037, ADR-0033, ADR-0034, G-18, G-12, Q-7
+// Verifies: ADR-0037, ADR-draft-merge-editor, ADR-0034, G-18, G-12, Q-7
 async fn branches_written_in_the_browser_end_as_the_desktop_leaves_them() {
     let mut pair = Pair::new("branches", |root| {
         history(root);
@@ -211,7 +211,7 @@ fn stash(dir: &Path, index: usize) -> String {
 }
 
 #[tokio::test]
-// Verifies: ADR-0037, ADR-0033, ADR-0034, G-18, G-12, Q-7
+// Verifies: ADR-0037, ADR-draft-merge-editor, ADR-0034, G-18, G-12, Q-7
 async fn stashes_and_tags_written_in_the_browser_end_as_the_desktop_leaves_them() {
     let mut pair = Pair::new("stashes-tags", |root| {
         history(root);
@@ -369,7 +369,7 @@ fn on_main(dir: &Path) -> (String, String) {
 }
 
 #[tokio::test]
-// Verifies: ADR-0037, ADR-0033, ADR-0034, G-18, G-13, G-14, Q-7
+// Verifies: ADR-0037, ADR-draft-merge-editor, ADR-0034, G-18, G-13, G-14, Q-7
 async fn history_operations_and_their_conflicts_in_the_browser_end_as_the_desktop_leaves_them() {
     let mut pair = Pair::new("operations", history).await;
     let made = |answer: &Result<Value, String>| {

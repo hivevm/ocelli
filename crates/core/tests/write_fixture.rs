@@ -1,4 +1,4 @@
-//! Verifies: ADR-0033
+//! Verifies: ADR-draft-merge-editor
 //!
 //! The web interface hands the core a `Write` as JSON from a union it keeps by hand in
 //! `src-web/src/writes.ts`, and nothing but this pair of tests compares the two. This test writes

@@ -698,7 +698,7 @@ mod tests {
     }
 
     #[test]
-    // Verifies: ADR-0036, ADR-0035, ADR-0033
+    // Verifies: ADR-0036, ADR-0035, ADR-draft-merge-editor
     fn the_refs_arrive_with_the_core_s_transfers_and_the_selection_with_its_operations() {
         let fake = Fake {
             chunks: vec![three(9)],

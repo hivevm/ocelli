@@ -505,7 +505,7 @@ pub(crate) mod tests {
     }
 
     #[test]
-    // Verifies: ADR-0036, ADR-0033
+    // Verifies: ADR-0036, ADR-draft-merge-editor
     fn a_selected_commit_offers_the_operations_of_its_loads_refs_a_stash_none() {
         use ocelli_core::model::LocalBranch;
         let refs = Arc::new(RepoRefs {
@@ -559,7 +559,7 @@ pub(crate) mod tests {
     }
 
     #[test]
-    // Verifies: ADR-0033
+    // Verifies: ADR-draft-merge-editor
     fn the_load_after_a_write_names_the_row_to_select_once_it_is_laid_out() {
         let session = Session::default();
         let mut layout = Layout::new();
@@ -574,7 +574,7 @@ pub(crate) mod tests {
     }
 
     #[test]
-    // Verifies: ADR-0033
+    // Verifies: ADR-draft-merge-editor
     fn the_developers_choice_or_a_newer_load_gives_the_commit_up() {
         let session = Session::default();
         let mut layout = Layout::new();

@@ -280,7 +280,7 @@ async fn told_of_a_write(tab: &mut Tab) -> bool {
 }
 
 #[tokio::test]
-// Verifies: ADR-0037, ADR-0033, G-18
+// Verifies: ADR-0037, ADR-draft-merge-editor, G-18
 async fn two_tabs_writing_to_one_repository_write_in_turn_and_the_other_tabs_on_it_load_again() {
     let tree = Tree::new("two-tabs-writing");
     let root = tree.root();

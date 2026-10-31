@@ -1838,7 +1838,7 @@ pub(crate) mod tests {
     }
 
     #[test]
-    // Verifies: ADR-0033, G-16
+    // Verifies: ADR-draft-merge-editor, G-16
     fn t_asks_for_a_name_then_a_message_and_hands_the_tag_to_the_event_loop() {
         let mut app = loaded_app();
         press(&mut app, KeyCode::Char('j'));
@@ -1901,7 +1901,7 @@ pub(crate) mod tests {
     }
 
     #[test]
-    // Verifies: ADR-0033
+    // Verifies: ADR-draft-merge-editor
     fn a_write_done_reloads_and_selects_the_commit_again_once_its_row_arrives() {
         let mut app = loaded_app();
         press(&mut app, KeyCode::Char('j'));
@@ -1926,7 +1926,7 @@ pub(crate) mod tests {
     }
 
     #[test]
-    // Verifies: ADR-0033
+    // Verifies: ADR-draft-merge-editor
     fn the_commit_a_write_left_selected_arrives_late_and_yields_to_the_developer() {
         let reload = |pick: bool| {
             let mut app = loaded_app();
@@ -2021,7 +2021,7 @@ pub(crate) mod tests {
     }
 
     #[test]
-    // Verifies: ADR-0033, G-16
+    // Verifies: ADR-draft-merge-editor, G-16
     fn s_asks_for_a_message_and_the_untracked_switch_and_stashes() {
         let mut app = loaded_app();
         press(&mut app, KeyCode::Char('s'));
@@ -2201,7 +2201,7 @@ pub(crate) mod tests {
     }
 
     #[test]
-    // Verifies: ADR-0033, G-12
+    // Verifies: ADR-draft-merge-editor, G-12
     fn a_and_u_stage_and_unstage_the_file_under_the_cursor() {
         let mut app = on_the_working_node();
         app.focus = Focus::Files;
@@ -2239,7 +2239,7 @@ pub(crate) mod tests {
     }
 
     #[test]
-    // Verifies: ADR-0033, G-12
+    // Verifies: ADR-draft-merge-editor, G-12
     fn c_on_the_working_node_commits_the_index_on_its_parent() {
         let mut app = on_the_working_node();
         press(&mut app, KeyCode::Char('c'));
@@ -2259,7 +2259,7 @@ pub(crate) mod tests {
     }
 
     #[test]
-    // Verifies: ADR-0033
+    // Verifies: ADR-draft-merge-editor
     fn the_commit_a_write_made_is_selected_after_the_reload() {
         let mut app = on_the_working_node();
         app.on_msg(Msg::Written(Ok(Some("new".into()))));
@@ -2284,7 +2284,7 @@ pub(crate) mod tests {
     }
 
     #[test]
-    // Verifies: ADR-0033, G-12
+    // Verifies: ADR-draft-merge-editor, G-12
     fn b_asks_for_a_branch_at_the_commit_switched_to_unless_turned_off() {
         let mut app = loaded_app();
         press(&mut app, KeyCode::Char('j'));
@@ -2305,7 +2305,7 @@ pub(crate) mod tests {
     }
 
     #[test]
-    // Verifies: ADR-0033, G-12
+    // Verifies: ADR-draft-merge-editor, G-12
     fn w_switches_to_a_branch_a_remote_branch_or_a_commit() {
         let mut app = loaded_app();
         press(&mut app, KeyCode::Char('w'));
@@ -2462,7 +2462,7 @@ pub(crate) mod tests {
     }
 
     #[test]
-    // Verifies: ADR-0033, G-13
+    // Verifies: ADR-draft-merge-editor, G-13
     fn the_checked_out_commit_offers_only_a_revert_and_a_reset() {
         let mut app = loaded_app();
         let row = app.data.as_ref().unwrap().row_of("d").unwrap();
@@ -2558,7 +2558,7 @@ pub(crate) mod tests {
     }
 
     #[test]
-    // Verifies: ADR-0033, G-14
+    // Verifies: ADR-draft-merge-editor, G-14
     fn the_conflicts_resolve_continue_and_abort_after_a_confirmation() {
         let conflict = ocelli_core::model::Conflict {
             path: "f".into(),
