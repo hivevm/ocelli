@@ -29,6 +29,14 @@
 set -uo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+
+# A measurement takes minutes, and scripts/check-all.sh runs every script a workflow runs, so it
+# skips itself unless OCELLI_MEASURE_ALL=1, which .github/workflows/measure.yml sets; the verdict
+# alone always runs.
+if [[ "${OCELLI_MEASURE_ALL:-}" != 1 && "${1:-}" != --verdict ]]; then
+  echo "Desktop memory (Q-3): skipped — measured weekly by .github/workflows/measure.yml; OCELLI_MEASURE_ALL=1 measures here."
+  exit 0
+fi
 commits="${OCELLI_MEMORY_COMMITS:-100000}"
 limit_mb="${OCELLI_MEMORY_LIMIT_MB:-150}"
 wrapper="${OCELLI_MEMORY_WRAPPER-xvfb-run -a}"
@@ -88,7 +96,7 @@ descendants() {
 }
 
 # kill_tree <pid> — stop the process and everything below it, the deepest first.
-# shellcheck disable=SC2317  # called through the RETURN trap of measure
+# shellcheck disable=SC2317,SC2329  # called through the RETURN trap of measure
 kill_tree() {
   local p
   for p in $(descendants "$1" | tac); do

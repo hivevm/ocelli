@@ -221,6 +221,12 @@ docs/CONVENTIONS.md   # how this project writes what no check decides, kept curr
 docs/ARCHITECTURE.md  # the system as it currently stands
 docs/adr/             # Architecture Decision Records (+ template)
 docs/plan/            # open work: feature specs and their tickets, deleted as they land
+Cargo.toml            # the Cargo workspace of the crates and the desktop host (ADR-0008)
+Cargo.lock            # the locked Rust dependencies
+rust-toolchain.toml   # the pinned Rust toolchain and its components (ADR-0008)
+.cargo/               # Cargo's build configuration: linkers and the development profile
+package.json          # the web interface's dependencies and scripts, run by Bun (ADR-0008)
+bun.lock              # the locked JavaScript dependencies
 crates/commands/      # the commands both hosts of the web interface answer (ADR-0037)
 crates/core/          # the core: commit graph, layout, and the repository port (ADR-0009)
 crates/git/           # the repository port implemented with git2 (ADR-0019)
@@ -397,7 +403,8 @@ configured once by a maintainer and worth re-checking after a repository move or
   only, since squash and rebase discard the merges a `feat/` branch carries and the commits it
   was reworked into ([`AGENTS.md` §6](AGENTS.md#6-project-rules)); requires the
   <!-- required-checks begin — compared with the workflow's jobs by scripts/check-docs.sh -->
-  `docs`, `traceability`, `devcontainer`, `sensors`, `shell`, and `build`
+  `docs`, `traceability`, `devcontainer`, `sensors`, `shell`, `build (ubuntu-latest)`,
+  `build (macos-latest)`, and `build (windows-latest)`
   <!-- required-checks end -->
   jobs of the **Checks** workflow as required status checks (rulesets list checks as they report:
   a job by its name, a job with a matrix by one check run per entry, such as

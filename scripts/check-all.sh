@@ -196,6 +196,16 @@ run "Build, test, lint" scripts/check-build.sh
 run "Measurement self-test" scripts/test-measure-crossings.sh
 run "Memory measurement self-test" scripts/test-measure-memory.sh
 run "Window measurement self-test" scripts/test-measure-windows.sh
+# The release pipeline builds and publishes the installers on a tag (ADR-0025) and checks nothing.
+# Not a gate: .github/workflows/release.yml
+# The measurements run weekly in .github/workflows/measure.yml: they clone real repositories,
+# build in release, and mutate the git adapter, so each skips itself here unless
+# OCELLI_MEASURE_ALL=1. generate-history.sh writes the histories they measure.
+# On instruction: scripts/generate-history.sh
+run "Edge crossings (Q-1)" scripts/measure-crossings.sh
+run "Waits on a large history (Q-2)" scripts/measure-windows.sh
+run "Desktop memory (Q-3)" scripts/measure-memory.sh
+run "Mutants of the git adapter's guards" scripts/measure-mutants.sh
 
 wait
 

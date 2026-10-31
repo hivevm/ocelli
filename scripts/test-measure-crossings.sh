@@ -18,6 +18,7 @@ set -uo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 SCRIPT="$ROOT/scripts/measure-crossings.sh"
+export OCELLI_MEASURE_ALL=1
 
 work="$(mktemp -d)"
 trap 'rm -rf "$work"' EXIT
@@ -105,6 +106,15 @@ OCELLI_MEASURE="$(stub 'commits: 9\\nmain line: none\\nocelli crossings: 3\\ngit
   expect "a layout without the main line fails the run" 1 "Measurement FAILED for: straight" "$work/one"
 OCELLI_MEASURE="$(stub 'commits: 9\\n')" \
   expect "counts that cannot be read fail the run" 1 "Measurement FAILED for: straight" "$work/one"
+
+# Without OCELLI_MEASURE_ALL the measurement skips itself, as in scripts/check-all.sh, and
+# measures nothing.
+out="$(env -u OCELLI_MEASURE_ALL OCELLI_MEASURE=/nonexistent bash "$SCRIPT" 2>&1)"; rc=$?
+if ((rc == 0)) && [[ "$out" == "Edge crossings (Q-1): skipped"* ]]; then
+  passed=$((passed + 1))
+else
+  failed=$((failed + 1)); echo "FAIL: without OCELLI_MEASURE_ALL the measurement skips itself (exit $rc)" >&2
+fi
 
 if ((failed)); then
   echo "Measurement self-test FAILED ($failed of $((passed + failed)) cases)." >&2

@@ -25,6 +25,14 @@
 set -uo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+
+# A measurement takes minutes, and scripts/check-all.sh runs every script a workflow runs, so it
+# skips itself unless OCELLI_MEASURE_ALL=1, which .github/workflows/measure.yml sets; the verdict
+# alone always runs.
+if [[ "${OCELLI_MEASURE_ALL:-}" != 1 && "${1:-}" != --verdict ]]; then
+  echo "Waits on a large history (Q-2): skipped — measured weekly by .github/workflows/measure.yml; OCELLI_MEASURE_ALL=1 measures here."
+  exit 0
+fi
 commits="${OCELLI_WINDOWS_COMMITS:-1000000}"
 first_limit="${OCELLI_FIRST_LIMIT_MS:-2000}"
 window_limit="${OCELLI_WINDOW_LIMIT_MS:-100}"
