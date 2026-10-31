@@ -1,4 +1,4 @@
-# ADR-draft-row-window-margin: The core keeps the commit graph, the front ends read windows of rows from it reaching one screen beyond the view, and the core searches it and computes lineage
+# ADR-0040: The core keeps the commit graph, the front ends read windows of rows from it reaching one screen beyond the view, and the core searches it and computes lineage
 
 - **Status:** 🟢 accepted
 - **Date:** 2026-10-31
