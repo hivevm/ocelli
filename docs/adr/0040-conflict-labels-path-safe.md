@@ -1,7 +1,7 @@
 # ADR-0040: A conflict's sides are labelled as `git` labels them, but for what would let a label spell a path
 
-- **Status:** 🟡 proposed
-- **Date:** 2026-10-10
+- **Status:** 🟢 accepted
+- **Date:** 2026-10-31
 - **Deciders:** Markus Brigl
 - **Applies to:** the labels every write that can stop on a conflict gives libgit2 in `crates/git/src/workdir.rs`, the label calls `crates/git/clippy.toml` disallows elsewhere, and the label tests of `crates/git/tests/history.rs` and `crates/git/tests/write.rs`
 
