@@ -1,6 +1,6 @@
 # ADR-draft-merge-editor: Ocelli writes through libgit2 what `git` writes for the same command, refusing first where `git` would or an ADR departs, running no program, and resolves a conflicted file's text in a merge editor of its own
 
-- **Status:** 🟡 proposed
+- **Status:** 🟢 accepted
 - **Date:** 2026-10-31
 - **Deciders:** Markus Brigl
 - **Applies to:** the `RepositoryWriter` port in `crates/core/src/port.rs`, the writes of `crates/git/src/` in `write.rs`, `guard.rs`, `checkout.rs`, `workdir.rs`, `message.rs`, `operations.rs`, `conflicts.rs`, and `stash.rs`, the working directory a pull's fast-forward writes from `remote.rs`, the reading of a stopped operation in `refs.rs`, every call of the writer from a front end and how a front end shows a stopped operation, `crates/git/tests/git_parity.rs`, the tests of Q-4, and the merge editor: the blocks the core finds in a conflicted file, the merge editor of the web interface and of the terminal application, and their dependencies on CodeMirror and `tui-textarea-2`
