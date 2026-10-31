@@ -2654,7 +2654,7 @@ pub(crate) mod tests {
     }
 
     #[test]
-    // Verifies: ADR-0016, ADR-draft-row-window-margin, G-17
+    // Verifies: ADR-0016, ADR-0040, G-17
     fn a_history_arriving_in_chunks_grows_below_what_is_shown() {
         let (mut app, mut layout) = chunked_app();
         assert_eq!(app.status, "3 commits in 1 chunk — loading older history…");
@@ -2717,7 +2717,7 @@ pub(crate) mod tests {
     }
 
     #[test]
-    // Verifies: ADR-draft-row-window-margin, G-11
+    // Verifies: ADR-0040, G-11
     fn search_reaches_the_chunks_arriving_after_it() {
         let (mut app, mut layout) = chunked_app();
         press(&mut app, KeyCode::Char('/'));
@@ -2732,7 +2732,7 @@ pub(crate) mod tests {
     }
 
     #[test]
-    // Verifies: ADR-draft-row-window-margin, G-11
+    // Verifies: ADR-0040, G-11
     fn a_search_typed_while_loading_finds_the_first_chunk() {
         let mut layout = Layout::new();
         let mut app = App::new("/repo".into(), Glyphs::Unicode);
@@ -2745,7 +2745,7 @@ pub(crate) mod tests {
     }
 
     #[test]
-    // Verifies: ADR-draft-row-window-margin, G-10
+    // Verifies: ADR-0040, G-10
     fn the_lineage_reaches_the_chunks_arriving_after_the_selection() {
         let (mut app, mut layout) = chunked_app();
         assert_eq!(app.lineage.as_ref().unwrap().rows().len(), 3);

@@ -499,7 +499,7 @@ mod tests {
     }
 
     #[test]
-    // Verifies: ADR-0015, ADR-draft-row-window-margin
+    // Verifies: ADR-0015, ADR-0040
     fn an_edge_reaches_one_lane_past_its_rightmost() {
         assert_eq!(edge((5, 0), (2, 2), true, None).lanes(), 3);
         assert_eq!(edge((5, 0), (2, 1), false, Some(4)).lanes(), 5);

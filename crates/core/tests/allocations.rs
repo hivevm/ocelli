@@ -95,7 +95,7 @@ fn history() -> Vec<CommitData> {
 }
 
 #[test]
-// Verifies: ADR-0013, ADR-draft-row-window-margin, Q-3
+// Verifies: ADR-0013, ADR-0040, Q-3
 fn a_load_holds_a_few_blocks_per_chunk_and_a_bounded_number_of_bytes_per_commit() {
     let chunks: Vec<Vec<CommitData>> = history().chunks(CHUNK_COMMITS).map(<[_]>::to_vec).collect();
     let n = chunks.len() as isize;
