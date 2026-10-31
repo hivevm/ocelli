@@ -3,7 +3,7 @@
 # Self-test of scripts/measure-memory.sh.
 #
 # A stand-in for the desktop application reports the commits of the repository it is given, as
-# the application reports its loaded graph, holds 64 MB of its own and about 40 MB more with a
+# the application reports its loaded graph, holds 128 MB of its own and about 40 MB more with a
 # repository than without (a 20 MB string, and the buffer bash read it through), starts a child
 # process, and keeps running; the script measures it, with no repository and on a small
 # generated one, without a display. What it holds alone is large enough that the pages it shares
@@ -44,7 +44,7 @@ pause="301.${$}"
 # The stand-ins' own "$1" and "$(...)" are theirs, not this script's.
 # shellcheck disable=SC2016
 {
-  printf '#!/usr/bin/env bash\nheld=$(head -c 64000000 /dev/zero | tr "\\0" a)\n'
+  printf '#!/usr/bin/env bash\nheld=$(head -c 128000000 /dev/zero | tr "\\0" a)\n'
   printf 'if [[ -n "${1:-}" ]]; then\n  [[ -d "$1" ]] || exit 3\n'
   printf '  big=$(head -c 20000000 /dev/zero | tr "\\0" a)\n'
   printf '  echo "$(git -C "$1" rev-list --count --all) commits" >&2\nfi\nsleep %s &\nwait\n' "$pause"
@@ -82,7 +82,7 @@ expect() {
 # share, and its RSS. The rest, bash's and libc's pages, is divided among every process on the
 # machine that maps them, a number load moves. Its two runs therefore stay less than 10 percent
 # apart at any load when nine times the rest is less than the private part. What the bound leaves
-# open is the private part itself: the kernel could reclaim or swap some of those 64 MB between
+# open is the private part itself: the kernel could reclaim or swap some of those 128 MB between
 # two runs, which a machine with memory to spare does not do within the seconds they take.
 "$work/runs" &
 standin=$!

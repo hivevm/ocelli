@@ -96,7 +96,7 @@ descendants() {
 }
 
 # kill_tree <pid> — stop the process and everything below it, the deepest first.
-# shellcheck disable=SC2317  # called through the RETURN trap of measure
+# shellcheck disable=SC2317,SC2329  # called through the RETURN trap of measure
 kill_tree() {
   local p
   for p in $(descendants "$1" | tac); do
