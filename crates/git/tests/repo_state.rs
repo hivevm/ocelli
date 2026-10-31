@@ -2,7 +2,7 @@
     clippy::disallowed_methods,
     reason = "a test sets a repository up by hand, the way a developer would"
 )]
-// Verifies: ADR-0028
+// Verifies: ADR-0028, ADR-0041
 //! Fixture tests for the repository-state read behind the sidebar (ADR-0027,
 //! ADR-0028): submodules, working trees, and the way back to the parent.
 //!
@@ -214,6 +214,10 @@ fn a_linked_worktree_sees_the_main_tree_as_parent() {
         .find(|w| w.is_main)
         .expect("a main row");
     assert!(main_row.is_current, "the main tree is the one being viewed");
+    assert!(
+        from_main.worktrees[0].is_main,
+        "the main tree is listed first"
+    );
     assert_eq!(
         from_main.worktrees.iter().filter(|w| w.is_current).count(),
         1,
@@ -235,6 +239,10 @@ fn a_linked_worktree_sees_the_main_tree_as_parent() {
         2,
         "the main tree is read through the shared git directory, not doubled"
     );
+    assert!(
+        from_linked.worktrees[0].is_main,
+        "the main tree is listed first from a linked one too"
+    );
     let linked_row = from_linked
         .worktrees
         .iter()
@@ -252,5 +260,19 @@ fn a_linked_worktree_sees_the_main_tree_as_parent() {
             .unwrap()
             .is_current,
         "the main tree is not current while a linked one is viewed"
+    );
+}
+
+/// A bare repository has no working tree of its own, so the worktrees section
+/// lists no main one.
+#[test]
+fn a_bare_repository_lists_no_main_working_tree() {
+    let scratch = Scratch::new("bare-worktrees");
+    let path = scratch.0.join("bare.git");
+    Repository::init_bare(&path).expect("a bare repository");
+    let refs = load_repo_refs(&path).expect("the repository state");
+    assert!(
+        refs.worktrees.iter().all(|w| !w.is_main),
+        "a bare repository has no main working tree"
     );
 }
