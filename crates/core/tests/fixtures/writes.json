@@ -127,6 +127,18 @@
     "take": "asEdited"
   },
   {
+    "kind": "saveMerge",
+    "path": "f",
+    "conflict": {
+      "path": "f",
+      "ancestor": null,
+      "ours": "o",
+      "theirs": "t"
+    },
+    "opened": "b",
+    "result": "both\n"
+  },
+  {
     "kind": "continue",
     "operation": "cherryPick",
     "head": "h"

@@ -343,6 +343,12 @@ pub fn examples(repositories: &Repositories) -> Vec<Example> {
             conflict: conflict(d, "k"),
             take: Take::Theirs,
         }),
+        (State::Merging, |d| Write::SaveMerge {
+            path: "k".into(),
+            conflict: conflict(d, "k"),
+            opened: git(d, &["hash-object", "k"]),
+            result: "resolved\n".into(),
+        }),
         (State::Picked, |d| Write::Continue {
             operation: Operation::CherryPick,
             head: rev(d, "HEAD"),

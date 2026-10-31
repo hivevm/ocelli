@@ -1,6 +1,7 @@
 //! The repository ports (ADR-0008): what the core needs from a repository, owned by the core and
 //! implemented by an adapter. Every `repo` path names a directory inside the repository.
 
+use crate::merge::MergeFile;
 use crate::model::{CommitData, DiffLine, FileChange, RepoRefs};
 use anyhow::{Result, bail};
 use serde::{Deserialize, Serialize};
@@ -34,6 +35,10 @@ pub trait RepositoryReader {
     /// Loads the diff of one file of a commit; [`crate::model::WORKDIR_SHA`] yields the
     /// uncommitted diff.
     fn load_file_diff(&self, repo: &Path, sha: &str, file_path: &str) -> Result<Vec<DiffLine>>;
+
+    /// Reads the conflicted file `path` for the merge editor (ADR-0031): refused, saying why,
+    /// where the editor does not open it.
+    fn load_merge_file(&self, repo: &Path, path: &str) -> Result<MergeFile>;
 }
 
 /// A write to a repository (ADR-0031), naming the state it expects to find: a write whose expected
@@ -160,6 +165,15 @@ pub enum Write {
         conflict: Conflict,
         take: Take,
     },
+    /// Saves the merge editor's `result` as the resolution of the conflicted file `path`, whose
+    /// conflict is expected to be `conflict` and whose file in the working directory is expected
+    /// to be the blob `opened`, the one the editor was opened on (ADR-0031).
+    SaveMerge {
+        path: String,
+        conflict: Conflict,
+        opened: String,
+        result: String,
+    },
     /// Continues the operation in progress, `HEAD` expected at `head`, once nothing conflicts
     /// (ADR-0031).
     Continue { operation: Operation, head: String },
@@ -222,6 +236,7 @@ impl Write {
                 take: Take::AsEdited,
                 ..
             }
+            | Write::SaveMerge { .. }
             | Write::Continue { .. } => None,
             Write::DeleteTag {
                 name,

@@ -531,6 +531,20 @@ fn writing_a_repository_runs_none_of_its_programs() {
         onto: theirs.clone(),
     });
     assert_eq!(stopped, None, "the rebase stopped on f");
+    let file = ocelli_git::GitReader.load_merge_file(d, "f").unwrap();
+    let conflict = ocelli_git::GitReader
+        .load_refs(d)
+        .unwrap()
+        .in_progress
+        .unwrap()
+        .conflicts[0]
+        .clone();
+    write(Write::SaveMerge {
+        path: "f".into(),
+        conflict,
+        opened: file.blob,
+        result: "resolved\n".into(),
+    });
     write(Write::Abort {
         operation: Operation::Rebase,
         head: rev("HEAD"),
@@ -1131,6 +1145,19 @@ fn a_path_that_names_no_file_of_the_working_directory_is_refused_by_every_write_
             take: Take::AsEdited,
         };
         refused(d, &resolve, why);
+        let save = Write::SaveMerge {
+            path: path.to_string(),
+            conflict: Conflict {
+                path: path.to_string(),
+                ancestor: None,
+                ours: None,
+                theirs: None,
+            },
+            opened: head.clone(),
+            result: String::new(),
+        };
+        refused(d, &save, why);
+        assert!(ocelli_git::GitReader.load_merge_file(d, path).is_err());
         for sha in [head.as_str(), ocelli_core::model::WORKDIR_SHA] {
             let read = ocelli_git::GitReader.load_file_diff(d, sha, path);
             assert!(

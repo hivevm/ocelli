@@ -2570,6 +2570,7 @@ pub(crate) mod tests {
         app.data.as_mut().unwrap().in_progress = Some(InProgress {
             operation: ocelli_core::model::Operation::Merge,
             conflicts: vec![conflict.clone()],
+            editable: Vec::new(),
             head: "d".into(),
         });
         press(&mut app, KeyCode::Char('!'));

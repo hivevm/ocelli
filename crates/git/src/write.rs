@@ -58,6 +58,13 @@ pub fn write(
             take,
         } => repository_path(path)
             .and_then(|()| crate::conflicts::resolve(&repo, path, conflict, *take)),
+        Write::SaveMerge {
+            path,
+            conflict,
+            opened,
+            result,
+        } => repository_path(path)
+            .and_then(|()| crate::conflicts::save_merge(&repo, path, conflict, opened, result)),
         Write::Continue { operation, head } => {
             return crate::conflicts::continue_stopped(&repo, *operation, head);
         }

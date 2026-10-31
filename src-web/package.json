@@ -9,6 +9,9 @@
     "lint": "svelte-check --tsconfig ./tsconfig.json && eslint src"
   },
   "dependencies": {
+    "@codemirror/commands": "^6",
+    "@codemirror/state": "^6",
+    "@codemirror/view": "^6",
     "@tauri-apps/api": "^2"
   },
   "devDependencies": {

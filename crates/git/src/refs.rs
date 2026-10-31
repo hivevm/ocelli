@@ -531,10 +531,19 @@ pub(crate) fn stopped(repo: &Repository) -> Option<InProgress> {
     let operation = operation_of(repo.state())?;
     let index = repo.index().ok()?;
     let conflicts = conflicts_of(&index);
+    let mut editable: Vec<String> = index
+        .conflicts()
+        .ok()?
+        .flatten()
+        .filter(|c| crate::conflicts::editable(repo, c))
+        .filter_map(|c| c.our.map(|e| String::from_utf8_lossy(&e.path).into_owned()))
+        .collect();
+    editable.sort();
     let head = repo.head().ok()?.peel_to_commit().ok()?.id().to_string();
     Some(InProgress {
         operation,
         conflicts,
+        editable,
         head,
     })
 }

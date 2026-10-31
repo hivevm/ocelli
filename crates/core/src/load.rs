@@ -214,6 +214,10 @@ mod tests {
         fn load_file_diff(&self, _: &Path, _: &str, _: &str) -> Result<Vec<DiffLine>> {
             unimplemented!()
         }
+
+        fn load_merge_file(&self, _: &Path, _: &str) -> Result<crate::merge::MergeFile> {
+            unimplemented!()
+        }
     }
 
     /// Three commits `c{top}` down to `c{top - 2}`, each on the next.

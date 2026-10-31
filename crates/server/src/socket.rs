@@ -301,6 +301,11 @@ struct FileDiff {
 }
 
 #[derive(Deserialize)]
+struct MergePath {
+    path: String,
+}
+
+#[derive(Deserialize)]
 struct Discards {
     write: Write,
 }
@@ -385,6 +390,10 @@ async fn answer(tab: &Arc<Tab>, cmd: &str, a: Value) -> Result<Value, String> {
         "get_file_diff" => {
             let FileDiff { sha, file_path } = args(a)?;
             value(host.get_file_diff(sha, file_path).await.map_err(scrub)?)
+        }
+        "get_merge_file" => {
+            let MergePath { path } = args(a)?;
+            value(host.get_merge_file(path).await.map_err(scrub)?)
         }
         "write_discards" => {
             let Discards { write } = args(a)?;
