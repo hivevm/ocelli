@@ -83,6 +83,18 @@ fn bare(dir: &Path) -> Command {
         .env("GIT_TERMINAL_PROMPT", "0")
         .env_remove("GIT_DIR")
         .env_remove("GIT_WORK_TREE");
+    // The identity a test's commits carry is the repository's, as the writer's are: `git commit`
+    // exports the committing developer's to its hooks, and the pre-commit hook runs the tests.
+    for var in [
+        "GIT_AUTHOR_NAME",
+        "GIT_AUTHOR_EMAIL",
+        "GIT_AUTHOR_DATE",
+        "GIT_COMMITTER_NAME",
+        "GIT_COMMITTER_EMAIL",
+        "GIT_COMMITTER_DATE",
+    ] {
+        command.env_remove(var);
+    }
     command
 }
 
