@@ -1,6 +1,6 @@
 # ADR-0019: The core keeps the commit graph, the front ends read windows of rows from it, and the core searches it and computes lineage
 
-- **Status:** 🟢 accepted
+- **Status:** ⚪ superseded by ADR-draft-row-window-margin
 - **Date:** 2026-10-06
 - **Deciders:** Markus Brigl
 - **Applies to:** the commit graph's store in `crates/core`, the desktop host's commands in `src-tauri`, the web interface's graph, search, and lineage in `src-web`, and the terminal application's reads in `crates/tui`
