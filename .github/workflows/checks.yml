@@ -59,7 +59,9 @@ concurrency:
 jobs:
   docs:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    # The normalize self-test runs every other self-test again, the measurements' among them,
+    # which build ocelli-measure.
+    timeout-minutes: 20
     steps:
       # Submodules are checked out because the link check resolves relative targets against the
       # working tree: a documentation link into a submodule would otherwise break in CI while
@@ -79,6 +81,10 @@ jobs:
         run: bash scripts/check-docs.sh
         env:
           PULL_REQUEST_DRAFT: ${{ github.event.pull_request.draft }}
+      # That self-test runs the others in parallel, three of which call cargo: rustup installs the
+      # toolchain rust-toolchain.toml pins once here, or they race to install it.
+      - name: Set up the pinned Rust toolchain
+        run: rustup show active-toolchain
       - name: Self-test the map script of the normalize skill
         run: bash scripts/test-normalize-remap.sh
       - name: Self-test the numbering script of the drafts
