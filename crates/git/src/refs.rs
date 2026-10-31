@@ -1,4 +1,4 @@
-// Verifies: ADR-0027
+// Verifies: ADR-0041
 //! Reads what the repository sidebar lists (ADR-0027, ADR-0028): local branches,
 //! remote branches grouped by their remote, working trees, tags, submodules, and
 //! the repository one level up.

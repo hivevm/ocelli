@@ -1,6 +1,6 @@
 # ADR-0027: A repository sidebar lists branches, remotes, worktrees, and tags, and selecting a branch or tag reveals its commit
 
-- **Status:** 🟢 accepted
+- **Status:** ⚪ superseded by ADR-0041
 - **Date:** 2026-10-04
 - **Deciders:** Markus Brigl
 - **Applies to:** `src-web/src/RepoSidebar.svelte`, `src-web/src/refTree.ts`, `crates/git/src/refs.rs`, the `RepoRefs` value in `crates/core/src/model.rs`, and `crates/tui/src/sidebar.rs`

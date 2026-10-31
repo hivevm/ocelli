@@ -112,7 +112,6 @@ is the table a session reads.
 | [0024](0024-themes-tokens-and-palettes.md) | Dark and light themes come from CSS variables, a canvas palette, and a terminal palette | `src-web/src/theme/`, the colours of every Svelte component, and the canvas and terminal palettes | 🟢 |
 | [0025](0025-no-egress-hardened-webview.md) | The front ends make no network request by default, and the WebView is granted only what it uses | `src-tauri/tauri.conf.json`, the avatar toggle, and every outbound request the web interface and the terminal application can make | 🟢 |
 | [0026](0026-diff-overlay-and-file-list.md) | A diff covers only the commit graph, and the changed files show as a tree or a flat list | the diff overlay and the changed-files list in `src-web/src/` and `crates/tui/src/` | 🟢 |
-| [0027](0027-repository-sidebar.md) | A repository sidebar lists branches, remotes, worktrees, and tags, and selecting a branch or tag reveals its commit | `src-web/src/RepoSidebar.svelte`, `src-web/src/refTree.ts`, `crates/git/src/refs.rs`, the `RepoRefs` value in `crates/core/src/model.rs`, and `crates/tui/src/sidebar.rs` | 🟢 |
 | [0028](0028-submodules-and-repository-switching.md) | Submodules appear in the repository sidebar, and the sidebar switches the viewed repository | `crates/git/src/refs.rs`, the `RepoRefs` value in `crates/core/src/model.rs`, the sidebar's submodule, worktree, and parent rows, and the flow that switches the viewed repository | 🟢 |
 | [0029](0029-terminal-application-ratatui.md) | The terminal application is built on ratatui and draws the core's layout unchanged | `crates/tui/`, the terminal application, package and binary `ocelli-cli` | 🟢 |
 | [0030](0030-cli-state-file.md) | The terminal application remembers its view state in one JSON file in the user's state directory | `crates/tui/src/state.rs` and the state file it writes | 🟢 |
@@ -126,6 +125,7 @@ is the table a session reads.
 | [0038](0038-tag-triggered-release.md) | A pushed version tag builds the installers and a Flatpak into a draft release | `.github/workflows/release.yml` and `flatpak/` | 🟢 |
 | [0039](0039-openssl-vendored-on-macos.md) | On macOS, Ocelli builds OpenSSL into its binaries and links no library outside the system | the OpenSSL that `crates/git/Cargo.toml` links on macOS, `Cargo.lock`, and the macOS linkage check of the `build` job in `.github/workflows/checks.yml` | 🟢 |
 | [0040](0040-row-window-margin.md) | The core keeps the commit graph, the front ends read windows of rows from it reaching one screen beyond the view, and the core searches it and computes lineage | the commit graph's store in `crates/core`, the desktop host's commands in `src-tauri`, the web interface's graph, search, and lineage in `src-web`, and the terminal application's reads in `crates/tui` | 🟢 |
+| [0041](0041-sidebar-worktrees-filter.md) | A repository sidebar lists branches, remotes, every worktree, and tags under one filter, and selecting a branch or tag reveals its commit | `src-web/src/RepoSidebar.svelte`, `src-web/src/refTree.ts`, `crates/git/src/refs.rs`, the `RepoRefs` value in `crates/core/src/model.rs`, and `crates/tui/src/sidebar.rs` | 🟢 |
 
 ### Superseded and rejected
 
@@ -136,3 +136,4 @@ flips its status.
 | ADR | Title | Applies to | Status |
 |-----|-------|------------|--------|
 | [0019](0019-front-ends-read-row-windows.md) | The core keeps the commit graph, the front ends read windows of rows from it, and the core searches it and computes lineage | the commit graph's store in `crates/core`, the desktop host's commands in `src-tauri`, the web interface's graph, search, and lineage in `src-web`, and the terminal application's reads in `crates/tui` | ⚪ |
+| [0027](0027-repository-sidebar.md) | A repository sidebar lists branches, remotes, worktrees, and tags, and selecting a branch or tag reveals its commit | `src-web/src/RepoSidebar.svelte`, `src-web/src/refTree.ts`, `crates/git/src/refs.rs`, the `RepoRefs` value in `crates/core/src/model.rs`, and `crates/tui/src/sidebar.rs` | ⚪ |
