@@ -1,4 +1,4 @@
-//! Verifies: ADR-0033, G-5, G-6
+//! Verifies: ADR-0031, G-13, G-14
 //!
 //! Merge, rebase, cherry-pick, revert, and reset, and the resolution of the conflicts they stop
 //! on, on repositories made with git: each compared with git doing the same on a twin of the
@@ -86,7 +86,7 @@ fn merge(dir: &Path, commit: &str, name: Option<&str>) -> Write {
 }
 
 #[test]
-// Verifies: ADR-0033, G-5
+// Verifies: ADR-0031, G-13
 fn a_merge_makes_what_git_merge_makes() {
     let repo = diverged("merge", "ours\n", "base\n");
     let other = twin(&repo, "merge-twin");
@@ -112,7 +112,7 @@ fn a_merge_makes_what_git_merge_makes() {
 }
 
 #[test]
-// Verifies: ADR-0033, G-5
+// Verifies: ADR-0031, G-13
 fn a_merge_fast_forwards_where_it_can_unless_merge_ff_says_otherwise() {
     let repo = diverged("merge-ff", "base\n", "theirs\n");
     git(&repo.0, &["reset", "--quiet", "--hard", "HEAD~1"]);
@@ -128,7 +128,7 @@ fn a_merge_fast_forwards_where_it_can_unless_merge_ff_says_otherwise() {
 }
 
 #[test]
-// Verifies: ADR-0033, G-5
+// Verifies: ADR-0031, G-13
 fn a_merge_that_conflicts_stops_where_git_stops() {
     let repo = diverged("merge-conflict", "ours\n", "theirs\n");
     let made = GitWriter
@@ -148,7 +148,7 @@ fn a_merge_that_conflicts_stops_where_git_stops() {
 }
 
 #[test]
-// Verifies: ADR-0033
+// Verifies: ADR-0031
 fn an_operation_over_uncommitted_changes_or_another_in_progress_is_refused() {
     let repo = diverged("refused", "ours\n", "base\n");
     write_file(&repo.0, "g", "mine\n");
@@ -169,7 +169,7 @@ fn an_operation_over_uncommitted_changes_or_another_in_progress_is_refused() {
 }
 
 #[test]
-// Verifies: ADR-0033, G-5
+// Verifies: ADR-0031, G-13
 fn a_cherry_pick_and_a_revert_commit_as_git_does() {
     let repo = diverged("pick", "ours\n", "base\n");
     let other = twin(&repo, "pick-twin");
@@ -209,7 +209,7 @@ fn a_cherry_pick_and_a_revert_commit_as_git_does() {
 }
 
 #[test]
-// Verifies: ADR-0033
+// Verifies: ADR-0031
 fn a_merge_commit_is_neither_picked_nor_reverted() {
     let repo = diverged("pick-merge", "ours\n", "base\n");
     git(&repo.0, &["merge", "--quiet", "--no-edit", "side"]);
@@ -232,7 +232,7 @@ fn a_merge_commit_is_neither_picked_nor_reverted() {
 }
 
 #[test]
-// Verifies: ADR-0033, G-5
+// Verifies: ADR-0031, G-13
 fn a_rebase_replays_the_branch_as_git_rebase_does_and_stops_on_a_conflict() {
     let repo = diverged("rebase", "ours\n", "base\n");
     let other = twin(&repo, "rebase-twin");
@@ -264,7 +264,7 @@ fn a_rebase_replays_the_branch_as_git_rebase_does_and_stops_on_a_conflict() {
 }
 
 #[test]
-// Verifies: ADR-0033, G-5
+// Verifies: ADR-0031, G-13
 fn a_reset_moves_the_branch_as_git_reset_does_in_each_mode() {
     for (mode, flag) in [
         (ResetMode::Soft, "--soft"),
@@ -308,7 +308,7 @@ fn resolve(dir: &Path, path: &str, take: Take) -> Write {
 }
 
 #[test]
-// Verifies: ADR-0033, G-6
+// Verifies: ADR-0031, G-14
 fn a_conflict_git_left_is_resolved_as_git_checkout_and_git_add_resolve_it() {
     for (take, side) in [(Take::Ours, "--ours"), (Take::Theirs, "--theirs")] {
         let repo = diverged(&format!("resolve{side}"), "ours\n", "theirs\n");
@@ -341,7 +341,7 @@ fn a_conflict_git_left_is_resolved_as_git_checkout_and_git_add_resolve_it() {
 }
 
 #[test]
-// Verifies: ADR-0033
+// Verifies: ADR-0031
 fn a_file_resolved_as_edited_is_refused_while_a_marker_remains() {
     let repo = diverged("as-edited", "ours\n", "theirs\n");
     assert!(!git_may_fail(&repo.0, &["merge", "side"]));
@@ -367,7 +367,7 @@ fn a_file_resolved_as_edited_is_refused_while_a_marker_remains() {
 }
 
 #[test]
-// Verifies: ADR-0033, G-6
+// Verifies: ADR-0031, G-14
 fn a_stopped_cherry_pick_continues_with_its_author_and_an_abort_goes_back() {
     let repo = diverged("pick-continue", "ours\n", "theirs\n");
     let pick = Write::CherryPick {
@@ -414,7 +414,7 @@ fn a_stopped_cherry_pick_continues_with_its_author_and_an_abort_goes_back() {
 }
 
 #[test]
-// Verifies: ADR-0033, G-6
+// Verifies: ADR-0031, G-14
 fn a_stopped_rebase_continues_to_its_end_and_an_abort_restores_the_branch() {
     let repo = diverged("rebase-continue", "ours\n", "theirs\n");
     let other = twin(&repo, "rebase-continue-twin");
@@ -467,7 +467,7 @@ fn a_stopped_rebase_continues_to_its_end_and_an_abort_restores_the_branch() {
 }
 
 #[test]
-// Verifies: ADR-0033
+// Verifies: ADR-0031
 fn a_rebase_either_side_started_is_aborted_by_the_other_and_continued_where_it_started() {
     // git starts it: Ocelli refuses to continue it and aborts it as git would.
     let repo = diverged("git-rebase", "ours\n", "theirs\n");
@@ -514,7 +514,7 @@ fn a_rebase_either_side_started_is_aborted_by_the_other_and_continued_where_it_s
 }
 
 #[test]
-// Verifies: ADR-0033, G-6
+// Verifies: ADR-0031, G-14
 fn a_stopped_revert_is_aborted_as_git_revert_abort_does() {
     let repo = diverged("revert-abort", "ours\n", "base\n");
     let reverted = head(&repo.0);
@@ -553,7 +553,7 @@ fn a_stopped_revert_is_aborted_as_git_revert_abort_does() {
 mod programs;
 
 #[test]
-// Verifies: ADR-0033, Q-4
+// Verifies: ADR-0031, Q-4
 fn history_operations_run_none_of_the_repositorys_programs() {
     let repo = diverged("programs", "ours\n", "theirs\n");
     let tools = Scratch::new("programs-ran");
@@ -625,7 +625,7 @@ fn history_operations_run_none_of_the_repositorys_programs() {
 }
 
 #[test]
-// Verifies: ADR-0033
+// Verifies: ADR-0031
 fn a_conflicted_link_is_resolved_as_git_resolves_it_and_nothing_outside_is_written() {
     let s = Scratch::new("link");
     let d = &s.0;
@@ -688,7 +688,7 @@ fn a_conflicted_link_is_resolved_as_git_resolves_it_and_nothing_outside_is_writt
 }
 
 #[test]
-// Verifies: ADR-0033
+// Verifies: ADR-0031
 fn a_sequence_or_an_autostash_git_holds_is_left_to_git() {
     let repo = diverged("sequence", "ours\n", "theirs\n");
     git(&repo.0, &["switch", "--quiet", "side"]);
@@ -728,7 +728,7 @@ fn a_sequence_or_an_autostash_git_holds_is_left_to_git() {
 }
 
 #[test]
-// Verifies: ADR-0033
+// Verifies: ADR-0031
 fn a_rebase_whose_step_meets_a_file_in_its_way_is_undone_whole() {
     let repo = diverged("rebase-in-the-way", "ours\n", "base\n");
     write_file(&repo.0, "new", "on main\n");
@@ -750,7 +750,7 @@ fn a_rebase_whose_step_meets_a_file_in_its_way_is_undone_whole() {
 }
 
 #[test]
-// Verifies: ADR-0033, G-5
+// Verifies: ADR-0031, G-13
 fn messages_and_merge_ff_follow_git() {
     // A cherry-pick keeps a line that starts with '#'.
     let repo = diverged("hash-line", "ours\n", "base\n");
@@ -797,7 +797,7 @@ fn messages_and_merge_ff_follow_git() {
 }
 
 #[test]
-// Verifies: ADR-0033
+// Verifies: ADR-0031
 fn a_cherry_pick_already_on_the_branch_is_refused_with_nothing_changed() {
     let repo = diverged("empty-pick", "ours\n", "base\n");
     git(&repo.0, &["cherry-pick", "side"]);
@@ -845,7 +845,7 @@ fn abort(dir: &Path, operation: Operation) -> Write {
 }
 
 #[test]
-// Verifies: ADR-0033, G-6
+// Verifies: ADR-0031, G-14
 fn a_path_is_taken_as_it_is_written_never_as_a_pattern() {
     // `x[ab].txt` as a pattern matches `xa.txt`: neither its edit nor an untracked copy is touched.
     let repo = conflicted_at("pattern-resolve", "x[ab].txt", &["xa.txt"]);
@@ -874,7 +874,7 @@ fn a_path_is_taken_as_it_is_written_never_as_a_pattern() {
 }
 
 #[test]
-// Verifies: ADR-0033, G-6
+// Verifies: ADR-0031, G-14
 fn a_path_below_a_link_or_a_file_is_refused_and_nothing_outside_is_written() {
     let outside = Scratch::new("below-outside");
     let repo = conflicted_at("below-link", "dir/f", &[]);
@@ -897,7 +897,7 @@ fn a_path_below_a_link_or_a_file_is_refused_and_nothing_outside_is_written() {
 }
 
 #[test]
-// Verifies: ADR-0033, Q-6
+// Verifies: ADR-0031, Q-7
 fn an_abort_keeps_an_edit_made_while_stopped_as_git_does() {
     let repo = diverged("abort-edit", "ours\n", "theirs\n");
     let d = &repo.0;
@@ -912,7 +912,7 @@ fn an_abort_keeps_an_edit_made_while_stopped_as_git_does() {
 }
 
 #[test]
-// Verifies: ADR-0033, G-6
+// Verifies: ADR-0031, G-14
 fn a_rebase_step_resolved_to_nothing_is_dropped_as_git_drops_it() {
     let s = Scratch::new("rebase-empty");
     let d = &s.0;
@@ -959,7 +959,7 @@ fn a_rebase_step_resolved_to_nothing_is_dropped_as_git_drops_it() {
 }
 
 #[test]
-// Verifies: ADR-0033, G-5
+// Verifies: ADR-0031, G-13
 fn a_merge_into_another_branch_is_named_as_git_names_it() {
     for suppress in [None, Some("fe*")] {
         let repo = diverged("merge-into", "ours\n", "base\n");
@@ -1010,7 +1010,7 @@ fn branched(
 }
 
 #[test]
-// Verifies: ADR-0033, Q-6
+// Verifies: ADR-0031, Q-7
 fn an_abort_keeps_a_file_made_where_the_operation_removed_one_as_git_does() {
     let repo = branched(
         "abort-made",
@@ -1038,7 +1038,7 @@ fn an_abort_keeps_a_file_made_where_the_operation_removed_one_as_git_does() {
 }
 
 #[test]
-// Verifies: ADR-0033, G-6
+// Verifies: ADR-0031, G-14
 fn an_abort_puts_back_a_file_and_a_directory_the_operation_swapped_as_git_does() {
     let file_to_dir = |d: &Path| {
         std::fs::remove_file(d.join("d")).unwrap();
@@ -1082,7 +1082,7 @@ fn an_abort_puts_back_a_file_and_a_directory_the_operation_swapped_as_git_does()
 }
 
 #[test]
-// Verifies: ADR-0033, Q-6
+// Verifies: ADR-0031, Q-7
 fn a_rebase_step_that_could_not_be_applied_is_never_dropped() {
     let repo = branched(
         "rebase-unapplied",
@@ -1117,7 +1117,7 @@ fn a_rebase_step_that_could_not_be_applied_is_never_dropped() {
 }
 
 #[test]
-// Verifies: ADR-0033, G-5
+// Verifies: ADR-0031, G-13
 fn merge_suppress_dest_matches_as_git_matches_it() {
     for (branch, pattern) in [
         ("fe/x", "fe*"),
@@ -1145,7 +1145,7 @@ fn merge_suppress_dest_matches_as_git_matches_it() {
 }
 
 #[test]
-// Verifies: ADR-0033, Q-6
+// Verifies: ADR-0031, Q-7
 fn an_abort_never_writes_through_a_link_the_operation_put_in_a_directorys_place() {
     let outside = Scratch::new("swap-link-outside");
     write_file(&outside.0, "x", "outside\n");
@@ -1179,7 +1179,7 @@ fn an_abort_never_writes_through_a_link_the_operation_put_in_a_directorys_place(
 }
 
 #[test]
-// Verifies: ADR-0033, Q-6
+// Verifies: ADR-0031, Q-7
 fn an_abort_keeps_a_directory_made_where_the_operation_removed_a_file_as_git_does() {
     let repo = branched(
         "abort-dir",
@@ -1253,7 +1253,7 @@ fn with_submodule(name: &str, theirs: &dyn Fn(&Path, &Path)) -> (Scratch, Scratc
 }
 
 #[test]
-// Verifies: ADR-0033, G-6
+// Verifies: ADR-0031, G-14
 fn an_abort_over_a_submodule_moved_or_replaced_ends_as_git_does_or_keeps_its_conflicts() {
     // Theirs moves the submodule on: the abort pins it back, as git's does.
     let (repo, _sub) = with_submodule("sub-bump", &|d, _| {
@@ -1290,7 +1290,7 @@ fn an_abort_over_a_submodule_moved_or_replaced_ends_as_git_does_or_keeps_its_con
 }
 
 #[test]
-// Verifies: ADR-0033, Q-6
+// Verifies: ADR-0031, Q-7
 fn a_directory_made_in_a_conflicted_files_place_is_neither_aborted_nor_resolved_away() {
     let repo = conflicted_at("conflict-dir", "f", &[]);
     let d = &repo.0;
@@ -1309,7 +1309,7 @@ fn a_directory_made_in_a_conflicted_files_place_is_neither_aborted_nor_resolved_
 }
 
 #[test]
-// Verifies: ADR-0033
+// Verifies: ADR-0031
 fn a_message_is_cleaned_up_as_git_cleans_it_up_for_the_way_it_is_made() {
     let message = "fix it\n\n#123 was the issue\n  trailing   \n";
     // Picked without a conflict, in every mode, and continued after one, where git strips.
@@ -1412,7 +1412,7 @@ fn raw_body(dir: &Path) -> String {
 }
 
 #[test]
-// Verifies: ADR-0033
+// Verifies: ADR-0031
 fn what_only_git_finishes_is_named_alike_by_every_refusal() {
     let repo = diverged("am-in-progress", "ours\n", "theirs\n");
     let d = &repo.0;
@@ -1445,7 +1445,7 @@ fn what_only_git_finishes_is_named_alike_by_every_refusal() {
     assert_eq!(GitReader.load_refs(d).unwrap().in_progress, None);
 }
 
-/// `git`'s conflicted file with the difference ADR-0040 decides taken out of its markers' labels:
+/// `git`'s conflicted file with the difference ADR-0032 decides taken out of its markers' labels:
 /// the subject `git` appends to a commit's label, ` (<subject>)`, dropped, and a `/` in a branch's
 /// name flattened to `_`, as the labels the writer gives libgit2 are path-safe. The side's label
 /// and the base's, which `git`'s `diff3` and `zdiff3` styles write, alike.
@@ -1470,7 +1470,7 @@ fn without_the_label_departure(text: &str) -> String {
 /// Asserts that the conflicted `path` reads in `ours`, stopped by the writer, as in `theirs`,
 /// stopped by `git`, but for the label departure; returns the writer's file. libgit2 labels a
 /// `diff3` base line only where the file has a base (`merge_file.c`): a file both sides added
-/// has a bare `|||||||` line where `git` labels it, another departure of ADR-0040, taken out
+/// has a bare `|||||||` line where `git` labels it, another departure of ADR-0032, taken out
 /// here only where the writer's base line is bare and `base_unlabelled` says the file has none.
 fn markers_as_git_with(
     ours: &Path,
@@ -1543,7 +1543,7 @@ fn stopped_operations_mark_as_git(style: Option<&str>) {
     let markers = markers_as_git(&repo.0, &other.0, "f", &format!("merge, {tag}"));
     // Where `git` writes a side to a file of its own, a file meeting a directory, it names it as
     // the writer labels the side: `x~` and the branch, flattened. The writer refuses that
-    // conflict before writing anything, a departure of ADR-0033.
+    // conflict before writing anything, a departure of ADR-0031.
     let df = Scratch::new(&format!("markers-df-{tag}"));
     let d = &df.0;
     git(d, &["init", "--quiet", "-b", "main"]);
@@ -1638,20 +1638,20 @@ fn stopped_operations_mark_as_git(style: Option<&str>) {
 }
 
 #[test]
-// Verifies: ADR-0033, ADR-0040
+// Verifies: ADR-0031, ADR-0032
 fn a_stopped_operation_writes_the_markers_git_writes_but_for_the_listed_label_departure() {
     stopped_operations_mark_as_git(None);
 }
 
 #[test]
-// Verifies: ADR-0033, ADR-0040
+// Verifies: ADR-0031, ADR-0032
 fn in_the_diff3_styles_the_base_is_labelled_as_git_labels_it() {
     stopped_operations_mark_as_git(Some("diff3"));
     stopped_operations_mark_as_git(Some("zdiff3"));
 }
 
 #[test]
-// Verifies: ADR-0033, ADR-0040
+// Verifies: ADR-0031, ADR-0032
 fn a_merge_labels_its_base_as_git_does_with_several_bases_or_none() {
     // Two branches each merged into the other: two merge bases, `merged common ancestors`.
     let s = Scratch::new("markers-criss-cross");
@@ -1729,7 +1729,7 @@ fn a_merge_labels_its_base_as_git_does_with_several_bases_or_none() {
 }
 
 #[test]
-// Verifies: ADR-0033, ADR-0040
+// Verifies: ADR-0031, ADR-0032
 fn a_numeric_core_abbrev_sets_the_length_of_a_labelled_commit_as_git_sets_it() {
     let repo = diverged("markers-abbrev", "ours\n", "theirs\n");
     git(&repo.0, &["config", "core.abbrev", "12"]);
@@ -1746,7 +1746,7 @@ fn a_numeric_core_abbrev_sets_the_length_of_a_labelled_commit_as_git_sets_it() {
 }
 
 #[test]
-// Verifies: ADR-0033, ADR-0040
+// Verifies: ADR-0031, ADR-0032
 fn a_merge_labels_its_side_by_the_branch_only_where_the_branch_is_at_the_commit() {
     // The name given is a branch elsewhere: the side is labelled by the commit, as for a commit.
     let repo = diverged("markers-moved-branch", "ours\n", "theirs\n");
@@ -1765,7 +1765,7 @@ fn a_merge_labels_its_side_by_the_branch_only_where_the_branch_is_at_the_commit(
 }
 
 #[test]
-// Verifies: ADR-0033, ADR-0040
+// Verifies: ADR-0031, ADR-0032
 fn a_branch_name_windows_refuses_in_a_file_name_labels_the_side_by_the_commit_instead() {
     // `git` takes `<` in a branch's name, which Windows refuses in a file's: labelled by it, the
     // side's file `<path>~<label>` would stop the write half done there, so the commit labels it.

@@ -1,6 +1,6 @@
 //! Embeds the web interface's build, `dist/` at the workspace's root, in the binary, so the server
 //! serves what was built with it and no directory beside it decides what the browser runs
-//! (ADR-0037). Without a build the server is compiled with no files and says so when asked.
+//! (ADR-0035). Without a build the server is compiled with no files and says so when asked.
 
 use std::path::{Path, PathBuf};
 

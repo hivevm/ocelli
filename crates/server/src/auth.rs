@@ -1,4 +1,4 @@
-//! Who the remote server admits (ADR-0038): a browser that carries the session cookie it got for
+//! Who the remote server admits (ADR-0036): a browser that carries the session cookie it got for
 //! the connection token, from the server's own origin, under a name of the machine itself. Every
 //! function here decides on values; the server applies them to each request before it serves a
 //! file or reads a command.
@@ -8,11 +8,11 @@ use std::sync::Mutex;
 use std::time::Duration;
 
 /// The name of the session cookie. Plain HTTP on `localhost` leaves it without `Secure`, and so
-/// without the `__Host-` prefix, which requires it (ADR-0038).
+/// without the `__Host-` prefix, which requires it (ADR-0036).
 pub const COOKIE: &str = "ocelli-session";
 
 /// The name of the session cookie over TLS, where it is `Secure` and so carries the `__Host-`
-/// prefix, which binds it to the origin that set it (ADR-0038).
+/// prefix, which binds it to the origin that set it (ADR-0036).
 pub const SECURE_COOKIE: &str = "__Host-ocelli-session";
 
 /// The name of the session cookie over TLS or over plain HTTP.
@@ -52,19 +52,19 @@ fn unhex(text: &str) -> Option<[u8; SECRET]> {
 }
 
 /// Whether two secrets are equal, in a time that does not depend on where they differ
-/// (ADR-0038).
+/// (ADR-0036).
 pub fn same(a: &[u8; SECRET], b: &[u8; SECRET]) -> bool {
     a.iter().zip(b).fold(0u8, |diff, (x, y)| diff | (x ^ y)) == 0
 }
 
 /// The connection token printed at start, and the session ids it has been exchanged for, kept in
-/// memory so that a restart ends every session (ADR-0038).
+/// memory so that a restart ends every session (ADR-0036).
 pub struct Gate {
     token: [u8; SECRET],
     /// The session ids given out, oldest first, at most `max_sessions` of them.
     sessions: Mutex<VecDeque<[u8; SECRET]>>,
     max_sessions: usize,
-    /// The wrong tokens since the last right one, counted for the whole server (ADR-0038).
+    /// The wrong tokens since the last right one, counted for the whole server (ADR-0036).
     failures: Mutex<u32>,
     /// The name of the session cookie it admits: `SECURE_COOKIE` over TLS.
     cookie: &'static str,
@@ -87,7 +87,7 @@ pub const FIRST_WAIT: Duration = Duration::from_millis(250);
 pub const MAX_WAIT: Duration = Duration::from_secs(8);
 
 /// How long the server waits before it answers a token after `failures` wrong ones in a row:
-/// nothing for the first few, then a wait doubling up to a cap (ADR-0038). With 256 bits a token
+/// nothing for the first few, then a wait doubling up to a cap (ADR-0036). With 256 bits a token
 /// is not guessed either way; the wait guards the log and the processor.
 pub fn wait_after(failures: u32) -> Duration {
     if failures < FREE_FAILURES {
@@ -162,7 +162,7 @@ impl Gate {
 
     /// The `Set-Cookie` header that hands a browser the session id `id`: `HttpOnly`,
     /// `SameSite=Strict`, `Path=/`, no `Domain`, no expiry, and over TLS `Secure` with the
-    /// `__Host-` prefix (ADR-0038).
+    /// `__Host-` prefix (ADR-0036).
     pub fn set_cookie(&self, id: &str) -> String {
         let secure = if self.cookie == SECURE_COOKIE {
             "; Secure"
@@ -196,7 +196,7 @@ pub fn query_param<'a>(query: Option<&'a str>, name: &str) -> Option<&'a str> {
 
 /// Whether `host`, a `Host` header, names the machine itself, at any port so that a tunnel's
 /// port works: anything else is what a page reaching the server through DNS rebinding sends
-/// (ADR-0038).
+/// (ADR-0036).
 pub fn loopback_host(host: &str) -> bool {
     host_name(host).is_some_and(|name| {
         ["localhost", "127.0.0.1", "[::1]"]
@@ -222,7 +222,7 @@ pub fn host_name(host: &str) -> Option<&str> {
 }
 
 /// The origin a request to `host` comes from: the scheme of the listener, `https` over TLS, with
-/// the `Host` it names (ADR-0038).
+/// the `Host` it names (ADR-0036).
 pub fn own_origin(host: &str, tls: bool) -> String {
     let scheme = if tls { "https" } else { "http" };
     format!("{scheme}://{}", host.to_ascii_lowercase())
@@ -233,7 +233,7 @@ mod tests {
     use super::*;
 
     #[test]
-    // Verifies: ADR-0038
+    // Verifies: ADR-0036
     fn a_token_opens_a_session_and_only_its_cookie_is_admitted() {
         let gate = Gate::new(8);
         assert_eq!(gate.token().len(), 64, "256 bits");
@@ -249,7 +249,7 @@ mod tests {
     }
 
     #[test]
-    // Verifies: ADR-0038
+    // Verifies: ADR-0036
     fn a_wrong_or_malformed_token_opens_no_session_and_is_counted() {
         let gate = Gate::new(8);
         let wrong = [
@@ -274,7 +274,7 @@ mod tests {
     }
 
     #[test]
-    // Verifies: ADR-0038
+    // Verifies: ADR-0036
     fn the_wait_starts_past_the_free_failures_and_doubles_up_to_the_cap() {
         assert_eq!(wait_after(0), Duration::ZERO);
         assert_eq!(wait_after(FREE_FAILURES - 1), Duration::ZERO);
@@ -286,7 +286,7 @@ mod tests {
     }
 
     #[test]
-    // Verifies: ADR-0038
+    // Verifies: ADR-0036
     fn the_oldest_session_gives_way_past_the_bound() {
         let gate = Gate::new(2);
         let ids: Vec<String> = (0..3)
@@ -301,13 +301,13 @@ mod tests {
     }
 
     #[test]
-    // Verifies: ADR-0038
+    // Verifies: ADR-0036
     fn two_starts_draw_two_tokens() {
         assert_ne!(Gate::new(1).token(), Gate::new(1).token());
     }
 
     #[test]
-    // Verifies: ADR-0038
+    // Verifies: ADR-0036
     fn the_cookie_is_http_only_strict_and_for_the_whole_server() {
         let cookie = Gate::new(1).set_cookie("ab");
         assert_eq!(
@@ -318,7 +318,7 @@ mod tests {
     }
 
     #[test]
-    // Verifies: ADR-0038
+    // Verifies: ADR-0036
     fn over_tls_the_cookie_is_secure_and_bound_to_its_origin_by_its_prefix() {
         let gate = Gate::new(8).over_tls();
         assert_eq!(
@@ -337,7 +337,7 @@ mod tests {
     }
 
     #[test]
-    // Verifies: ADR-0038
+    // Verifies: ADR-0036
     fn only_names_of_the_machine_itself_are_hosts_at_any_port() {
         for host in [
             "localhost",

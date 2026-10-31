@@ -1,5 +1,5 @@
-// The web interface's side of a write (ADR-0033): the writes it hands the host, asking before one
-// that discards work in the words the core names it with (ADR-0034), and running one at a time.
+// The web interface's side of a write (ADR-0031): the writes it hands the host, asking before one
+// that discards work in the words the core names it with (ADR-0033), and running one at a time.
 //
 // All of it is bookkeeping over strings and numbers, so it lives here and is tested directly.
 

@@ -1,4 +1,4 @@
-//! Verifies: ADR-0032, G-3
+//! Verifies: ADR-0014, G-3
 //!
 //! The main line's tip, on repositories made with git: the local branch `origin/HEAD` names, else
 //! `main`, else `master`, else the checked-out commit; and a load lays the tip's first-parent chain
@@ -98,7 +98,7 @@ fn a_remote_branch_alone_does_not_make_a_main_line() {
 }
 
 #[test]
-// Verifies: ADR-0032, ADR-0015, G-3
+// Verifies: ADR-0014, ADR-0013, G-3
 fn a_load_lays_the_main_line_out_in_the_leftmost_lane_alone() {
     let scratch = Scratch::new("load");
     let dir = &scratch.0;

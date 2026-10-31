@@ -1,8 +1,8 @@
-//! One write per repository at a time across the server's tabs (ADR-0037): a write takes its
+//! One write per repository at a time across the server's tabs (ADR-0035): a write takes its
 //! repository's turn, keyed by the canonical common directory, so that a worktree and the working
 //! directory it belongs to count as one, and a write of another tab to it waits until the turn is
 //! given back. The write checks what it expects only once its turn has come, so a write overtaken
-//! is refused with nothing changed where the first changed it (ADR-0033).
+//! is refused with nothing changed where the first changed it (ADR-0031).
 //!
 //! A waiting write holds a thread of the blocking pool, so a bounded number wait for each
 //! repository, one past them refused at once, and a write whose tab has closed gives up its wait
@@ -49,7 +49,7 @@ pub struct Turn {
 }
 
 /// The reason a write whose repository's common directory cannot be read fails with: it is git's
-/// failure, which the browser reads only as such (ADR-0039).
+/// failure, which the browser reads only as such (ADR-0037).
 const NO_COMMON_DIR: &str = "The repository's common directory cannot be read";
 
 /// The reason a write is refused with where as many writes wait for its repository as may.
@@ -144,7 +144,7 @@ impl Turns {
 
 impl ocelli_commands::Turn for Turn {
     /// A write done, or refused or failed after it moved a ref or `HEAD`, tells the other tabs
-    /// on the repository to load again, while the turn is still held (ADR-0037).
+    /// on the repository to load again, while the turn is still held (ADR-0035).
     fn ended(&mut self, done: bool) {
         let Some((tab, path, before)) = &self.write else {
             return;
@@ -170,7 +170,7 @@ mod tests {
     use std::time::Duration;
 
     #[test]
-    // Verifies: ADR-0037
+    // Verifies: ADR-0035
     fn a_write_waits_for_the_turn_of_its_repository_and_not_for_another_s() {
         let turns = Turns::new(4);
         let (one, two) = (PathBuf::from("/one/.git"), PathBuf::from("/two/.git"));
@@ -211,7 +211,7 @@ mod tests {
     }
 
     #[test]
-    // Verifies: ADR-0037
+    // Verifies: ADR-0035
     fn writes_past_the_bound_are_refused_at_once_and_a_closed_tab_s_write_gives_up_unwritten() {
         let turns = Turns::new(1);
         let one = PathBuf::from("/one/.git");

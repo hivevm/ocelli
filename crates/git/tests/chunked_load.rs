@@ -139,7 +139,7 @@ fn a_history_of_several_chunks_loads_whole_in_commit_date_order() {
 }
 
 #[test]
-// Verifies: ADR-0024
+// Verifies: ADR-0018
 fn the_first_chunk_moves_walked_commits_on_to_make_room_for_the_working_directory() {
     let scratch = Scratch::new("dirty");
     let dir = scratch.0.join("repo");
@@ -181,7 +181,7 @@ fn a_load_stops_when_told_to() {
 }
 
 #[test]
-// Verifies: ADR-0015
+// Verifies: ADR-0013
 fn the_chunks_lay_out_into_one_commit_graph_whose_first_chunk_is_todays() {
     let scratch = Scratch::new("layout");
     let dir = scratch.0.join("repo");

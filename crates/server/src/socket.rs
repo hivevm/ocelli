@@ -1,13 +1,13 @@
 //! One WebSocket per browser tab, carrying the desktop host's commands and events with the same
-//! names and payloads, each connection a load session of its own (ADR-0037).
+//! names and payloads, each connection a load session of its own (ADR-0035).
 //!
 //! A message from the browser is a command, `{"id", "cmd", "args"}`, the arguments as `invoke`
 //! passes them; the server answers `{"id", "ok"}` with the value the Tauri command returns, or
 //! `{"id", "err"}` with the reason it rejects with. An event is `{"event", "payload"}`. Every
 //! event, and the failure of every command that reached the repository, leaves the server through
-//! `scrub`, so that no path outside the server root leaves it (ADR-0039). A write runs only where
+//! `scrub`, so that no path outside the server root leaves it (ADR-0037). A write runs only where
 //! the server was started with `--allow-writes`, through the shared `Host` as in the desktop
-//! host, taking turns with the other tabs' writes to its repository (ADR-0037).
+//! host, taking turns with the other tabs' writes to its repository (ADR-0035).
 
 pub mod scrub;
 
@@ -27,12 +27,12 @@ use tokio::sync::{Notify, Semaphore, mpsc};
 use tokio::task::JoinSet;
 
 /// The reason every write is refused with where the server was started without `--allow-writes`
-/// (ADR-0037).
+/// (ADR-0035).
 pub const WRITES_REFUSED: &str =
     "The remote server only reads: it writes only when started with --allow-writes";
 
 /// What a tab is told, as the server's own `repo-written` event, once another tab wrote to the
-/// repository it has open, which it then loads again (ADR-0037).
+/// repository it has open, which it then loads again (ADR-0035).
 pub const WRITTEN_ELSEWHERE: &str =
     "Another tab wrote to this repository: it is shown as it is now";
 
@@ -63,7 +63,7 @@ pub struct ToSocket {
 }
 
 /// How many tabs' load sessions the server holds: each counted from its connection's start until
-/// the last of what holds it, the connection, a command, or a load, has let it go (ADR-0037).
+/// the last of what holds it, the connection, a command, or a load, has let it go (ADR-0035).
 #[derive(Clone, Default)]
 pub struct Sessions(Arc<AtomicUsize>);
 
@@ -110,7 +110,7 @@ struct Tab {
     root: Arc<Root>,
     to: ToSocket,
     /// The turns of the server's writes, where the tab may write: the server was started with
-    /// `--allow-writes` (ADR-0037).
+    /// `--allow-writes` (ADR-0035).
     writes: Option<Turns>,
     /// The tab's number among the turns' tabs.
     number: u64,
@@ -123,8 +123,8 @@ struct Tab {
 }
 
 /// Serves one connection until the browser closes it, or until it does not read what it is sent
-/// in time, then stops its load and drops its load session (ADR-0037). Its writes take turns with
-/// the other tabs' in `writes`, none where the server refuses every write (ADR-0037).
+/// in time, then stops its load and drops its load session (ADR-0035). Its writes take turns with
+/// the other tabs' in `writes`, none where the server refuses every write (ADR-0035).
 pub async fn serve(
     mut socket: WebSocket,
     root: Arc<Root>,
@@ -135,7 +135,7 @@ pub async fn serve(
     let (tx, mut rx) = mpsc::channel::<String>(limits.queue);
     let overflowed = Arc::new(Notify::new());
     let guard_root = Arc::clone(&root);
-    // Every command that reaches the repository checks it again (ADR-0039).
+    // Every command that reaches the repository checks it again (ADR-0037).
     let host = Host::guarded(Arc::new(move |path| guard_root.verify(path)));
     // Set once the connection ends: a write still waiting for its turn then gives it up.
     let gone = Arc::new(AtomicBool::new(false));
@@ -228,7 +228,7 @@ pub async fn serve(
     // window closes; a fetch, or a pull while it fetches, stops, as `cancel_write` stops it, so
     // that a tab gone holds no repository's turn for a transfer nobody waits for; a push, which
     // cannot be stopped, finishes. One still waiting for its turn gives it up unwritten
-    // (ADR-0037).
+    // (ADR-0035).
     tab.host.cancel_write();
     gone.store(true, Ordering::Release);
     if let Some(turns) = writes {
@@ -313,7 +313,7 @@ struct Perform {
 }
 
 /// The answer to one command, as the desktop host's command of the same name gives it, from the
-/// same `Host` (ADR-0037).
+/// same `Host` (ADR-0035).
 async fn answer(tab: &Arc<Tab>, cmd: &str, a: Value) -> Result<Value, String> {
     let host = &tab.host;
     match cmd {
@@ -351,7 +351,7 @@ async fn answer(tab: &Arc<Tab>, cmd: &str, a: Value) -> Result<Value, String> {
             value(())
         }
         // The counterpart of the desktop's folder dialog `browse_repo`, which the server does not
-        // answer: a command of the same name never answers otherwise (ADR-0037, ADR-0039).
+        // answer: a command of the same name never answers otherwise (ADR-0035, ADR-0037).
         "list_folders" => {
             let Folder { path } = args(a)?;
             let root = Arc::clone(&tab.root);

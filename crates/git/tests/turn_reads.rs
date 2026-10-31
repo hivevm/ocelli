@@ -1,4 +1,4 @@
-//! Verifies: ADR-0037
+//! Verifies: ADR-0035
 //!
 //! The two reads of a repository the remote server's turns take: the common directory a write's
 //! turn is keyed by, one for a working directory and every worktree of it, and the digest of its
@@ -55,7 +55,7 @@ impl Tree {
 }
 
 #[test]
-// Verifies: ADR-0037
+// Verifies: ADR-0035
 fn a_worktree_and_its_repository_share_one_common_directory_and_another_repository_does_not() {
     let tree = Tree::new("confine-shared-common");
     let main = tree.root.join("ok");
@@ -77,7 +77,7 @@ fn a_worktree_and_its_repository_share_one_common_directory_and_another_reposito
 }
 
 #[test]
-// Verifies: ADR-0037
+// Verifies: ADR-0035
 fn the_refs_digest_changes_with_a_ref_or_head_and_with_nothing_else() {
     let tree = Tree::new("confine-refs-digest");
     let repo = tree.root.join("ok");

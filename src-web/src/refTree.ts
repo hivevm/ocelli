@@ -1,4 +1,4 @@
-// Grouping and filtering for the repository sidebar (ADR-0026).
+// Grouping and filtering for the repository sidebar (ADR-0027).
 //
 // Branch names are paths: `feature/sidebar` and `feature/graph` belong together
 // under `feature`. Turning a flat list into that tree is plain data work with no

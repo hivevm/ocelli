@@ -1,7 +1,7 @@
 /**
  * The color tokens of `theme.css` as plain data, for renderers that cannot read
  * CSS custom properties cheaply — a `<canvas>` repainting per frame, an SVG
- * generator, a chart library (ADR-0021).
+ * generator, a chart library (ADR-0024).
  *
  * This file and `theme.css` are two views of one palette and are kept in sync by
  * hand: when a color changes, change it in both. Only colors that imperative

@@ -1,6 +1,6 @@
 <script lang="ts">
   // Whether a file of the uncommitted changes is staged, and the control that stages it whole or
-  // takes it out of the index (G-4). A click here does not open the file's diff.
+  // takes it out of the index (G-12). A click here does not open the file's diff.
   import type { FileChange, Staging } from './types.ts';
 
   interface Props {

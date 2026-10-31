@@ -1,7 +1,7 @@
 //! Drawing. The layout follows the desktop window: a title bar with the open,
 //! refresh and search controls; the repository sidebar, the graph and the
 //! commit detail with its changed files side by side; a status bar below. Only
-//! the visible window of the graph is rasterised each frame (ADR-0017);
+//! the visible window of the graph is rasterised each frame (ADR-0020);
 //! everything else is read from the [`App`] state.
 
 use crate::app::{App, Focus, Modal, StashPrompt, TagPrompt};
@@ -573,7 +573,7 @@ fn working(app: &App) -> bool {
         .is_some_and(|f| f.sha == ocelli_core::model::WORKDIR_SHA)
 }
 
-/// How much of a file's change is staged: all, part, or none (G-4).
+/// How much of a file's change is staged: all, part, or none (G-12).
 fn staged_mark(p: &Palette, glyphs: Glyphs, staged: Staged) -> Span<'static> {
     let (unicode, ascii, colour) = match staged {
         Staged::Yes => ("● ", "[x] ", p.accent),
@@ -837,7 +837,7 @@ fn draw_prompt(frame: &mut Frame, text: &str, p: &Palette, main: Rect) {
     draw_dialog(frame, p, main, " Open repository ".to_string(), lines);
 }
 
-/// The tag prompt (G-7): the name, then the message, the line being typed
+/// The tag prompt (G-16): the name, then the message, the line being typed
 /// carrying the cursor.
 fn draw_tag_prompt(frame: &mut Frame, tag: &TagPrompt, p: &Palette, main: Rect) {
     let typing_name = tag.message.is_none();
@@ -858,7 +858,7 @@ fn draw_tag_prompt(frame: &mut Frame, tag: &TagPrompt, p: &Palette, main: Rect) 
 }
 
 /// The question before a write that discards work, naming what is lost
-/// (ADR-0034).
+/// (ADR-0033).
 fn draw_confirm(frame: &mut Frame, write: &Write, p: &Palette, main: Rect) {
     let Some(lost) = write.discards() else {
         return;
@@ -879,7 +879,7 @@ fn draw_confirm(frame: &mut Frame, write: &Write, p: &Palette, main: Rect) {
     draw_dialog(frame, p, main, " Discard? ".to_string(), lines);
 }
 
-/// The stash prompt (G-7): the message, and whether the untracked files go
+/// The stash prompt (G-16): the message, and whether the untracked files go
 /// with the changes.
 fn draw_stash_prompt(frame: &mut Frame, stash: &StashPrompt, p: &Palette, main: Rect) {
     let untracked = if stash.untracked { "[x]" } else { "[ ]" };
@@ -964,7 +964,7 @@ fn hints(app: &App) -> &'static str {
 }
 
 /// What the status bar says first while an operation is stopped: which, how many files still
-/// conflict, and the key to resolve them (ADR-0033).
+/// conflict, and the key to resolve them (ADR-0031).
 fn stopped_note(app: &App) -> String {
     match app.data.as_ref().and_then(|d| d.in_progress.as_ref()) {
         Some(stopped) => format!(
@@ -976,7 +976,7 @@ fn stopped_note(app: &App) -> String {
     }
 }
 
-/// The conflicted files of the operation in progress, the cursor on `selected` (ADR-0033).
+/// The conflicted files of the operation in progress, the cursor on `selected` (ADR-0031).
 fn draw_conflicts(frame: &mut Frame, app: &App, selected: usize, p: &Palette, main: Rect) {
     let Some(stopped) = app.data.as_ref().and_then(|d| d.in_progress.as_ref()) else {
         return;
@@ -1107,7 +1107,7 @@ mod tests {
     }
 
     #[test]
-    // Verifies: ADR-0028
+    // Verifies: ADR-0029
     fn the_graph_pane_shows_ref_chips_lanes_shas_and_messages() {
         let mut app = loaded_app();
         let rows = screen(&mut app, 160, 14);
@@ -1150,7 +1150,7 @@ mod tests {
     }
 
     #[test]
-    // Verifies: G-12
+    // Verifies: G-9
     fn the_detail_pane_shows_the_commit_and_its_links() {
         let mut app = loaded_app();
         let text = screen(&mut app, 160, 20).join("\n");
@@ -1201,7 +1201,7 @@ mod tests {
         assert!(text.contains("Matches"), "{text}");
     }
 
-    // Verifies: ADR-0020
+    // Verifies: ADR-0026
     #[test]
     fn the_diff_overlay_covers_the_graph_and_leaves_the_file_list() {
         let mut app = loaded_app();
@@ -1302,7 +1302,7 @@ mod tests {
     }
 
     #[test]
-    // Verifies: ADR-0021
+    // Verifies: ADR-0024
     fn the_light_theme_paints_a_light_background() {
         let mut app = loaded_app();
         press(&mut app, KeyCode::Char('T'));
@@ -1342,7 +1342,7 @@ mod tests {
     }
 
     #[test]
-    // Verifies: ADR-0034
+    // Verifies: ADR-0033
     fn the_question_before_deleting_names_what_is_lost() {
         let mut app = loaded_app();
         app.modal = Some(Modal::Confirm(Write::DeleteTag {
@@ -1408,7 +1408,7 @@ mod tests {
     }
 
     #[test]
-    // Verifies: ADR-0028
+    // Verifies: ADR-0029
     fn a_tiny_terminal_does_not_panic() {
         let mut app = loaded_app();
         for (w, h) in [(1, 1), (10, 3), (30, 2), (60, 6)] {
@@ -1429,7 +1429,7 @@ mod tests {
     }
 
     #[test]
-    // Verifies: ADR-0031
+    // Verifies: ADR-0019
     fn older_history_with_more_lanes_moves_nothing_until_scrolled_to() {
         use crate::app::tests::commit;
         use crate::loader::Msg;

@@ -1,4 +1,4 @@
-//! Verifies: ADR-0033
+//! Verifies: ADR-0031
 //!
 //! A write that records a person refuses where no identity is configured. libgit2 looks for the
 //! identity in the global and system configuration too, so this test points those at an empty

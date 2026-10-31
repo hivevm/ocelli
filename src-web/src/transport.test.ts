@@ -1,4 +1,4 @@
-// Verifies: ADR-0037
+// Verifies: ADR-0035
 //
 // The remote server's transport carries the desktop host's commands and events: a command goes
 // out with an id and its arguments, its answer resolves the call with that id, a refusal rejects
@@ -104,7 +104,7 @@ describe('the WebSocket transport', () => {
 
   test('the server\'s own repo-written event reaches its listener with the payload its type names', async () => {
     // The message a tab receives once another tab wrote to its repository, as the server's
-    // two-tab test writes it (ADR-0037).
+    // two-tab test writes it (ADR-0035).
     const fixture = join(import.meta.dir, '..', '..', 'crates', 'server', 'tests', 'fixtures', 'repo-written.json');
     const message = await Bun.file(fixture).json();
     expect(message.event).toBe('repo-written');

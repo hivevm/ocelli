@@ -1,6 +1,6 @@
 # The git adapter writes the working directory through libgit2's checkout and hands libgit2 a path
-# as written, never as a pattern (ADR-0033, docs/CONVENTIONS.md); it compares a path with a root
-# only once both are resolved the same way (ADR-0039). A git2 method that unwraps a caller's
+# as written, never as a pattern (ADR-0031, docs/CONVENTIONS.md); it compares a path with a root
+# only once both are resolved the same way (ADR-0037). A git2 method that unwraps a caller's
 # string, or one a repository or a remote holds, is listed too: a panic aborts a release build,
 # every tab of the remote server with it, and tests/git2_unwraps.txt audits each site. So is one
 # that reads a path that is not UTF-8 as none, which a check would skip: a path is read and handed

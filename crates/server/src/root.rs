@@ -1,4 +1,4 @@
-//! The server root (ADR-0039): the folder the remote server was started with, below which alone a
+//! The server root (ADR-0037): the folder the remote server was started with, below which alone a
 //! browser opens a repository. A path from the browser is relative to it; the server resolves
 //! it, links included, and opens only a repository whose working directory, git directory,
 //! common directory, and object stores all lie below the server root, checking it again before
@@ -9,7 +9,7 @@ use serde::Serialize;
 use std::path::{Component, Path, PathBuf};
 
 /// A folder of a listing: its name, its path relative to the server root, and whether it holds a
-/// `.git` of its own, which marks it as a repository to open; opening decides (ADR-0039).
+/// `.git` of its own, which marks it as a repository to open; opening decides (ADR-0037).
 #[derive(Debug, PartialEq, Eq, Serialize)]
 pub struct Folder {
     pub name: String,
@@ -18,7 +18,7 @@ pub struct Folder {
 }
 
 /// The folders below one folder: the server's counterpart of the desktop's folder dialog
-/// (ADR-0037, ADR-0039).
+/// (ADR-0035, ADR-0037).
 #[derive(Debug, PartialEq, Eq, Serialize)]
 pub struct Listing {
     /// The folder listed, relative to the server root, `.` for the root itself.
@@ -140,7 +140,7 @@ impl Root {
     /// The repository at `relative`, a path from the browser. An absolute path, `..` leading
     /// out, a link out of the server root, a folder that is not a repository's working directory
     /// itself, and a repository that reaches outside the server root are refused alike
-    /// (ADR-0039); one whose git directory holds more than the walk for links checks is refused
+    /// (ADR-0037); one whose git directory holds more than the walk for links checks is refused
     /// as too large. It reads the file system: on the async runtime, call it on the blocking
     /// pool.
     pub fn open(&self, relative: &str) -> Result<Opened, String> {
@@ -162,7 +162,7 @@ impl Root {
     }
 
     /// The folders below `relative`, a path from the browser, in place of the desktop's folder
-    /// dialog (ADR-0039): resolved as `open` resolves it, refused alike where it leads to no
+    /// dialog (ADR-0037): resolved as `open` resolves it, refused alike where it leads to no
     /// folder below the server root, and listing no entry that is not a folder below it, so that
     /// a link out of the server root is not followed, nor shown. It reads at most `LIST_READ`
     /// entries and lists at most `LIST_FOLDERS` folders, saying where there are more. It reads
@@ -273,7 +273,7 @@ mod tests {
     }
 
     #[test]
-    // Verifies: ADR-0039
+    // Verifies: ADR-0037
     fn a_repository_below_the_root_opens_named_relative_to_it() {
         let tree = Tree::new("below");
         let root = tree.root();
@@ -286,7 +286,7 @@ mod tests {
     }
 
     #[test]
-    // Verifies: ADR-0039
+    // Verifies: ADR-0037
     fn a_path_leading_out_of_the_root_is_refused_naming_nothing_outside() {
         let tree = Tree::new("out");
         let root = tree.root();
@@ -305,7 +305,7 @@ mod tests {
 
     #[cfg(unix)]
     #[test]
-    // Verifies: ADR-0039
+    // Verifies: ADR-0037
     fn a_link_out_of_the_root_is_refused() {
         let tree = Tree::new("link");
         std::os::unix::fs::symlink(tree.0.join("outside"), tree.0.join("root/link")).unwrap();
@@ -314,7 +314,7 @@ mod tests {
     }
 
     #[test]
-    // Verifies: ADR-0039
+    // Verifies: ADR-0037
     fn a_folder_inside_a_repository_or_none_opens_nothing() {
         let tree = Tree::new("plain");
         let root = tree.root();
@@ -325,7 +325,7 @@ mod tests {
     }
 
     #[test]
-    // Verifies: ADR-0039
+    // Verifies: ADR-0037
     fn the_listing_names_the_folders_below_marks_repositories_and_follows_no_link_out() {
         let tree = Tree::new("list");
         let root = tree.root();
@@ -376,7 +376,7 @@ mod tests {
     }
 
     #[test]
-    // Verifies: ADR-0039
+    // Verifies: ADR-0037
     fn a_listing_never_shows_or_enters_a_git_directory_in_any_case_or_through_a_link() {
         let tree = Tree::new("list-git");
         let root = tree.root();
@@ -406,7 +406,7 @@ mod tests {
     }
 
     #[test]
-    // Verifies: ADR-0039
+    // Verifies: ADR-0037
     fn a_listing_stops_at_its_bound_and_says_there_is_more() {
         let tree = Tree::new("list-bound");
         for n in 0..=LIST_FOLDERS {
@@ -422,7 +422,7 @@ mod tests {
     }
 
     #[test]
-    // Verifies: ADR-0039
+    // Verifies: ADR-0037
     fn the_root_itself_may_be_the_repository() {
         let tree = Tree::new("itself");
         let root = Root::new(&tree.0.join("root/app")).unwrap();

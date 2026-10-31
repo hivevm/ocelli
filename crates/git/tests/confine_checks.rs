@@ -1,4 +1,4 @@
-//! Verifies: ADR-0039, Q-5
+//! Verifies: ADR-0037, Q-5
 //!
 //! The checks that a repository lies below a server root, each way out of it a case of its own:
 //! everything libgit2 reads or follows on its own (`docs/CONVENTIONS.md`, untrusted

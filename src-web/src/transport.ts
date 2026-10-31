@@ -1,4 +1,4 @@
-// The way the web interface reaches its host (ADR-0037): the desktop host's Tauri commands and
+// The way the web interface reaches its host (ADR-0035): the desktop host's Tauri commands and
 // events, or the remote server's WebSocket, which carries the same commands and events with the
 // same names and payloads. The components see neither; `host.ts` picks one at start-up.
 
@@ -36,7 +36,7 @@ export function socketUrl(location: { protocol: string; host: string }): string 
 
 /**
  * The remote server's transport: a command goes out as `{id, cmd, args}`, its answer comes back
- * as `{id, ok}` or `{id, err}`, and an event arrives as `{event, payload}` (ADR-0037).
+ * as `{id, ok}` or `{id, err}`, and an event arrives as `{event, payload}` (ADR-0035).
  */
 export class SocketTransport implements Transport {
   private next = 0;

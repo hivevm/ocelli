@@ -31,7 +31,7 @@ use tokio::net::TcpStream;
 use tokio_tungstenite::tungstenite::Message;
 
 #[tokio::test]
-// Verifies: ADR-0037, ADR-0038, ADR-0039, G-8
+// Verifies: ADR-0035, ADR-0036, ADR-0037, G-18
 async fn the_printed_url_opens_the_repository_at_the_root_and_its_rows_arrive_as_the_desktop_reads_them()
  {
     let tree = Tree::new("tracer");
@@ -48,7 +48,7 @@ async fn the_printed_url_opens_the_repository_at_the_root_and_its_rows_arrive_as
     }
     let cookie = set.split(';').next().unwrap().to_string();
 
-    // With the cookie the web interface is served, under the headers of ADR-0037 and ADR-0038.
+    // With the cookie the web interface is served, under the headers of ADR-0035 and ADR-0036.
     let page = get(running.port, "/", &[("Cookie", &cookie)]).await;
     if ocelli_server::web::built() {
         assert_eq!(page.status, 200);
@@ -102,7 +102,7 @@ async fn the_printed_url_opens_the_repository_at_the_root_and_its_rows_arrive_as
 }
 
 #[tokio::test]
-// Verifies: ADR-0038, Q-5
+// Verifies: ADR-0036, Q-5
 async fn a_request_without_the_token_or_its_cookie_is_refused_and_serves_nothing() {
     let tree = Tree::new("refused");
     let running = server(&tree).await;
@@ -134,7 +134,7 @@ async fn a_request_without_the_token_or_its_cookie_is_refused_and_serves_nothing
 }
 
 #[tokio::test]
-// Verifies: ADR-0038, Q-5
+// Verifies: ADR-0036, Q-5
 async fn a_handshake_from_another_origin_or_none_and_a_foreign_host_are_refused() {
     let tree = Tree::new("origin");
     let running = server(&tree).await;
@@ -168,7 +168,7 @@ async fn a_handshake_from_another_origin_or_none_and_a_foreign_host_are_refused(
 }
 
 #[tokio::test]
-// Verifies: ADR-0039
+// Verifies: ADR-0037
 async fn a_path_outside_the_server_root_is_refused() {
     let tree = Tree::new("outside");
     let running = server(&tree).await;
@@ -242,7 +242,7 @@ fn desktop(name: &str) -> bool {
 }
 
 #[test]
-// Verifies: ADR-0037
+// Verifies: ADR-0035
 fn the_server_links_no_part_of_tauri_or_webkit() {
     let lock =
         std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/../../Cargo.lock")).unwrap();
@@ -296,7 +296,7 @@ fn refused(path: &str) -> Result<Value, String> {
 /// upwards, the root itself inside a repository, and `core.worktree`. Each way out of its kind
 /// is a case of the confinement's own tests, `crates/git/tests/confine_checks.rs`.
 #[tokio::test]
-// Verifies: ADR-0039
+// Verifies: ADR-0037
 async fn a_repository_below_the_root_that_reaches_outside_it_is_refused() {
     let tree = Enclosed::new("ways-out");
     let root = tree.root();
@@ -350,7 +350,7 @@ async fn a_repository_below_the_root_that_reaches_outside_it_is_refused() {
 }
 
 #[tokio::test]
-// Verifies: ADR-0039, ADR-0037
+// Verifies: ADR-0037, ADR-0035
 async fn a_repository_swapped_for_a_way_out_after_it_opened_is_checked_again() {
     let tree = Enclosed::new("swap");
     let root = tree.root();
@@ -415,7 +415,7 @@ async fn a_repository_swapped_for_a_way_out_after_it_opened_is_checked_again() {
 }
 
 #[tokio::test]
-// Verifies: ADR-0039
+// Verifies: ADR-0037
 async fn the_sidebar_names_no_path_outside_the_root() {
     let tree = Tree::new("sidebar");
     let root = tree.root();
@@ -454,7 +454,7 @@ async fn the_sidebar_names_no_path_outside_the_root() {
 }
 
 #[tokio::test]
-// Verifies: ADR-0038, Q-5
+// Verifies: ADR-0036, Q-5
 async fn wrong_tokens_past_a_few_are_answered_ever_later_and_the_right_one_still_opens() {
     let tree = Tree::new("throttle");
     let running = server(&tree).await;
@@ -479,7 +479,7 @@ async fn wrong_tokens_past_a_few_are_answered_ever_later_and_the_right_one_still
 }
 
 #[tokio::test]
-// Verifies: ADR-0038
+// Verifies: ADR-0036
 async fn a_connection_that_does_not_send_its_headers_in_time_is_closed() {
     let tree = Tree::new("slow");
     let limits = Limits {
@@ -500,7 +500,7 @@ async fn a_connection_that_does_not_send_its_headers_in_time_is_closed() {
 }
 
 #[tokio::test]
-// Verifies: ADR-0037
+// Verifies: ADR-0035
 async fn a_tab_that_does_not_read_its_answers_is_closed() {
     let tree = Tree::new("unread");
     let limits = Limits {
@@ -538,7 +538,7 @@ async fn a_tab_that_does_not_read_its_answers_is_closed() {
 
 #[cfg(unix)]
 #[tokio::test]
-// Verifies: ADR-0039
+// Verifies: ADR-0037
 async fn a_link_inside_the_git_directory_or_an_alternates_line_read_otherwise_is_refused() {
     // One case of each kind; the rest are cases of the confinement's own tests.
     let tree = Enclosed::new("inner-ways-out");
@@ -569,7 +569,7 @@ async fn a_link_inside_the_git_directory_or_an_alternates_line_read_otherwise_is
 }
 
 #[tokio::test]
-// Verifies: ADR-0039
+// Verifies: ADR-0037
 async fn the_sidebar_reads_no_superproject_or_submodule_outside_the_root() {
     let tree = Enclosed::new("sidebar-out");
     let root = tree.root();
@@ -623,7 +623,7 @@ async fn the_sidebar_reads_no_superproject_or_submodule_outside_the_root() {
 }
 
 #[tokio::test]
-// Verifies: ADR-0039
+// Verifies: ADR-0037
 async fn what_git_says_about_a_failed_read_reaches_the_browser_only_as_reading_failed() {
     let tree = Tree::new("git-says");
     let running = server(&tree).await;
@@ -652,7 +652,7 @@ async fn what_git_says_about_a_failed_read_reaches_the_browser_only_as_reading_f
 }
 
 #[tokio::test]
-// Verifies: ADR-0038, Q-5
+// Verifies: ADR-0036, Q-5
 async fn connections_and_tabs_past_their_bound_are_refused() {
     let tree = Tree::new("bounds");
     let running = start_on(
@@ -717,7 +717,7 @@ async fn connections_and_tabs_past_their_bound_are_refused() {
 
 #[cfg(unix)]
 #[tokio::test]
-// Verifies: ADR-0039
+// Verifies: ADR-0037
 async fn a_linked_folder_or_a_path_leading_out_reads_nothing_outside_the_root() {
     let tree = Enclosed::new("workdir-link");
     let root = tree.root();
@@ -771,7 +771,7 @@ async fn a_linked_folder_or_a_path_leading_out_reads_nothing_outside_the_root() 
 }
 
 #[tokio::test]
-// Verifies: ADR-0039
+// Verifies: ADR-0037
 async fn a_git_directory_larger_than_the_walk_is_refused_as_too_large() {
     let tree = Enclosed::new("walk-cap");
     let root = tree.root();
@@ -798,7 +798,7 @@ async fn a_git_directory_larger_than_the_walk_is_refused_as_too_large() {
 }
 
 #[tokio::test]
-// Verifies: ADR-0038, Q-5
+// Verifies: ADR-0036, Q-5
 async fn an_upgrade_without_a_token_or_with_a_wrong_one_is_refused() {
     let tree = Tree::new("upgrade-token");
     let running = server(&tree).await;
@@ -833,7 +833,7 @@ async fn an_upgrade_without_a_token_or_with_a_wrong_one_is_refused() {
 }
 
 #[tokio::test]
-// Verifies: ADR-0038, Q-5
+// Verifies: ADR-0036, Q-5
 async fn a_session_the_server_no_longer_keeps_or_a_previous_start_gave_is_refused() {
     let tree = Tree::new("expired");
     let running = start_on(
@@ -873,7 +873,7 @@ async fn a_session_the_server_no_longer_keeps_or_a_previous_start_gave_is_refuse
 }
 
 #[tokio::test]
-// Verifies: ADR-0038, Q-5
+// Verifies: ADR-0036, Q-5
 async fn a_request_or_upgrade_with_a_valid_cookie_from_any_other_origin_is_refused() {
     let tree = Tree::new("origins");
     let running = server(&tree).await;
@@ -914,7 +914,7 @@ async fn a_request_or_upgrade_with_a_valid_cookie_from_any_other_origin_is_refus
 }
 
 #[tokio::test]
-// Verifies: ADR-0038, Q-5
+// Verifies: ADR-0036, Q-5
 async fn wrong_tokens_from_many_connections_wait_their_turn_for_the_whole_server() {
     let tree = Tree::new("throttle-shared");
     let running = server(&tree).await;
@@ -954,7 +954,7 @@ async fn wrong_tokens_from_many_connections_wait_their_turn_for_the_whole_server
 }
 
 #[tokio::test]
-// Verifies: ADR-0039, ADR-0027
+// Verifies: ADR-0037, ADR-0028
 async fn a_submodule_and_a_worktree_below_the_root_open_through_their_rows_and_lead_back() {
     let tree = Tree::new("switch");
     let root = tree.root();
@@ -1006,7 +1006,7 @@ async fn a_submodule_and_a_worktree_below_the_root_open_through_their_rows_and_l
 }
 
 #[tokio::test]
-// Verifies: ADR-0039
+// Verifies: ADR-0037
 async fn each_way_out_of_the_root_is_refused_with_the_reason_that_names_it() {
     let tree = Tree::new("reasons");
     let root = tree.root();
@@ -1104,7 +1104,7 @@ async fn sessions_become(running: &Running, n: usize) {
 }
 
 #[tokio::test]
-// Verifies: ADR-0037, G-8
+// Verifies: ADR-0035, G-18
 async fn two_tabs_on_two_repositories_each_show_their_own_and_a_selection_stays_in_its_tab() {
     let tree = Tree::new("two-tabs");
     let root = tree.root();
@@ -1172,7 +1172,7 @@ async fn two_tabs_on_two_repositories_each_show_their_own_and_a_selection_stays_
 }
 
 #[tokio::test]
-// Verifies: ADR-0037
+// Verifies: ADR-0035
 async fn a_tab_closed_or_dropped_during_a_load_has_its_session_dropped() {
     let tree = Tree::new("close-loading");
     let root = tree.root();
@@ -1199,7 +1199,7 @@ async fn a_tab_closed_or_dropped_during_a_load_has_its_session_dropped() {
 }
 
 #[tokio::test]
-// Verifies: ADR-0037, ADR-0036, ADR-0031, G-8
+// Verifies: ADR-0035, ADR-0022, ADR-0019, G-18
 async fn each_read_the_browser_asks_is_answered_as_the_desktop_host_answers_it() {
     let tree = Tree::new("same-answers");
     let root = tree.root();
@@ -1224,7 +1224,7 @@ async fn each_read_the_browser_asks_is_answered_as_the_desktop_host_answers_it()
     let (mut desktop, desktop_refs) = Desktop::open(&root).await;
 
     // The sidebar and the toolbar: the same refs and transfers; a working tree's path is the
-    // one thing told otherwise, relative to the server root (ADR-0039).
+    // one thing told otherwise, relative to the server root (ADR-0037).
     assert_eq!(refs["transfers"], desktop_refs["transfers"]);
     for key in [
         "locals",
@@ -1355,7 +1355,7 @@ async fn each_read_the_browser_asks_is_answered_as_the_desktop_host_answers_it()
 }
 
 #[tokio::test]
-// Verifies: ADR-0039, ADR-0037
+// Verifies: ADR-0037, ADR-0035
 async fn the_browser_chooses_a_repository_from_the_folders_below_the_root() {
     let tree = Enclosed::new("choose");
     let root = tree.root();
@@ -1414,7 +1414,7 @@ async fn the_browser_chooses_a_repository_from_the_folders_below_the_root() {
 }
 
 #[tokio::test]
-// Verifies: ADR-0038, Q-5
+// Verifies: ADR-0036, Q-5
 async fn wrong_tokens_that_wait_hold_no_connection_and_never_keep_the_right_token_out() {
     let tree = Tree::new("throttle-slots");
     let connections = 8;
@@ -1450,7 +1450,7 @@ async fn wrong_tokens_that_wait_hold_no_connection_and_never_keep_the_right_toke
 }
 
 #[tokio::test]
-// Verifies: ADR-0038, Q-5
+// Verifies: ADR-0036, Q-5
 async fn a_wrong_token_past_those_waiting_is_refused_at_once_with_when_to_try_again() {
     let tree = Tree::new("throttle-waiting");
     let running = start_on(
@@ -1481,7 +1481,7 @@ async fn a_wrong_token_past_those_waiting_is_refused_at_once_with_when_to_try_ag
 }
 
 #[tokio::test]
-// Verifies: ADR-0037
+// Verifies: ADR-0035
 async fn a_tab_that_answers_no_ping_is_closed_and_frees_its_slot_while_one_that_reads_stays() {
     let tree = Tree::new("pings");
     let running = start_on(

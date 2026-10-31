@@ -1,5 +1,5 @@
 //! Resolving a stopped operation's conflicts file by file, and continuing or aborting the
-//! operation, whoever started it, running no program the repository names (ADR-0033).
+//! operation, whoever started it, running no program the repository names (ADR-0031).
 
 use crate::checkout::{entry_as_in, named};
 use crate::git::WORKTREE;
@@ -30,7 +30,7 @@ fn is_marker(line: &str) -> bool {
 
 /// Resolves the conflicted file `path`, still in the conflict `expected`, by writing the side
 /// `take` names, or the working directory's file as the developer edited it, to the index, as
-/// `git checkout --ours/--theirs` and `git add` do (ADR-0033).
+/// `git checkout --ours/--theirs` and `git add` do (ADR-0031).
 pub(crate) fn resolve(
     repo: &Repository,
     path: &str,
@@ -181,7 +181,7 @@ fn stopped_as_shown(repo: &Repository, operation: Operation, head: &str) -> Resu
 }
 
 /// Continues the stopped `operation` once nothing conflicts, as `git <operation> --continue`
-/// does: commits it, a rebase going on to its next step (ADR-0033).
+/// does: commits it, a rebase going on to its next step (ADR-0031).
 pub(crate) fn continue_stopped(
     repo: &Repository,
     operation: Operation,
@@ -232,7 +232,7 @@ pub(crate) fn continue_stopped(
 
 /// Aborts the stopped `operation`, back to where the developer was, as `git <operation> --abort`
 /// does: the files it touched as the checked-out commit has them, its state gone; a change of the
-/// developer's own to another file stays (ADR-0033).
+/// developer's own to another file stays (ADR-0031).
 pub(crate) fn abort(repo: &Repository, operation: Operation, head: &str) -> Result<()> {
     stopped_as_shown(repo, operation, head)?;
     left_to_git(repo, "abort")?;

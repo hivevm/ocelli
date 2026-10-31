@@ -1,7 +1,7 @@
-//! The writes of G-5 and G-6 with git2: merge, rebase, cherry-pick, revert, and reset from a
+//! The writes of G-13 and G-14 with git2: merge, rebase, cherry-pick, revert, and reset from a
 //! clean tree, stopping on a conflict in `git`'s own state; and resolving such a conflict file
 //! by file, then continuing or aborting the operation, whoever started it. No hook and no program
-//! the repository names runs (ADR-0033).
+//! the repository names runs (ADR-0031).
 
 use crate::checkout::{check_out, files_written, nothing_untracked_in_the_way};
 use crate::guard::{
@@ -17,7 +17,7 @@ use ocelli_core::model::Operation;
 use ocelli_core::port::ResetMode;
 
 /// Refuses unless the branch `name` is checked out at `tip`, no operation is in progress, and no
-/// tracked file has an uncommitted change: where every history operation starts (ADR-0033).
+/// tracked file has an uncommitted change: where every history operation starts (ADR-0031).
 fn clean_start<'r>(repo: &'r Repository, name: &str, tip: &str) -> Result<git2::Branch<'r>> {
     let branch = branch_as_shown(repo, name, tip)?;
     if !branch.is_head() {
@@ -52,7 +52,7 @@ pub(crate) fn short(oid: Oid) -> String {
     oid.to_string()[..7].to_string()
 }
 
-/// The identity a commit is made by, where signing is not asked for (ADR-0033).
+/// The identity a commit is made by, where signing is not asked for (ADR-0031).
 pub(crate) fn committer(repo: &Repository) -> Result<Signature<'static>> {
     refuse_where_signing_is_asked(repo, "commit.gpgSign", "a commit")?;
     Ok(repo.signature().context(NO_IDENTITY)?.to_owned())
@@ -357,7 +357,7 @@ pub(crate) fn run_rebase(
 }
 
 /// Moves the checked-out branch to `commit`, as `git reset` does in `mode`; a hard one discards
-/// work and comes only with the developer's confirmation (ADR-0034).
+/// work and comes only with the developer's confirmation (ADR-0033).
 pub(crate) fn reset(
     repo: &Repository,
     name: &str,

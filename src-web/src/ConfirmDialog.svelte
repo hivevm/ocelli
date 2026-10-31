@@ -1,5 +1,5 @@
 <script lang="ts">
-  // The question before a write that discards work (ADR-0034): it names what is lost, and its
+  // The question before a write that discards work (ADR-0033): it names what is lost, and its
   // default button, the one Enter presses, keeps the work. Escape keeps it too.
   import Dialog from './Dialog.svelte';
 

@@ -1,4 +1,4 @@
-//! Verifies: ADR-0033
+//! Verifies: ADR-0031
 //!
 //! A write `git` would sign is refused where the global configuration asks for a signature, as
 //! where the repository's does. libgit2 reads the global configuration from its search path,

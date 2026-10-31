@@ -1,6 +1,6 @@
 //! Counting the *edge crossings* (glossary) in Ocelli's layout (Q-1).
 //!
-//! An edge is drawn as an orthogonal L-shape whose bend follows its type (ADR-0030): a branch edge
+//! An edge is drawn as an orthogonal L-shape whose bend follows its type (ADR-0015): a branch edge
 //! runs along the parent's row and then up the child's lane, a merge edge up the parent's lane and
 //! then along the child's row, a merge out of the main line along the parent's row to its track, up
 //! the track, and along the child's row, and an edge within one lane is a single vertical line. No
@@ -29,7 +29,7 @@ struct Vertical {
     to: i32,
 }
 
-/// The straight segments an edge is drawn with, as the core routes it (ADR-0030).
+/// The straight segments an edge is drawn with, as the core routes it (ADR-0015).
 fn segments(e: &Edge) -> (Vec<Horizontal>, Option<Vertical>) {
     let mut horizontals = Vec::new();
     let mut vertical = None;

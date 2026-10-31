@@ -1,6 +1,6 @@
 //! The web interface's build, embedded in the binary, and the policy it is served under: the
-//! headers ADR-0023 sets for the WebView, as HTTP headers (ADR-0037), with the framing and
-//! referrer rules of ADR-0038.
+//! headers ADR-0025 sets for the WebView, as HTTP headers (ADR-0035), with the framing and
+//! referrer rules of ADR-0036.
 
 use base64::Engine as _;
 use sha2::{Digest, Sha256};
@@ -66,7 +66,7 @@ pub fn inline_script_hashes(html: &str) -> Vec<String> {
 
 /// The Content-Security-Policy of every answer to a request made to `host`: the bundle's own
 /// scripts and styles, a connection to the server itself, avatars from Gravatar and nothing else
-/// beyond it (ADR-0023, ADR-0037), and no page that frames the server (ADR-0038). Over TLS the
+/// beyond it (ADR-0025, ADR-0035), and no page that frames the server (ADR-0036). Over TLS the
 /// socket is `wss`.
 pub fn csp(host: &str, tls: bool, script_hashes: &[String]) -> String {
     let scripts = std::iter::once("'self'".to_string())
@@ -86,7 +86,7 @@ mod tests {
     use super::*;
 
     #[test]
-    // Verifies: ADR-0037, ADR-0038, ADR-0023
+    // Verifies: ADR-0035, ADR-0036, ADR-0025
     fn the_policy_grants_one_origin_beyond_the_server_and_no_framing() {
         assert!(csp("h:1", true, &[]).contains("; connect-src 'self' wss://h:1;"));
         let policy = csp("localhost:8000", false, &["'sha256-x'".into()]);
@@ -114,7 +114,7 @@ mod tests {
     }
 
     #[test]
-    // Verifies: ADR-0037
+    // Verifies: ADR-0035
     fn each_inline_script_is_hashed_and_a_bundled_one_is_not() {
         let html = "<script>\n  a();\n</script>\n<script type=\"module\" src=\"/x.js\"></script>";
         let hashes = inline_script_hashes(html);

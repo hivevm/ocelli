@@ -1,4 +1,4 @@
-// Which rows the graph asks the host for (ADR-0031).
+// Which rows the graph asks the host for (ADR-0019).
 //
 // The host keeps the history; the web interface holds only the window of rows it draws. A window
 // reaches one screen beyond the view on either side, so scrolling within it needs no round trip,

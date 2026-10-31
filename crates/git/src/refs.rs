@@ -1,5 +1,5 @@
-// Verifies: ADR-0026
-//! Reads what the repository sidebar lists (ADR-0026, ADR-0027): local branches,
+// Verifies: ADR-0027
+//! Reads what the repository sidebar lists (ADR-0027, ADR-0028): local branches,
 //! remote branches grouped by their remote, working trees, tags, submodules, and
 //! the repository one level up.
 //!
@@ -14,7 +14,7 @@
 //! repository itself is fatal, and that fails the history load as well.
 //!
 //! For the remote server's turns it also reads which repository a folder belongs to, by its
-//! common directory, and a digest of where its refs point (ADR-0037).
+//! common directory, and a digest of where its refs point (ADR-0035).
 
 use anyhow::Result;
 use git2::{BranchType, ObjectType, Repository, RepositoryOpenFlags, RepositoryState};
@@ -25,7 +25,7 @@ use ocelli_core::model::{
 use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
 
-/// The tip of the main line (ADR-0032): the commit of the local branch `origin/HEAD` names, else
+/// The tip of the main line (ADR-0014): the commit of the local branch `origin/HEAD` names, else
 /// of `main`, else of `master`, else the checked-out commit; none where `HEAD` does not resolve
 /// either. A remote branch alone does not make a main line.
 pub fn load_main_tip(repo_path: &Path) -> Result<Option<String>> {
@@ -368,7 +368,7 @@ fn submodule_state(pinned: Option<&str>, checked_out: Option<&str>) -> Submodule
 ///
 /// Every id here belongs to the submodule's own object database, never to this
 /// repository's, so none of them is a commit the graph could reveal — the path
-/// is what the sidebar acts on (ADR-0027).
+/// is what the sidebar acts on (ADR-0028).
 fn load_submodules(repo: &Repository) -> Vec<Submodule> {
     let Some(workdir) = repo.workdir() else {
         return Vec::new();
@@ -383,7 +383,7 @@ fn load_submodules(repo: &Repository) -> Vec<Submodule> {
 
         // `workdir_id` is only set once the submodule has a working copy; an
         // absent one is exactly what "uninitialized" means.
-        // Confined, a submodule is opened only where it lies below the root (ADR-0039); one
+        // Confined, a submodule is opened only where it lies below the root (ADR-0037); one
         // that reaches out of it reads as one without a working copy, a row without its switch.
         let full = workdir.join(&path);
         let readable = match crate::confine::root_of(&full) {
@@ -420,7 +420,7 @@ fn load_submodules(repo: &Repository) -> Vec<Submodule> {
 }
 
 /// Finds the repository one level up, so the sidebar offers a way back out
-/// (ADR-0027).
+/// (ADR-0028).
 ///
 /// Two cases, in order: a linked worktree belongs to a main working tree, found
 /// through the shared git directory; a submodule's working copy sits inside its
@@ -446,7 +446,7 @@ fn find_parent(repo: &Repository) -> Option<ParentRepo> {
     let candidate = match crate::confine::root_of(workdir).ok()? {
         None => Repository::discover(above).ok()?,
         // Confined, the search upwards stops at the root, and a superproject that reaches out of
-        // it is none (ADR-0039).
+        // it is none (ADR-0037).
         Some(root) => {
             let root = root.as_path();
             // The folders above, links resolved, walked up to the root.
@@ -510,7 +510,7 @@ fn load_tags(repo: &Repository) -> Vec<Tag> {
     out
 }
 
-/// The operation in progress `state` names, where Ocelli can continue or abort it (ADR-0033).
+/// The operation in progress `state` names, where Ocelli can continue or abort it (ADR-0031).
 pub(crate) fn operation_of(state: RepositoryState) -> Option<Operation> {
     match state {
         RepositoryState::Merge => Some(Operation::Merge),
@@ -526,7 +526,7 @@ pub(crate) fn operation_of(state: RepositoryState) -> Option<Operation> {
 }
 
 /// The operation stopped in the repository, as `git status` reads it, with its conflicted files
-/// (ADR-0033).
+/// (ADR-0031).
 pub(crate) fn stopped(repo: &Repository) -> Option<InProgress> {
     let operation = operation_of(repo.state())?;
     let index = repo.index().ok()?;
@@ -566,7 +566,7 @@ pub(crate) fn conflicts_of(index: &git2::Index) -> Vec<Conflict> {
 
 /// The common directory of the repository at `path`, opened without searching upwards, resolved,
 /// links included: one for a working directory and every worktree that belongs to it, which the
-/// remote server orders its tabs' writes by (ADR-0037). `None` where no repository opens there or
+/// remote server orders its tabs' writes by (ADR-0035). `None` where no repository opens there or
 /// its common directory does not resolve.
 pub fn common_dir(path: &Path) -> Option<PathBuf> {
     let repo = Repository::open_ext(
@@ -581,7 +581,7 @@ pub fn common_dir(path: &Path) -> Option<PathBuf> {
 /// A digest of where `HEAD` and every ref of the repository at `path` point, opened without
 /// searching upwards: the remote server compares the digest taken before a write with the one after, to
 /// tell its other tabs on the repository to load again where a refused write moved a ref, as a
-/// pull's fetch does before its fast-forward is refused (ADR-0037). `None` where no repository
+/// pull's fetch does before its fast-forward is refused (ADR-0035). `None` where no repository
 /// opens there or its refs cannot be listed.
 pub fn refs_digest(path: &Path) -> Option<u64> {
     use std::hash::{Hash, Hasher};
@@ -670,7 +670,7 @@ mod tests {
     }
 
     /// No working copy means uninitialized, whatever the superproject pins —
-    /// the viewer never clones one to find out (ADR-0023).
+    /// the viewer never clones one to find out (ADR-0025).
     #[test]
     fn a_submodule_without_a_working_copy_is_uninitialized() {
         assert_eq!(

@@ -1,5 +1,5 @@
-// Verifies: ADR-0029
-//! The view state the terminal frontend remembers across sessions (ADR-0029):
+// Verifies: ADR-0030
+//! The view state the terminal frontend remembers across sessions (ADR-0030):
 //! theme, minimised sidebar and diff layout — the desktop's `localStorage`
 //! choices that exist in the terminal. One JSON file in the platform's state
 //! directory; a missing or broken file means defaults, never a failed start.

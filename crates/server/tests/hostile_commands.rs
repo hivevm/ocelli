@@ -1,4 +1,4 @@
-//! Verifies: ADR-0039, ADR-0037, Q-5
+//! Verifies: ADR-0037, ADR-0035, Q-5
 //!
 //! Every argument of every command comes from the browser, which may send anything JSON holds.
 //! git2 unwraps some conversions of a caller's string, and a release build aborts on a panic, so
@@ -61,7 +61,7 @@ const READ_PATH: &str = "read";
 const RUN: &str = "run";
 
 /// The reads that take a path, and the argument that holds it: each refuses a path that names
-/// the repository beside the server root (ADR-0039).
+/// the repository beside the server root (ADR-0037).
 const PATHS: &[(&str, &str)] = &[
     ("open_repo", "/path"),
     ("list_folders", "/path"),

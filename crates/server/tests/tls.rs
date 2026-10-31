@@ -1,4 +1,4 @@
-//! Where the remote server listens and how it is reached there (ADR-0038): by default on the
+//! Where the remote server listens and how it is reached there (ADR-0036): by default on the
 //! loopback addresses alone over plain HTTP; with `--listen`, over TLS alone, with the developer's
 //! certificate and key or a self-signed pair it makes and keeps for the developer, and a cookie
 //! only a secure connection carries.
@@ -128,7 +128,7 @@ fn mode(path: &Path) -> u32 {
 }
 
 #[tokio::test]
-// Verifies: ADR-0038, Q-5
+// Verifies: ADR-0036, Q-5
 async fn with_listen_and_no_certificate_one_is_made_kept_for_the_developer_and_reused() {
     let tree = Tree::new("self-signed");
     let keep_in = tree.0.join("config/ocelli/server");
@@ -223,7 +223,7 @@ async fn with_listen_and_no_certificate_one_is_made_kept_for_the_developer_and_r
 }
 
 #[tokio::test]
-// Verifies: ADR-0038
+// Verifies: ADR-0036
 async fn with_listen_and_a_certificate_and_key_given_it_serves_those() {
     let tree = Tree::new("given-cert");
     let made =
@@ -264,7 +264,7 @@ async fn with_listen_and_a_certificate_and_key_given_it_serves_those() {
 }
 
 #[tokio::test]
-// Verifies: ADR-0038, Q-5
+// Verifies: ADR-0036, Q-5
 async fn with_listen_plain_http_is_not_answered() {
     let tree = Tree::new("plain-on-tls");
     let keep_in = tree.0.join("config");
@@ -298,7 +298,7 @@ async fn with_listen_plain_http_is_not_answered() {
 }
 
 #[tokio::test]
-// Verifies: ADR-0038
+// Verifies: ADR-0036
 async fn by_default_the_server_listens_on_the_loopback_addresses_alone() {
     let tree = Tree::new("loopback");
     let running = server(&tree).await;
@@ -325,7 +325,7 @@ fn keep(dir: &Path, made: &rcgen::CertifiedKey<rcgen::KeyPair>) {
 }
 
 #[tokio::test]
-// Verifies: ADR-0038
+// Verifies: ADR-0036
 async fn a_kept_pair_in_part_or_a_key_others_may_read_is_refused_saying_what_to_do() {
     let tree = Tree::new("kept-pair");
     let made = rcgen::generate_simple_self_signed(vec!["127.0.0.1".into()]).unwrap();
@@ -373,7 +373,7 @@ async fn a_kept_pair_in_part_or_a_key_others_may_read_is_refused_saying_what_to_
 }
 
 #[tokio::test]
-// Verifies: ADR-0038, Q-5
+// Verifies: ADR-0036, Q-5
 async fn on_an_unspecified_address_the_certificate_names_the_host_and_is_checked_for_it() {
     let tree = Tree::new("unspecified");
     let host = ocelli_server::tls::host_name().expect("the test machine's host name is a DNS name");
@@ -423,7 +423,7 @@ async fn on_an_unspecified_address_the_certificate_names_the_host_and_is_checked
 }
 
 #[tokio::test]
-// Verifies: ADR-0038
+// Verifies: ADR-0036
 async fn on_an_ipv6_address_the_certificate_names_it() {
     // Where the machine has no IPv6 loopback, there is nothing to listen on: the test says so.
     if std::net::TcpListener::bind("[::1]:0").is_err() {

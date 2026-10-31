@@ -31,13 +31,13 @@ pub struct CommitData {
     pub refs: Vec<String>,
     pub parent_shas: Vec<String>,
     pub kind: CommitKind,
-    /// A stash node's place `n` in the stash, `stash@{n}` (ADR-0024); `None` for every other node.
+    /// A stash node's place `n` in the stash, `stash@{n}` (ADR-0018); `None` for every other node.
     pub stash: Option<usize>,
 }
 
 /// A connection between a child commit and one of its parents.
 /// `is_branch` marks a BRANCH edge, to the child's first parent, which runs up the child's
-/// lane; otherwise it is a MERGE edge, which runs up the parent's lane or its track (ADR-0030).
+/// lane; otherwise it is a MERGE edge, which runs up the parent's lane or its track (ADR-0015).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Edge {
@@ -48,7 +48,7 @@ pub struct Edge {
     pub is_branch: bool,
     pub min_row: i32,
     pub max_row: i32,
-    /// The lane a merge out of the main line runs up between its ends (ADR-0030); none for every
+    /// The lane a merge out of the main line runs up between its ends (ADR-0015); none for every
     /// other edge, and then left out of the JSON.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub track: Option<i32>,
@@ -64,7 +64,7 @@ pub enum Run {
 
 impl Edge {
     /// The corners the edge is drawn through, from the parent to the child, as rows and lanes,
-    /// after its type (ADR-0030): a branch edge along the parent's row and up the child's lane, a
+    /// after its type (ADR-0015): a branch edge along the parent's row and up the child's lane, a
     /// merge edge up the parent's lane and along the child's row, a merge out of the main line
     /// along the parent's row to its track, up the track, and along the child's row, and an edge
     /// within one lane down that lane alone. A corner that would repeat the one before is left out.
@@ -156,7 +156,7 @@ pub struct Graph {
     pub edges: Vec<Edge>,
 }
 
-// ── Repository sidebar (ADR-0026) ───────────────────────────────────────────
+// ── Repository sidebar (ADR-0027) ───────────────────────────────────────────
 // What the sidebar lists, read in the same pass as the history. These are refs
 // and checkout locations — repository state, not history — so none of them is a
 // node in the commit graph; each only points at the commit it resolves to.
@@ -213,7 +213,7 @@ pub struct Worktree {
     /// report as a worktree of its own.
     pub is_main: bool,
     /// True for the working tree currently being viewed — selecting it would
-    /// switch to where the user already is (ADR-0027).
+    /// switch to where the user already is (ADR-0028).
     pub is_current: bool,
 }
 
@@ -222,7 +222,7 @@ pub struct Worktree {
 #[serde(rename_all = "camelCase")]
 pub enum SubmoduleState {
     /// Configured, but no working copy on disk: nothing to open, and initialising
-    /// one is out of scope (ADR-0027).
+    /// one is out of scope (ADR-0028).
     Uninitialized,
     /// Checked out at a different commit than the superproject records.
     Modified,
@@ -231,7 +231,7 @@ pub enum SubmoduleState {
 }
 
 /// A submodule of this repository: a pinned commit in a *different* object
-/// database, which is why it is opened rather than revealed (ADR-0027).
+/// database, which is why it is opened rather than revealed (ADR-0028).
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Submodule {
@@ -261,7 +261,7 @@ pub enum ParentKind {
 }
 
 /// The repository one level up, so the sidebar can navigate back out of a
-/// submodule or a linked worktree (ADR-0027). Read from git rather than
+/// submodule or a linked worktree (ADR-0028). Read from git rather than
 /// remembered by the UI, so the way back exists however the user arrived.
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -298,7 +298,7 @@ pub struct RepoRefs {
     /// upstream, else `origin`, else the only remote there is.
     pub default_remote: Option<String>,
     /// The operation stopped in the repository, whoever started it, with its conflicted files
-    /// (ADR-0033).
+    /// (ADR-0031).
     pub in_progress: Option<InProgress>,
 }
 
@@ -382,7 +382,7 @@ pub struct DiffLine {
     pub new_lineno: Option<u32>,
 }
 
-/// How much of a file's uncommitted change the index holds (G-4).
+/// How much of a file's uncommitted change the index holds (G-12).
 #[derive(Debug, Serialize, Clone, Copy, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub enum Staged {
@@ -407,7 +407,7 @@ pub struct FileChange {
 }
 
 /// How a file of the working-directory node stands in the index: how much of its change is
-/// staged, and the content shown, which staging and unstaging expect to find (ADR-0033).
+/// staged, and the content shown, which staging and unstaging expect to find (ADR-0031).
 #[derive(Debug, Serialize, Clone, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct Staging {
@@ -442,7 +442,7 @@ mod tests {
     }
 
     #[test]
-    // Verifies: ADR-0030
+    // Verifies: ADR-0015
     fn each_edge_type_takes_its_route() {
         let along = |row, from, to| Run::Along { row, from, to };
         let down = |lane, from, to| Run::Down { lane, from, to };
@@ -477,7 +477,7 @@ mod tests {
     }
 
     #[test]
-    // Verifies: ADR-0030
+    // Verifies: ADR-0015
     fn an_edge_runs_through_its_corners_from_the_parent_to_the_child() {
         assert_eq!(
             edge((5, 0), (2, 2), true, None).path(),
@@ -499,7 +499,7 @@ mod tests {
     }
 
     #[test]
-    // Verifies: ADR-0030, ADR-0031
+    // Verifies: ADR-0015, ADR-0019
     fn an_edge_reaches_one_lane_past_its_rightmost() {
         assert_eq!(edge((5, 0), (2, 2), true, None).lanes(), 3);
         assert_eq!(edge((5, 0), (2, 1), false, Some(4)).lanes(), 5);

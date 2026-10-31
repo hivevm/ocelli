@@ -7,7 +7,7 @@ description: Revisit the design of what recent work touched — the tickets of a
 
 The rule is [`AGENTS.md` §5](../../../AGENTS.md#5-quality-bar--definition-of-done); that a spec
 closes only after this has run, and that it is due after a number of changes without a spec, is
-decided in [ADR-0006](../../../docs/adr/0006-feature-layer.md). This skill runs in a fresh
+decided in [ADR-0004](../../../docs/adr/0004-feature-layer.md). This skill runs in a fresh
 session and states no rule of its own
 ([ADR-0003](../../../docs/adr/0003-procedures-as-skills.md)).
 

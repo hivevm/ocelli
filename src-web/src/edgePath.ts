@@ -1,4 +1,4 @@
-// How the canvas draws an edge through its corners (ADR-0030).
+// How the canvas draws an edge through its corners (ADR-0015).
 //
 // The core decides which corners an edge runs through, from its parent to its child; the canvas
 // only turns them into a path with each inner corner softened by a short quadratic curve. That
