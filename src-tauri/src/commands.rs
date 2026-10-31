@@ -144,3 +144,8 @@ pub async fn get_file_diff(
 ) -> Result<String, String> {
     Ok(state.host.get_file_diff(sha, file_path).await?)
 }
+
+#[tauri::command]
+pub async fn get_merge_file(path: String, state: State<'_, AppState>) -> Result<String, String> {
+    Ok(state.host.get_merge_file(path).await?)
+}

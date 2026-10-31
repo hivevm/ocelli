@@ -66,6 +66,7 @@ const PATHS: &[(&str, &str)] = &[
     ("open_repo", "/path"),
     ("list_folders", "/path"),
     ("get_file_diff", "/filePath"),
+    ("get_merge_file", "/path"),
 ];
 
 /// The arguments a read is sent with as the web interface sends them, from what the repository
@@ -253,6 +254,8 @@ async fn every_command_with_each_argument_hostile_panics_nowhere_and_the_server_
                 .into_iter()
                 .map(|(state, make)| (json!({ "write": make(&repositories.of(state)) }), None))
                 .collect(),
+            // The merge editor reads a conflicted file, in the repository a merge stopped in.
+            "get_merge_file" => vec![(json!({ "path": "k" }), Some(State::Merging))],
             _ => match reads(cmd, &head) {
                 Some(reads) => reads.into_iter().map(|args| (args, None)).collect(),
                 None => {

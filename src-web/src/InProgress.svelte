@@ -1,7 +1,8 @@
 <script lang="ts">
   // The operation stopped in the repository, whoever started it, and its conflicted files
   // (ADR-0031): each resolved by ours, theirs, or as the developer edited it, then the operation
-  // continued, or aborted after a confirmation.
+  // continued, or aborted after a confirmation. A file whose sides both hold text opens in the
+  // merge editor too.
   import { operationName, type Take, type Write } from './writes.ts';
   import type { InProgress } from './types.ts';
 
@@ -9,8 +10,10 @@
     stopped: InProgress;
     /** Performs a write, asking first where it discards work; resolves with why it was refused. */
     onWrite: (write: Write) => Promise<string | null>;
+    /** Opens the conflicted file in the merge editor. */
+    onEdit: (path: string) => void;
   }
-  let { stopped, onWrite }: Props = $props();
+  let { stopped, onWrite, onEdit }: Props = $props();
 
   let busy = $state(false);
   let refused = $state<string | null>(null);
@@ -49,6 +52,10 @@
   {#each stopped.conflicts as conflict, i (conflict.path)}
     <div class="file">
       <span class="path" title={conflict.path}>{conflict.path}</span>
+      {#if stopped.editable.includes(conflict.path)}
+        <button class="btn" disabled={busy} title="Edit the file in the merge editor"
+                onclick={() => onEdit(conflict.path)}>Edit…</button>
+      {/if}
       <button class="btn" disabled={busy} onclick={() => resolve(i, 'ours')}>Ours</button>
       <button class="btn" disabled={busy} onclick={() => resolve(i, 'theirs')}>Theirs</button>
       <button class="btn" disabled={busy} title="Take the file as you edited it"

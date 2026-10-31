@@ -231,10 +231,30 @@ export interface Conflict {
   theirs: string | null;
 }
 
+/** A block of a conflicted file: the lines of its first and last marker, counted from 1, and
+    the text of each side, each line with its line ending. */
+export interface MergeBlock {
+  firstLine: number;
+  lastLine: number;
+  ours: string;
+  theirs: string;
+  base: string | null;
+}
+
+/** A conflicted file the merge editor opens, as the working directory holds it (ADR-0031). */
+export interface MergeFile {
+  text: string;
+  /** The blob id of the file it was read from, which saving expects to find again. */
+  blob: string;
+  blocks: MergeBlock[];
+}
+
 /** A merge, rebase, cherry-pick, or revert stopped in the repository. */
 export interface InProgress {
   operation: Operation;
   conflicts: Conflict[];
+  /** The conflicted files whose sides both hold text, which the merge editor opens. */
+  editable: string[];
   /** The commit HEAD is at, which continuing and aborting expect. */
   head: string;
 }

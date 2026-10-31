@@ -1079,6 +1079,7 @@ mod tests {
         app.data.as_mut().unwrap().in_progress = Some(ocelli_core::model::InProgress {
             operation: ocelli_core::model::Operation::Merge,
             conflicts,
+            editable: Vec::new(),
             head: "d".into(),
         });
         press(&mut app, KeyCode::Char('!'));

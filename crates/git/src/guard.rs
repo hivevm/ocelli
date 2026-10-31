@@ -540,6 +540,26 @@ fn strings_of<'w>(write: &'w Write) -> Vec<(&'static str, &'w str)> {
                 id.iter().for_each(|id| add(field, id));
             }
         }
+        Write::SaveMerge {
+            path,
+            conflict:
+                Conflict {
+                    path: conflicted,
+                    ancestor,
+                    ours,
+                    theirs,
+                },
+            opened,
+            result,
+        } => {
+            add("path", path);
+            add("conflict.path", conflicted);
+            for (field, id) in [("ancestor", ancestor), ("ours", ours), ("theirs", theirs)] {
+                id.iter().for_each(|id| add(field, id));
+            }
+            add("opened", opened);
+            add("result", result);
+        }
         Write::Continue { operation: _, head } | Write::Abort { operation: _, head } => {
             add("head", head)
         }
