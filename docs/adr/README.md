@@ -126,6 +126,7 @@ is the table a session reads.
 | [0037](0037-git-adapter-confined-to-the-server-root.md) | The git adapter, confined to the server root, opens nothing whose files lie outside it | every path a browser names to `ocelli-server`, the confinement of the git adapter in `crates/git/src/confine.rs` and the reads it changes in `refs.rs` and `git.rs`, the server root and its folder listing in `crates/server/src/root.rs`, the check `Host::guarded` in `crates/commands` makes before every command, what `crates/server/src/socket.rs` lets leave the server, and the sidebar's submodule, worktree, and parent rows it serves | 🟢 |
 | [0038](0038-tag-triggered-release.md) | A pushed version tag builds the installers and a Flatpak into a draft release | `.github/workflows/release.yml` and `flatpak/` | 🟢 |
 | [0039](0039-openssl-vendored-on-macos.md) | On macOS, Ocelli builds OpenSSL into its binaries and links no library outside the system | the OpenSSL that `crates/git/Cargo.toml` links on macOS, `Cargo.lock`, and the macOS linkage check of the `build` job in `.github/workflows/checks.yml` | 🟢 |
+| [draft-sidebar-worktrees-filter](draft-sidebar-worktrees-filter.md) | A repository sidebar lists branches, remotes, every worktree, and tags under one filter, and selecting a branch or tag reveals its commit | `src-web/src/RepoSidebar.svelte`, `src-web/src/refTree.ts`, `crates/git/src/refs.rs`, the `RepoRefs` value in `crates/core/src/model.rs`, and `crates/tui/src/sidebar.rs` | 🟡 |
 
 ### Superseded and rejected
 
