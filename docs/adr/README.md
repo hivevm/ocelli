@@ -113,7 +113,6 @@ is the table a session reads.
 | [0024](0024-themes-tokens-and-palettes.md) | Dark and light themes come from CSS variables, a canvas palette, and a terminal palette | `src-web/src/theme/`, the colours of every Svelte component, and the canvas and terminal palettes | 🟢 |
 | [0025](0025-no-egress-hardened-webview.md) | The front ends make no network request by default, and the WebView is granted only what it uses | `src-tauri/tauri.conf.json`, the avatar toggle, and every outbound request the web interface and the terminal application can make | 🟢 |
 | [0026](0026-diff-overlay-and-file-list.md) | A diff covers only the commit graph, and the changed files show as a tree or a flat list | the diff overlay and the changed-files list in `src-web/src/` and `crates/tui/src/` | 🟢 |
-| [0027](0027-repository-sidebar.md) | A repository sidebar lists branches, remotes, worktrees, and tags, and selecting a branch or tag reveals its commit | `src-web/src/RepoSidebar.svelte`, `src-web/src/refTree.ts`, `crates/git/src/refs.rs`, the `RepoRefs` value in `crates/core/src/model.rs`, and `crates/tui/src/sidebar.rs` | 🟢 |
 | [0028](0028-submodules-and-repository-switching.md) | Submodules appear in the repository sidebar, and the sidebar switches the viewed repository | `crates/git/src/refs.rs`, the `RepoRefs` value in `crates/core/src/model.rs`, the sidebar's submodule, worktree, and parent rows, and the flow that switches the viewed repository | 🟢 |
 | [0029](0029-terminal-application-ratatui.md) | The terminal application is built on ratatui and draws the core's layout unchanged | `crates/tui/`, the terminal application, package and binary `ocelli-cli` | 🟢 |
 | [0030](0030-cli-state-file.md) | The terminal application remembers its view state in one JSON file in the user's state directory | `crates/tui/src/state.rs` and the state file it writes | 🟢 |
@@ -126,7 +125,7 @@ is the table a session reads.
 | [0037](0037-git-adapter-confined-to-the-server-root.md) | The git adapter, confined to the server root, opens nothing whose files lie outside it | every path a browser names to `ocelli-server`, the confinement of the git adapter in `crates/git/src/confine.rs` and the reads it changes in `refs.rs` and `git.rs`, the server root and its folder listing in `crates/server/src/root.rs`, the check `Host::guarded` in `crates/commands` makes before every command, what `crates/server/src/socket.rs` lets leave the server, and the sidebar's submodule, worktree, and parent rows it serves | 🟢 |
 | [0038](0038-tag-triggered-release.md) | A pushed version tag builds the installers and a Flatpak into a draft release | `.github/workflows/release.yml` and `flatpak/` | 🟢 |
 | [0039](0039-openssl-vendored-on-macos.md) | On macOS, Ocelli builds OpenSSL into its binaries and links no library outside the system | the OpenSSL that `crates/git/Cargo.toml` links on macOS, `Cargo.lock`, and the macOS linkage check of the `build` job in `.github/workflows/checks.yml` | 🟢 |
-| [draft-sidebar-worktrees-filter](draft-sidebar-worktrees-filter.md) | A repository sidebar lists branches, remotes, every worktree, and tags under one filter, and selecting a branch or tag reveals its commit | `src-web/src/RepoSidebar.svelte`, `src-web/src/refTree.ts`, `crates/git/src/refs.rs`, the `RepoRefs` value in `crates/core/src/model.rs`, and `crates/tui/src/sidebar.rs` | 🟡 |
+| [draft-sidebar-worktrees-filter](draft-sidebar-worktrees-filter.md) | A repository sidebar lists branches, remotes, every worktree, and tags under one filter, and selecting a branch or tag reveals its commit | `src-web/src/RepoSidebar.svelte`, `src-web/src/refTree.ts`, `crates/git/src/refs.rs`, the `RepoRefs` value in `crates/core/src/model.rs`, and `crates/tui/src/sidebar.rs` | 🟢 |
 
 ### Superseded and rejected
 
@@ -136,3 +135,4 @@ flips its status.
 
 | ADR | Title | Applies to | Status |
 |-----|-------|------------|--------|
+| [0027](0027-repository-sidebar.md) | A repository sidebar lists branches, remotes, worktrees, and tags, and selecting a branch or tag reveals its commit | `src-web/src/RepoSidebar.svelte`, `src-web/src/refTree.ts`, `crates/git/src/refs.rs`, the `RepoRefs` value in `crates/core/src/model.rs`, and `crates/tui/src/sidebar.rs` | ⚪ |
