@@ -2682,7 +2682,7 @@ pub(crate) mod tests {
     }
 
     #[test]
-    // Verifies: ADR-0016, ADR-0027
+    // Verifies: ADR-0016, ADR-draft-sidebar-worktrees-filter
     fn the_first_chunk_shows_before_its_refs_and_the_refs_fill_the_sidebar_after() {
         let mut layout = Layout::new();
         let mut app = App::new("/repo".into(), Glyphs::Unicode);

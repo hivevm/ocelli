@@ -1,4 +1,4 @@
-// Verifies: ADR-0027, ADR-0028
+// Verifies: ADR-draft-sidebar-worktrees-filter, ADR-0028
 //! The repository sidebar: what a repository *contains* — the way back to its
 //! parent, local branches, remotes, working trees, tags and submodules
 //! (ADR-0027, ADR-0028, in the terminal form of ADR-0029). It mirrors the
