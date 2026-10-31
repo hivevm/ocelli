@@ -250,8 +250,8 @@ pub(crate) fn pull(
     }
     if !repo.graph_descendant_of(theirs, ours)? {
         bail!(
-            "'{name}' and its upstream have diverged: merge or rebase them with git; only the \
-             fetch was done"
+            "'{name}' and its upstream have diverged: only the fetch was done; merge or rebase \
+             the upstream from the commit graph"
         );
     }
     let target = repo.find_commit(theirs)?;
