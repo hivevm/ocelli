@@ -22,15 +22,14 @@ mod shown;
 mod support;
 
 use browser::{
-    Desktop, Tab, Tree, git2_panics, open_and_load, perform, row, server, three_commits, to_value,
-    with_changes, writing_on, writing_within,
+    Desktop, Tab, Tree, git2_panics, hold_turn, open_and_load, perform, row, server, three_commits,
+    to_value, until_waiting, with_changes, writing_on, writing_within,
 };
 use ocelli_core::port::Write;
-use ocelli_server::{Limits, Running};
+use ocelli_server::Limits;
 use serde_json::{Value, json};
 use shown::{kinds_of_write, stage_in, unstage_in};
 use std::path::Path;
-use std::time::Duration;
 use support::{git, snapshot};
 // The test of Q-4 runs on unix alone, its programs scripts of the shell; `git_command` is the
 // module `programs` starts `git` through, as well as its function.
@@ -198,18 +197,6 @@ async fn a_path_that_names_no_file_of_the_working_directory_is_refused_and_the_s
     assert_ne!(snapshot(&root), before);
 }
 
-/// Waits until `n` writes wait for the repository whose common directory is `common`.
-async fn until_waiting(running: &Running, common: &Path, n: usize) {
-    let since = std::time::Instant::now();
-    while running.turns().unwrap().waiting(common) != n {
-        assert!(
-            since.elapsed() < Duration::from_secs(20),
-            "{n} never waited"
-        );
-        tokio::time::sleep(Duration::from_millis(10)).await;
-    }
-}
-
 #[tokio::test]
 // Verifies: ADR-0035
 async fn a_write_past_those_waiting_is_refused_and_a_closed_tab_s_waiting_write_never_runs() {
@@ -228,14 +215,7 @@ async fn a_write_past_those_waiting_is_refused_and_a_closed_tab_s_waiting_write_
     open_and_load(&mut second, ".").await;
     let before = snapshot(&root);
     // A write of another tab holds the repository's turn.
-    let held = {
-        let (turns, common) = (running.turns().unwrap().clone(), common.clone());
-        let never = std::sync::atomic::AtomicBool::new(false);
-        tokio::task::spawn_blocking(move || turns.take(common, &never))
-            .await
-            .unwrap()
-            .unwrap()
-    };
+    let held = hold_turn(&running, &common).await;
     let stage = stage_in(&root, "f");
     let write = json!({ "write": stage, "confirmed": false });
     first.send("perform_write", write).await;
@@ -306,14 +286,7 @@ async fn two_tabs_writing_to_one_repository_write_in_turn_and_the_other_tabs_on_
         message: "from the browser".into(),
         head: Some(head.clone()),
     };
-    let held = {
-        let (turns, common) = (running.turns().unwrap().clone(), common.clone());
-        let never = std::sync::atomic::AtomicBool::new(false);
-        tokio::task::spawn_blocking(move || turns.take(common, &never))
-            .await
-            .unwrap()
-            .unwrap()
-    };
+    let held = hold_turn(&running, &common).await;
     let sent = json!({ "write": commit, "confirmed": false });
     let one = first.send("perform_write", sent.clone()).await;
     let two = second.send("perform_write", sent).await;
