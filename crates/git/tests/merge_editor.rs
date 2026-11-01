@@ -121,6 +121,38 @@ fn a_block_without_a_base_section_takes_the_base_of_the_index_s_stages_merged_in
 }
 
 #[test]
+fn a_block_git_trimmed_or_joined_in_the_merge_style_takes_its_base_from_the_stages() {
+    // Both sides add the same first line: git moves it out of the block.
+    let repo = diverged(
+        "read-trimmed",
+        b"a\norig\nz\n",
+        Some(b"a\nsame\nA\nz\n"),
+        Some(b"a\nsame\nB\nz\n"),
+    );
+    git(&repo.0, &["config", "merge.conflictStyle", "merge"]);
+    assert!(!git_may_fail(&repo.0, &["merge", "side"]));
+    let file = GitReader.load_merge_file(&repo.0, "f").unwrap();
+    assert_eq!(file.blocks[0].ours, "A\n", "git trimmed the block");
+    assert_eq!(file.blocks[0].base.as_deref(), Some("orig\n"));
+
+    // Two changes three lines apart: git joins them into one block.
+    let repo = diverged(
+        "read-joined",
+        b"alpha\nbase one\nbeta\n\ngamma\nbase two\ndelta\n",
+        Some(b"alpha\nours one\nbeta\n\ngamma\nours two\ndelta\n"),
+        Some(b"alpha\ntheirs one\nbeta\n\ngamma\ntheirs two\ndelta\n"),
+    );
+    git(&repo.0, &["config", "merge.conflictStyle", "merge"]);
+    assert!(!git_may_fail(&repo.0, &["merge", "side"]));
+    let file = GitReader.load_merge_file(&repo.0, "f").unwrap();
+    assert_eq!(file.blocks.len(), 1, "git joined the conflicts");
+    assert_eq!(
+        file.blocks[0].base.as_deref(),
+        Some("base one\nbeta\n\ngamma\nbase two\n")
+    );
+}
+
+#[test]
 fn a_block_whose_sides_were_edited_since_or_whose_index_holds_no_base_has_none() {
     let repo = conflicted("read-edited-sides", "merge");
     let text = std::fs::read_to_string(repo.0.join("f")).unwrap();

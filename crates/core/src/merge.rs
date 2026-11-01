@@ -2,8 +2,8 @@
 //! holds it, and its blocks, found here once for every front end. A block runs from a `<<<<<<<`
 //! line to its `>>>>>>>` line, ours before `=======` and theirs after it, its base the `|||||||`
 //! section where the file holds one, as the `merge`, `diff3`, and `zdiff3` styles write them,
-//! else the base of the block holding the same ours and theirs in a merge of the index's three
-//! stages in memory in the `diff3` style.
+//! else the bases of the run of blocks holding the same ours and theirs in a merge of the
+//! index's three stages in memory in the `diff3` style.
 
 use serde::Serialize;
 
@@ -116,26 +116,117 @@ pub fn blocks(text: &str) -> Vec<MergeBlock> {
     found
 }
 
-/// The blocks of `text`, each without a base of its own given the base of the block of
+/// The blocks of `text`, each without a base of its own given the bases of the run of blocks of
 /// `merged`, the index's three stages merged in memory in the `diff3` style, that holds the same
-/// ours and theirs, in the line endings of `text`; a block that none holds keeps none. Blocks
-/// alike take the merged ones in their order, each one once.
+/// ours and theirs, in the line endings of `text`; a block that none holds keeps none. A run is
+/// one block or several in a row, joined by the lines between them, and without the lines both
+/// sides share at its ends: `git`'s `merge` style moves those out of a block and joins
+/// conflicts close together into one, the `diff3` style does neither. Its base is the runs'
+/// bases joined by the same lines. Blocks take the runs in their order, each block once.
 pub fn blocks_with_bases(text: &str, merged: &str) -> Vec<MergeBlock> {
     let lf = |s: &str| s.replace("\r\n", "\n");
-    let mut candidates = blocks(merged).into_iter();
+    let merged = lf(merged);
+    let runs = Runs::of(&merged);
+    let mut from = 0;
     let mut found = blocks(text);
     for block in found.iter_mut().filter(|b| b.base.is_none()) {
         let (ours, theirs) = (lf(&block.ours), lf(&block.theirs));
-        let mut ahead = candidates.clone();
-        if let Some(base) = ahead
-            .find(|m| lf(&m.ours) == ours && lf(&m.theirs) == theirs)
-            .and_then(|m| m.base)
-        {
+        if let Some((base, next)) = runs.base_of(from, &ours, &theirs) {
             block.base = Some(with_line_endings(text, &base));
-            candidates = ahead;
+            from = next;
         }
     }
     found
+}
+
+/// The blocks of a merge in the `diff3` style, ours, base, and theirs each as lines, `None` for
+/// one without a base, which no run holds, and the lines between each block and the next.
+struct Runs {
+    blocks: Vec<Option<[Vec<String>; 3]>>,
+    between: Vec<Vec<String>>,
+}
+
+/// `text`'s lines, each with its line ending.
+fn lines_of(text: &str) -> Vec<String> {
+    text.split_inclusive('\n').map(str::to_string).collect()
+}
+
+impl Runs {
+    fn of(merged: &str) -> Self {
+        let lines = lines_of(merged);
+        let found = blocks(merged);
+        let between = found
+            .windows(2)
+            .map(|pair| lines[pair[0].last_line..pair[1].first_line - 1].to_vec())
+            .collect();
+        let blocks = found
+            .into_iter()
+            .map(|b| Some([lines_of(&b.ours), lines_of(&b.base?), lines_of(&b.theirs)]))
+            .collect();
+        Runs { blocks, between }
+    }
+
+    /// The base of the first run from block `from` on that holds `ours` and `theirs`, and the
+    /// block after the run.
+    fn base_of(&self, from: usize, ours: &str, theirs: &str) -> Option<(String, usize)> {
+        let (ours, theirs) = (lines_of(ours), lines_of(theirs));
+        for first in from..self.blocks.len() {
+            // A run sheds only lines both sides share, never a side whole: the block's first
+            // lines are among those of the run's first block.
+            let Some([first_ours, _, first_theirs]) = &self.blocks[first] else {
+                continue;
+            };
+            let starts = |side: &[String], run: &[String]| {
+                side.first()
+                    .is_none_or(|line| run.is_empty() || run.contains(line))
+            };
+            if !starts(&ours, first_ours) || !starts(&theirs, first_theirs) {
+                continue;
+            }
+            let mut joined: [Vec<String>; 3] = Default::default();
+            for last in first..self.blocks.len() {
+                let Some(block) = &self.blocks[last] else {
+                    break;
+                };
+                if last > first {
+                    for part in &mut joined {
+                        part.extend_from_slice(&self.between[last - 1]);
+                    }
+                }
+                for (part, lines) in joined.iter_mut().zip(block) {
+                    part.extend_from_slice(lines);
+                }
+                if holds(&joined[0], &joined[2], &ours, &theirs) {
+                    return Some((joined[1].concat(), last + 1));
+                }
+                // The lines a run may shed are its first block's and its last's: past those, a
+                // longer run holds more than the block.
+                if last > first && joined[0].len() - first_ours.len() - block[0].len() > ours.len()
+                {
+                    break;
+                }
+            }
+        }
+        None
+    }
+}
+
+/// Whether `run_ours` and `run_theirs` are `ours` and `theirs` with the same lines before them and
+/// the same lines after them.
+fn holds(run_ours: &[String], run_theirs: &[String], ours: &[String], theirs: &[String]) -> bool {
+    let Some(shed) = run_ours.len().checked_sub(ours.len()) else {
+        return false;
+    };
+    if run_theirs.len().checked_sub(theirs.len()) != Some(shed) {
+        return false;
+    }
+    (0..=shed).any(|before| {
+        let after = shed - before;
+        run_ours[..before] == run_theirs[..before]
+            && run_ours[run_ours.len() - after..] == run_theirs[run_theirs.len() - after..]
+            && run_ours[before..before + ours.len()] == *ours
+            && run_theirs[before..before + theirs.len()] == *theirs
+    })
 }
 
 #[cfg(test)]
@@ -206,6 +297,76 @@ mod tests {
         let bases: Vec<_> = found.iter().map(|b| b.base.as_deref()).collect();
         assert_eq!(bases, [Some("b1\r\n"), None, Some("b3\r\n")]);
         assert!(found.iter().all(|b| !b.base_in_file));
+    }
+
+    #[test]
+    fn a_block_git_moved_the_lines_both_sides_share_out_of_takes_its_base() {
+        // Verifies: ADR-0031, G-15
+        // `git merge-file` of a,orig,z with ours a,same,A,z and theirs a,same,B,z.
+        let text = "a\nsame\n<<<<<<< o\nA\n=======\nB\n>>>>>>> t\nz\n";
+        let merged = "a\n<<<<<<< o\nsame\nA\n||||||| b\norig\n=======\nsame\nB\n>>>>>>> t\nz\n";
+        assert_eq!(
+            blocks_with_bases(text, merged)[0].base.as_deref(),
+            Some("orig\n")
+        );
+        // And the lines both share at its end.
+        let text = "a\n<<<<<<< o\nA\n=======\nB\n>>>>>>> t\nsame\nz\n";
+        let merged = "a\n<<<<<<< o\nA\nsame\n||||||| b\norig\n=======\nB\nsame\n>>>>>>> t\nz\n";
+        assert_eq!(
+            blocks_with_bases(text, merged)[0].base.as_deref(),
+            Some("orig\n")
+        );
+    }
+
+    #[test]
+    fn a_block_git_joined_from_conflicts_close_together_takes_their_bases_and_the_lines_between() {
+        // Verifies: ADR-0031, G-15
+        let text = "a\n<<<<<<< o\no1\nmid\no2\n=======\nt1\nmid\nt2\n>>>>>>> t\nz\n\
+                    <<<<<<< o\nx\n=======\ny\n>>>>>>> t\n";
+        let merged = "a\n<<<<<<< o\no1\n||||||| b\nb1\n=======\nt1\n>>>>>>> t\nmid\n\
+                      <<<<<<< o\no2\n||||||| b\nb2\n=======\nt2\n>>>>>>> t\nz\n\
+                      <<<<<<< o\nx\n||||||| b\nbx\n=======\ny\n>>>>>>> t\n";
+        let found = blocks_with_bases(text, merged);
+        assert_eq!(found[0].base.as_deref(), Some("b1\nmid\nb2\n"));
+        assert_eq!(found[1].base.as_deref(), Some("bx\n"), "the run after it");
+    }
+
+    #[test]
+    fn a_merged_block_whose_side_holds_marker_lines_is_read_without_a_panic() {
+        // Verifies: ADR-0031, G-15
+        // Ours holds `=======` and `>>>>>>> q`: the merge reads as a block without a base,
+        // which no run may hold.
+        let merged = "a\n<<<<<<< o\n=======\n>>>>>>> q\n||||||| b\nx\n=======\ny\n>>>>>>> t\nz\n";
+        let text = "a\n<<<<<<< o\nA\n=======\nB\n>>>>>>> t\nz\n";
+        assert_eq!(blocks_with_bases(text, merged)[0].base, None);
+    }
+
+    #[test]
+    fn a_run_of_three_blocks_in_crlf_takes_their_bases_in_the_file_s_line_endings() {
+        // Verifies: ADR-0031, G-15
+        let text = "<<<<<<< o\r\no1\r\nm\r\no2\r\nn\r\no3\r\n=======\r\n\
+                    t1\r\nm\r\nt2\r\nn\r\nt3\r\n>>>>>>> t\r\n";
+        let merged = "<<<<<<< o\no1\n||||||| b\nb1\n=======\nt1\n>>>>>>> t\nm\n\
+                      <<<<<<< o\no2\n||||||| b\nb2\n=======\nt2\n>>>>>>> t\nn\n\
+                      <<<<<<< o\no3\n||||||| b\nb3\n=======\nt3\n>>>>>>> t\n";
+        assert_eq!(
+            blocks_with_bases(text, merged)[0].base.as_deref(),
+            Some("b1\r\nm\r\nb2\r\nn\r\nb3\r\n")
+        );
+    }
+
+    #[test]
+    fn a_run_that_holds_more_than_the_block_or_other_sides_gives_it_no_base() {
+        // Verifies: ADR-0031, G-15
+        let text = "<<<<<<< o\nA\n=======\nB\n>>>>>>> t\n";
+        // The shared lines differ, before and after.
+        for merged in [
+            "<<<<<<< o\nsame\nA\n||||||| b\norig\n=======\nother\nB\n>>>>>>> t\n",
+            "<<<<<<< o\nA\nsame\n||||||| b\norig\n=======\nB\nother\n>>>>>>> t\n",
+            "<<<<<<< o\nC\n||||||| b\norig\n=======\nB\n>>>>>>> t\n",
+        ] {
+            assert_eq!(blocks_with_bases(text, merged)[0].base, None, "{merged}");
+        }
     }
 
     #[test]
