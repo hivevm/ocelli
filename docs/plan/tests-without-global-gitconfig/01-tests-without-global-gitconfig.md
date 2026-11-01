@@ -37,6 +37,8 @@ configuration.
 - [ ] Given a sensor or self-test that runs the test suite under a hostile global gitconfig,
       when a test reads the developer's configuration again, then it fails, so the isolation
       cannot quietly erode.
+- [ ] Given the README's "Host configuration the container takes up", when this lands, then it
+      no longer asks for `core.autocrlf` to be other than `true`, since the tests no longer care.
 
 ## Read first
 
