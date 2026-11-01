@@ -232,13 +232,15 @@ export interface Conflict {
 }
 
 /** A block of a conflicted file: the lines of its first and last marker, counted from 1, and
-    the text of each side, each line with its line ending. */
+    the text of each side, each line with its line ending. The base is the file's own `|||||||`
+    section where `baseInFile`, else one found in memory that none of the file's lines hold. */
 export interface MergeBlock {
   firstLine: number;
   lastLine: number;
   ours: string;
   theirs: string;
   base: string | null;
+  baseInFile: boolean;
 }
 
 /** A conflicted file the merge editor opens, as the working directory holds it (ADR-0031). */

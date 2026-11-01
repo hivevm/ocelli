@@ -54,6 +54,10 @@ pub struct Palette {
     pub purple: Color,
     pub add_bg: Color,
     pub del_bg: Color,
+    /// The merge editor's theirs, ours being `add_bg`, and the base of a block (ADR-0031): the
+    /// web interface's `--blue-bg` and `--amber-bg`.
+    pub theirs_bg: Color,
+    pub base_bg: Color,
     pub chip_local: Chip,
     pub chip_head: Chip,
     pub chip_remote: Chip,
@@ -85,6 +89,8 @@ const DARK: Palette = Palette {
     purple: rgb(0xb48efe),
     add_bg: rgb(0x1a3a22),
     del_bg: rgb(0x3a1a1a),
+    theirs_bg: rgb(0x162338),
+    base_bg: rgb(0x2e2412),
     chip_local: Chip {
         fg: rgb(0x4caf7d),
         bg: rgb(0x1a3a22),
@@ -130,6 +136,8 @@ const LIGHT: Palette = Palette {
     purple: rgb(0x7a4fd0),
     add_bg: rgb(0xe3f6ea),
     del_bg: rgb(0xfbe4e6),
+    theirs_bg: rgb(0xe4edfb),
+    base_bg: rgb(0xfbf0d8),
     chip_local: Chip {
         fg: rgb(0x2e9e63),
         bg: rgb(0xe3f6ea),

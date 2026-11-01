@@ -9,6 +9,7 @@ mod chips;
 mod diffsplit;
 mod files;
 mod loader;
+mod merge;
 mod raster;
 mod sidebar;
 mod state;

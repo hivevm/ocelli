@@ -15,7 +15,7 @@ use git2::{
     ErrorCode, IndexConflict, IndexEntry, ObjectType, Oid, Repository, RepositoryState, ResetType,
     Status, StatusOptions,
 };
-use ocelli_core::merge::{MergeFile, as_text, blocks, has_marker, with_line_endings};
+use ocelli_core::merge::{MergeFile, as_text, blocks_with_bases, has_marker, with_line_endings};
 use ocelli_core::model::{Conflict, Operation};
 use ocelli_core::port::Take;
 use std::path::{Path, PathBuf};
@@ -175,7 +175,8 @@ fn opened_file(repo: &Repository, path: &str) -> Result<(PathBuf, Vec<u8>)> {
 }
 
 /// Reads the conflicted file `path` for the merge editor: its text as the working directory
-/// holds it, edits made since included, its blob id, and its blocks (ADR-0031).
+/// holds it, edits made since included, its blob id, and its blocks, each with a base where the
+/// file or a merge of the index's stages in memory holds one (ADR-0031).
 pub(crate) fn load_merge_file(repo_path: &Path, path: &str) -> Result<MergeFile> {
     crate::guard::repository_path(path)?;
     let repo = crate::confine::open(repo_path)?;
@@ -187,8 +188,27 @@ pub(crate) fn load_merge_file(repo_path: &Path, path: &str) -> Result<MergeFile>
     Ok(MergeFile {
         text: text.to_string(),
         blob: Oid::hash_object(ObjectType::Blob, &bytes)?.to_string(),
-        blocks: blocks(text),
+        blocks: blocks_with_bases(text, &merged_in_memory(&repo, path).unwrap_or_default()),
     })
+}
+
+/// The index's three stages of `path` merged in memory in the `diff3` style, as libgit2 merges
+/// them with no configuration read; empty where the index holds no base or the merge is no text,
+/// which gives no block a base. A merge that fails, a stage's blob missing, leaves the bases out
+/// rather than the editor closed.
+fn merged_in_memory(repo: &Repository, path: &str) -> Result<String> {
+    let IndexConflict {
+        ancestor,
+        our,
+        their,
+    } = conflict_at(&repo.index()?, path)?;
+    let (Some(ancestor), Some(ours), Some(theirs)) = (ancestor, our, their) else {
+        return Ok(String::new());
+    };
+    let mut options = git2::MergeFileOptions::new();
+    options.style_diff3(true);
+    let merged = repo.merge_file_from_index(&ancestor, &ours, &theirs, Some(&mut options))?;
+    Ok(as_text(merged.content()).unwrap_or_default().to_string())
 }
 
 /// Saves the merge editor's `result` as the resolution of `path`, still in the conflict
