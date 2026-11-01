@@ -12,12 +12,10 @@
 
 mod git_command;
 use git_command::git_command;
-use git2::ConfigLevel;
 use ocelli_core::port::{RepositoryWriter, Write};
 use ocelli_git::GitWriter;
 
 #[test]
-#[allow(unsafe_code)]
 fn a_commit_and_an_annotated_tag_are_refused_where_the_global_configuration_signs() {
     let dir = std::env::temp_dir().join(format!("ocelli-write-signing-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
@@ -31,12 +29,7 @@ fn a_commit_and_an_annotated_tag_are_refused_where_the_global_configuration_sign
          [commit]\n\tgpgSign = true\n[tag]\n\tgpgSign = true\n",
     )
     .unwrap();
-    // The paths every test gets first, so that its own `git` leaves this test's in place.
-    git_command::libgit2_without_developer_configuration();
-    for level in [ConfigLevel::Global, ConfigLevel::XDG, ConfigLevel::System] {
-        // SAFETY: this binary holds this one test, and nothing else uses libgit2 while it runs.
-        unsafe { git2::opts::set_search_path(level, &global) }.unwrap();
-    }
+    git_command::libgit2_with_developer_configuration_in(&global);
     let git = |args: &[&str]| {
         let out = git_command(&repo)
             .args(["-c", "user.name=F", "-c", "user.email=f@example.invalid"])

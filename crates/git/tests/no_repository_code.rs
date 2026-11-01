@@ -80,7 +80,7 @@ fn reading_a_repository_runs_none_of_its_programs() {
 fn every_place_of_the_list_is_set_and_each_program_leaves_its_marker() {
     let root = std::env::temp_dir().join(format!("ocelli-programs-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&root);
-    let _guard = Scratch(root.clone());
+    let _guard = Scratch::at(root.clone());
     let dir = root.join("repo");
     // A remote, for which the programs a fetch and a push start are named.
     git2::Repository::init(&dir)

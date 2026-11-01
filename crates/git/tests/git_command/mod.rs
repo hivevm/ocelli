@@ -14,16 +14,23 @@ use std::path::Path;
 use std::process::Command;
 use std::sync::Once;
 
-/// The developer's global, XDG, and system configuration out of reach of libgit2 in this test
-/// binary, the writer's and the reader's, as `bare` puts it out of reach of the test's own `git`:
-/// a write and `git` on a twin then both read the repository's own configuration and nothing
-/// else. Every way a test makes or starts a repository calls it first, `git` through `bare`, a
-/// scratch directory, and the fixture repository, so a new test is covered without a line of
-/// its own.
+/// Where libgit2 looks for configuration beyond the repository's own.
+const LEVELS: [ConfigLevel; 4] = [
+    ConfigLevel::ProgramData,
+    ConfigLevel::System,
+    ConfigLevel::XDG,
+    ConfigLevel::Global,
+];
+
+/// The developer's configuration out of reach of libgit2 in this test binary, the writer's and the
+/// reader's, as `bare` puts it out of reach of the test's own `git`: a write and `git` on a twin
+/// then both read the repository's own configuration and nothing else. Every way a test makes or
+/// starts a repository calls it first, `git` through `bare`, a scratch directory, and the fixture
+/// repository, so a new test is covered without a line of its own.
 pub fn libgit2_without_developer_configuration() {
     static DONE: Once = Once::new();
     DONE.call_once(|| {
-        for level in [ConfigLevel::Global, ConfigLevel::XDG, ConfigLevel::System] {
+        for level in LEVELS {
             // SAFETY: libgit2 reads its search paths with no lock, so no thread may use it while
             // they change. A test reaches libgit2 only on a repository it made or started through
             // one of the callers above, each of which waits here until the paths are set.
@@ -31,6 +38,19 @@ pub fn libgit2_without_developer_configuration() {
             unsafe { git2::opts::set_search_path(level, "") }.unwrap();
         }
     });
+}
+
+/// libgit2 in this test binary reading the developer's configuration from `dir` alone, for a
+/// test of what Ocelli does with a developer's configuration. The paths every test gets are set
+/// first, so that a later `git` of the test leaves these in place.
+#[allow(dead_code)] // only the tests of a developer's configuration point libgit2 at one
+pub fn libgit2_with_developer_configuration_in(dir: &Path) {
+    libgit2_without_developer_configuration();
+    for level in LEVELS {
+        // SAFETY: as above; the caller sets them before any test of its binary uses libgit2.
+        #[allow(unsafe_code)]
+        unsafe { git2::opts::set_search_path(level, dir) }.unwrap();
+    }
 }
 
 /// What `git` would run otherwise, turned off.

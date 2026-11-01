@@ -42,9 +42,13 @@ run "Build (web interface)" bun run --cwd src-web build
 # The Rust tests run with a developer's git configuration in reach that changes what a write does,
 # so a test that reads it again fails here rather than only on a machine whose configuration
 # differs. libgit2 reads it at the XDG level; a global ~/.gitconfig still overrides its keys, so
-# CI, which has none of them, is where this holds fully.
-run "Test (Rust)" env XDG_CONFIG_HOME="$ROOT/crates/git/tests/developer-config" \
-  cargo test --workspace --locked
+# CI, which has none of them, is where this holds fully. A copy in a directory of its own, since
+# whatever else reads XDG_CONFIG_HOME may write there.
+developer_config="$(mktemp -d)"
+trap 'rm -rf "$developer_config"' EXIT
+mkdir -p "$developer_config/git"
+cp "$ROOT/crates/git/tests/developer-config/git/config" "$developer_config/git/config"
+run "Test (Rust)" env XDG_CONFIG_HOME="$developer_config" cargo test --workspace --locked
 run "Test (web interface)" bun test src-web
 run "Format check" cargo fmt --all --check
 run "Lint (clippy)" cargo clippy --workspace --all-targets --locked -- -D warnings

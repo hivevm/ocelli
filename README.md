@@ -275,14 +275,14 @@ version cannot be repointed and a version suffix is VS Code-specific.
 
 ### Host configuration the container takes up
 
-The container mounts the host's `~/.claude` and `~/.config/gh`, so the agent's login and the
-`gh` login survive a rebuild. **`gh` shares the host's login only where the host keeps the token
-in that directory.** `gh` keeps it in the system keyring by default; the container cannot reach
-the keyring and logs in on its own. To share the host's login, log in on the host once with
-`gh auth login --insecure-storage`, which stores the token in plain text in
-`~/.config/gh/hosts.yml`. The container can then read every `gh` login of the host and write its
-configuration ([SECURITY.md](SECURITY.md)). On Windows the host's `gh` keeps its configuration
-under `%AppData%`, so nothing is shared there.
+The container mounts the host's `~/.claude` and `~/.config/gh`, so the agent's login and the `gh`
+login survive a rebuild; VS Code also copies the host's `~/.gitconfig` into it. **`gh` shares the
+host's login only where the host keeps the token in that directory.** `gh` keeps it in the system
+keyring by default; the container cannot reach the keyring and logs in on its own. To share the
+host's login, log in on the host once with `gh auth login --insecure-storage`, which stores the
+token in plain text in `~/.config/gh/hosts.yml`. The container can then read every `gh` login of the
+host and write its configuration ([SECURITY.md](SECURITY.md)). On Windows the host's `gh` keeps its
+configuration under `%AppData%`, so nothing is shared there.
 
 ### Host container management
 
