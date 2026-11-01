@@ -1071,9 +1071,19 @@ fn draw_conflicts(frame: &mut Frame, app: &App, selected: usize, p: &Palette, ma
     let Some(stopped) = app.data.as_ref().and_then(|d| d.in_progress.as_ref()) else {
         return;
     };
+    // Why the last key did nothing, here rather than in the status bar, which an 80-column
+    // terminal gives no room beside the stopped operation's note.
+    let said: Vec<String> = app.notice.as_deref().map_or_else(Vec::new, |said| {
+        wrapped(
+            said,
+            usize::from(main.width.min(80).saturating_sub(2)).max(1),
+        )
+    });
     // The dialog opens a third down; the rows below it hold the list, a window that follows the
-    // selection where the list is longer.
-    let room = usize::from((main.height - main.height / 3).saturating_sub(3)).max(1);
+    // selection where the list is longer, and the reason beneath it.
+    let room = usize::from((main.height - main.height / 3).saturating_sub(3))
+        .saturating_sub(said.len())
+        .max(1);
     let first = selected.saturating_sub(room - 1);
     let mut lines: Vec<Line> = stopped
         .conflicts
@@ -1096,12 +1106,32 @@ fn draw_conflicts(frame: &mut Frame, app: &App, selected: usize, p: &Palette, ma
             Style::new().fg(p.text_muted),
         ));
     }
+    for line in said {
+        lines.push(Line::styled(line, Style::new().fg(p.red)));
+    }
     lines.push(Line::styled(
         "o ours · t theirs · e as edited · m edit · c continue · A abort · Esc close",
         Style::new().fg(p.text_dim),
     ));
     let title = format!(" {} in progress ", stopped.operation.name());
     draw_dialog(frame, p, main, title, lines);
+}
+
+/// `text` broken at its whitespace, line breaks included, into lines at most `width` cells wide
+/// on the terminal; a word wider than that stands on a line of its own and is cut there.
+fn wrapped(text: &str, width: usize) -> Vec<String> {
+    let cells = |s: &str| Span::raw(s).width();
+    let mut lines: Vec<String> = Vec::new();
+    for word in text.split_whitespace() {
+        match lines.last_mut() {
+            Some(line) if cells(line) + 1 + cells(word) <= width => {
+                line.push(' ');
+                line.push_str(word);
+            }
+            _ => lines.push(word.to_string()),
+        }
+    }
+    lines
 }
 
 /// The right of the status bar: the hint, then the theme and quit keys, which the merge editor
@@ -1243,6 +1273,76 @@ mod tests {
         );
         let rows = screen(&mut app, 80, 24);
         assert!(rows[23].contains("Esc leave"), "{}", rows[23]);
+    }
+
+    #[test]
+    // Verifies: ADR-0031, G-15, G-18
+    fn why_m_opens_nothing_shows_in_the_conflicts_on_an_80_column_terminal() {
+        let mut app = loaded_app();
+        let conflict = ocelli_core::model::Conflict {
+            path: "blob.bin".into(),
+            ancestor: Some("a".into()),
+            ours: Some("o".into()),
+            theirs: Some("t".into()),
+        };
+        app.data.as_mut().unwrap().in_progress = Some(ocelli_core::model::InProgress {
+            operation: ocelli_core::model::Operation::Merge,
+            conflicts: vec![conflict],
+            editable: Vec::new(),
+            head: "d".into(),
+        });
+        press(&mut app, KeyCode::Char('!'));
+        press(&mut app, KeyCode::Char('m'));
+        let shown = screen(&mut app, 80, 24).join("\n");
+        // Wrapped within the dialog at 80 columns.
+        assert!(shown.contains("resolve blob.bin by"), "{shown}");
+        assert!(shown.contains("o, t, or e"), "{shown}");
+        press(&mut app, KeyCode::Char('j'));
+        let shown = screen(&mut app, 80, 24).join("\n");
+        assert!(
+            !shown.contains("resolve blob.bin"),
+            "until the next key: {shown}"
+        );
+    }
+
+    #[test]
+    fn a_reason_wraps_at_whitespace_within_the_cells_it_takes() {
+        assert_eq!(wrapped("ab cd ef", 5), ["ab cd", "ef"]);
+        assert_eq!(wrapped("abcdefg h", 3), ["abcdefg", "h"]);
+        assert_eq!(wrapped("aaaa  bb\ncc", 4), ["aaaa", "bb", "cc"]);
+        // A wide character takes two cells.
+        assert_eq!(wrapped("日本 語", 4), ["日本", "語"]);
+        assert!(wrapped("", 4).is_empty());
+    }
+
+    #[test]
+    // Verifies: ADR-0031, G-18
+    fn a_reason_beneath_a_long_list_of_conflicts_keeps_the_keys_and_the_border_on_screen() {
+        let mut app = loaded_app();
+        let conflicts = (0..40)
+            .map(|i| ocelli_core::model::Conflict {
+                path: format!("file{i:02}"),
+                ancestor: Some("a".into()),
+                ours: Some("o".into()),
+                theirs: Some("t".into()),
+            })
+            .collect();
+        app.data.as_mut().unwrap().in_progress = Some(ocelli_core::model::InProgress {
+            operation: ocelli_core::model::Operation::Merge,
+            conflicts,
+            editable: Vec::new(),
+            head: "d".into(),
+        });
+        press(&mut app, KeyCode::Char('!'));
+        press(&mut app, KeyCode::Char('m'));
+        let rows = screen(&mut app, 80, 24);
+        let shown = rows.join("\n");
+        assert!(shown.contains("resolve file00 by"), "{shown}");
+        assert!(shown.contains("A abort · Esc close"), "{shown}");
+        assert!(
+            rows[22].starts_with('╰'),
+            "the border above the status bar: {shown}"
+        );
     }
 
     #[test]
