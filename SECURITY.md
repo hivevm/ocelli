@@ -31,10 +31,10 @@ These properties shape the security posture of the coding agents working here:
   issues is stored in `~/.config/gh`, which the Dev Container mounts from the host: where the host
   keeps it there rather than in its keyring, every agent in the container can use and change every
   `gh` login of the host, and can write the host's `gh` configuration, aliases that run on the
-  host included ([Host configuration the container takes up](README.md#host-configuration-the-container-takes-up)
-  in the README). What the repository's own git hooks guarantee for every agent and every human,
-  and what bypasses each, is under
-  [Git hooks](README.md#git-hooks) in the README.
+  host included (README:
+  [Host configuration the container takes up](README.md#host-configuration-the-container-takes-up)).
+  What the repository's own git hooks guarantee for every agent and every human, and what
+  bypasses each, is under [Git hooks](README.md#git-hooks) in the README.
 - **The specification and the decision record change only by human decision**
   ([`AGENTS.md` §3](AGENTS.md#3-adr-rules), rules 4 and 7). The gate is
   [`.github/CODEOWNERS`](.github/CODEOWNERS) together with the Code-Owner review requirement
