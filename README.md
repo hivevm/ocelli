@@ -273,6 +273,23 @@ Features or extensions. Features are pinned by major tag and resolved in the com
 `devcontainer-lock.json`. Extensions are listed by identifier only, because a published extension
 version cannot be repointed and a version suffix is VS Code-specific.
 
+### Host configuration the container takes up
+
+The container mounts the host's `~/.claude` and `~/.config/gh`, so the agent's login and the
+`gh` login survive a rebuild. VS Code also copies the host's `~/.gitconfig` into it. Two host
+settings decide whether that works:
+
+- **`gh` shares its login only where the host keeps the token in that directory.** `gh` keeps
+  it in the system keyring by default; the container cannot reach the keyring and logs in on its
+  own. To share the host's login, log in on the host once with
+  `gh auth login --insecure-storage`, which stores the token in plain text in
+  `~/.config/gh/hosts.yml`. The container can then read every `gh` login of the host and write
+  its configuration ([SECURITY.md](SECURITY.md)). On Windows the host's `gh` keeps its
+  configuration under `%AppData%`, so nothing is shared there.
+- **`core.autocrlf` must not be `true`.** libgit2 in the tests reads the copied gitconfig, and
+  under `true` they check files out with CRLF and fail. On a Linux or macOS host, set
+  `git config --global core.autocrlf input` before the container is built.
+
 ### Host container management
 
 The Dev Container deliberately has **no access to the host Docker daemon**: the socket is not
