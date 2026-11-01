@@ -1130,19 +1130,20 @@ impl App {
     }
 
     /// `m` in the conflicts: reads `path` for the merge editor, where the core says the editor
-    /// opens it; on any other file it says why not (ADR-0031).
+    /// opens it; on any other file it says why not, in the conflicts, where the status bar of an
+    /// 80-column terminal has no room for it (ADR-0031).
     fn read_merge(&mut self, stopped: &InProgress, path: &str) {
         // A write's answer would reload the repository under the editor, its result with it.
         if self.writes.running() {
-            self.status = "A write is still running".to_string();
+            self.notice = Some("A write is still running: m opens the editor once it ends".into());
         } else if stopped.editable.iter().any(|p| p == path) {
             self.status = format!("Opening {path}…");
             self.requests.push(Request::MergeFile { path: path.into() });
         } else {
-            self.status = format!(
+            self.notice = Some(format!(
                 "The merge editor opens a file whose sides both hold text: resolve {path} by \
                  o, t, or e"
-            );
+            ));
         }
     }
 
@@ -1163,9 +1164,16 @@ impl App {
                 self.status = format!("Editing {path}");
                 self.merge = Some(MergeEditor::open(conflict, file));
             }
-            (Ok(_), None) => self.status = format!("{path} no longer conflicts"),
-            (Err(e), _) => self.status = format!("Not opened: {e}"),
+            (Ok(_), None) => self.said_on_open(format!("{path} no longer conflicts")),
+            (Err(e), _) => self.said_on_open(format!("Not opened: {e}")),
         }
+    }
+
+    /// Why the file read opened no editor: in the conflicts until the next key, and in the
+    /// status bar in place of the "Opening…" the read left there.
+    fn said_on_open(&mut self, said: String) {
+        self.status = said.clone();
+        self.notice = Some(said);
     }
 
     /// A key in the merge editor: Ctrl-S saves through the one write that runs, and leaving goes
@@ -2776,11 +2784,8 @@ pub(crate) mod tests {
         app.requests.clear();
         press(&mut app, KeyCode::Char('m'));
         assert!(app.requests.is_empty(), "g is not opened");
-        assert!(
-            app.status.contains("resolve g by o, t, or e"),
-            "{}",
-            app.status
-        );
+        let said = app.notice.clone().unwrap_or_default();
+        assert!(said.contains("resolve g by o, t, or e"), "{said}");
         assert_eq!(app.modal, Some(Modal::Conflicts { selected: 1 }));
 
         // A read refused says why, the conflicts still open.
@@ -2792,7 +2797,14 @@ pub(crate) mod tests {
             file: Err("f no longer holds text".into()),
         });
         assert!(app.merge.is_none());
-        assert_eq!(app.status, "Not opened: f no longer holds text");
+        assert_eq!(
+            app.notice.as_deref(),
+            Some("Not opened: f no longer holds text")
+        );
+        assert_eq!(
+            app.status, "Not opened: f no longer holds text",
+            "no Opening… left"
+        );
     }
 
     #[test]
@@ -2805,7 +2817,10 @@ pub(crate) mod tests {
         app.requests.clear();
         press(&mut app, KeyCode::Char('m'));
         assert!(app.requests.is_empty());
-        assert_eq!(app.status, "A write is still running");
+        assert_eq!(
+            app.notice.as_deref(),
+            Some("A write is still running: m opens the editor once it ends")
+        );
 
         // A file read after the conflicts closed opens nothing over what came since.
         let (mut app, _) = stopped_in_a_merge();
