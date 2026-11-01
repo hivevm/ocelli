@@ -144,8 +144,9 @@ golden path and the test pattern an agent copies from are named here.
   `writes.rs` holds with the requests the keys build, as `writes.ts` does for the web interface,
   showing a
   transfer's progress in the status line and stopping a fetch or a pull on `Esc`, lists an
-  operation in progress with its conflicts, resolved, continued, or aborted from there, and keeps
-  its view state in a file
+  operation in progress with its conflicts, resolved, continued, or aborted from there, opens a
+  conflicted file in the merge editor of `merge.rs` on `tui-textarea-2`, its blocks the core's,
+  and keeps its view state in a file
   ([ADR-0029](adr/0029-terminal-application-ratatui.md), [ADR-0030](adr/0030-cli-state-file.md)).
 - **Measurement** (`crates/measure`, `ocelli-measure`) — a command that lays out a repository as
   the front ends do and measures a quality goal on it: the number of edge crossings for Q-1, next

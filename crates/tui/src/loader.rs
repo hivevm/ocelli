@@ -5,6 +5,7 @@
 //! (ADR-0031).
 
 use ocelli_core::load::{self, Event};
+use ocelli_core::merge::MergeFile;
 use ocelli_core::model::{DiffLine, FileChange};
 use ocelli_core::port::{self, Confirmation, RepositoryReader, Write};
 use ocelli_git::{GitReader, GitWriter};
@@ -27,6 +28,12 @@ pub enum Msg {
         path: String,
         lines: Result<Vec<DiffLine>, String>,
     },
+    /// A conflicted file read for the merge editor, or why the editor does not open it
+    /// (ADR-0031).
+    MergeFile {
+        path: String,
+        file: Result<MergeFile, String>,
+    },
     /// How far a transfer has come.
     WriteProgress(String),
     /// A write done, with the commit it made where it made one, or refused with nothing changed.
@@ -38,6 +45,7 @@ pub enum Msg {
 pub enum Request {
     Files { sha: String },
     Diff { sha: String, path: String },
+    MergeFile { path: String },
 }
 
 /// Loads the history on a thread of its own (ADR-0016), laid out there, so the
@@ -77,7 +85,7 @@ pub fn spawn_worker(path: PathBuf, tx: Sender<Msg>) -> Sender<Request> {
     let (req_tx, req_rx) = channel::<Request>();
     thread::spawn(move || {
         let reader = GitReader;
-        while let Some((files, diff)) = next_batch(&req_rx) {
+        while let Some((files, diff, merge)) = next_batch(&req_rx) {
             if let Some(sha) = files {
                 let files = reader
                     .load_commit_files(&path, &sha)
@@ -99,20 +107,33 @@ pub fn spawn_worker(path: PathBuf, tx: Sender<Msg>) -> Sender<Request> {
                     return;
                 }
             }
+            if let Some(file_path) = merge {
+                let file = reader
+                    .load_merge_file(&path, &file_path)
+                    .map_err(|e| e.to_string());
+                let msg = Msg::MergeFile {
+                    path: file_path,
+                    file,
+                };
+                if tx.send(msg).is_err() {
+                    return;
+                }
+            }
         }
     });
     req_tx
 }
 
-type Batch = (Option<String>, Option<(String, String)>);
+type Batch = (Option<String>, Option<(String, String)>, Option<String>);
 
 /// Blocks for one request, then drains whatever else is queued, keeping only
 /// the newest request of each kind. `None` once the event loop has gone.
 fn next_batch(rx: &Receiver<Request>) -> Option<Batch> {
-    let mut batch: Batch = (None, None);
+    let mut batch: Batch = (None, None, None);
     let mut take = |req| match req {
         Request::Files { sha } => batch.0 = Some(sha),
         Request::Diff { sha, path } => batch.1 = Some((sha, path)),
+        Request::MergeFile { path } => batch.2 = Some(path),
     };
     take(rx.recv().ok()?);
     while let Ok(req) = rx.try_recv() {
@@ -139,7 +160,7 @@ mod tests {
         .unwrap();
         assert_eq!(
             next_batch(&rx),
-            Some((Some("c".into()), Some(("c".into(), "f".into()))))
+            Some((Some("c".into()), Some(("c".into(), "f".into())), None))
         );
         drop(tx);
         assert_eq!(next_batch(&rx), None);

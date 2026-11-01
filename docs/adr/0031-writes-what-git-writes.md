@@ -158,7 +158,11 @@ editor of Ocelli's own whose result the writer takes as the developer's edit.
   block of a merge of the three stages in memory in the `diff3` style that holds the same ours
   and theirs; else the block has none.
 - **What it shows.** One column at any width: the file's text with each block set apart, ours
-  above theirs, its base folded until the developer opens it. No language is highlighted.
+  above theirs, its base folded until the developer opens it. No language is highlighted. The
+  terminal application, whose text widget folds no lines, sets a base section the file holds
+  aside when the editor opens and shows it, as a base found in memory, beneath the text while
+  open; no line outside a base section is changed, and no saved result could keep one, since it
+  holds a marker line.
 - **What it does.** A block is replaced by ours, by theirs, or by both, ours first; the text is
   editable everywhere, the blocks included, with undo.
 - **Saving** takes the result as the file's resolution, refused while it holds a marker line, as
