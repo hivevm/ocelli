@@ -76,7 +76,8 @@ golden path and the test pattern an agent copies from are named here.
   `load.rs` runs a load session through the port, and a `LoadSession` is what a front end keeps of
   it, its `History` and its status line, for both front ends and the measurement alike.
   `merge.rs` finds a conflicted file's blocks for the merge editor of G-15, once for every front
-  end, and tells a marker line and text from anything else
+  end, each with its base from the file or from a merge of the index's stages in memory, and
+  tells a marker line and text from anything else
   ([ADR-0031](adr/0031-writes-what-git-writes.md)).
 - **Git adapter** (`crates/git`, `ocelli-git`) — `GitReader`, the repository port implemented with
   git2: the main line's tip, the history in chunks of 3 000 commits, the first with the stash and
@@ -255,7 +256,8 @@ golden path and the test pattern an agent copies from are named here.
   checked-out branch, and the working-directory node's stage toggles and commit form,
   the diff overlay, the search field, the banner of an operation in progress with its conflicted
   files and the merge editor over the commit graph, CodeMirror 6, whose decisions are in
-  `mergeEditor.ts`, the dialogs that describe a stash and confirm a write that discards work,
+  `mergeEditor.ts` and its blocks' state, a side taken undone with the text, in `mergeBlocks.ts`,
+  the dialogs that describe a stash and confirm a write that discards work,
   the toolbar's Fetch, Pull, and Push, which give way to a Cancel while a fetch or a pull runs,
   and themes;
   `writes.ts` holds the writes it hands the host, one at a time; the toolbar draws the transfers
