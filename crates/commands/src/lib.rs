@@ -7,6 +7,7 @@
 pub mod session;
 
 use ocelli_core::load::{self, Event};
+use ocelli_core::merge::NotOpened;
 use ocelli_core::model::RepoRefs;
 use ocelli_core::port::{self, Confirmation, RepositoryReader, Write};
 use ocelli_core::transfer::Transfers;
@@ -114,10 +115,11 @@ pub enum HostError {
     /// No repository is open for the command to reach.
     NoRepository,
     /// Ocelli refused, for the reason given: the guard, a path that does not exist, a write
-    /// while another runs.
+    /// while another runs, a file the merge editor does not open.
     Refused(String),
     /// git failed, or the read around it: what it said. A write the git adapter refuses is one
-    /// too, since the adapter's error tells its refusals from git's failures by no type.
+    /// too, since the adapter's error tells its refusals of a write from git's failures by no
+    /// type.
     Git(String),
 }
 
@@ -302,12 +304,18 @@ impl Host {
     }
 
     /// The conflicted file `path` read for the merge editor, as JSON, or why the editor does not
-    /// open it (ADR-0031).
+    /// open it (ADR-0031): a refusal of Ocelli's own, which names the file below the repository
+    /// alone and so reaches the browser as it stands (ADR-0037).
     pub async fn get_merge_file(&self, path: String) -> Result<String, HostError> {
         let (repo_path, guard) = self.repo()?;
         let file = tokio::task::spawn_blocking(move || {
             checked(&guard, &repo_path)?;
-            GitReader.load_merge_file(&repo_path, &path).map_err(git)
+            GitReader
+                .load_merge_file(&repo_path, &path)
+                .map_err(|error| match error.downcast::<NotOpened>() {
+                    Ok(NotOpened(reason)) => HostError::Refused(reason),
+                    Err(error) => git(error),
+                })
         })
         .await
         .map_err(git)??;

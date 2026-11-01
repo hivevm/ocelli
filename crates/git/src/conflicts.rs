@@ -15,7 +15,9 @@ use git2::{
     ErrorCode, IndexConflict, IndexEntry, ObjectType, Oid, Repository, RepositoryState, ResetType,
     Status, StatusOptions,
 };
-use ocelli_core::merge::{MergeFile, as_text, blocks_with_bases, has_marker, with_line_endings};
+use ocelli_core::merge::{
+    MergeFile, NotOpened, as_text, blocks_with_bases, has_marker, with_line_endings,
+};
 use ocelli_core::model::{Conflict, Operation};
 use ocelli_core::port::Take;
 use std::path::{Path, PathBuf};
@@ -114,14 +116,15 @@ pub(crate) fn resolve(
 
 /// The stages of the conflicted file `path` in `index`.
 fn conflict_at(index: &git2::Index, path: &str) -> Result<IndexConflict> {
-    index
-        .conflicts()?
-        .flatten()
-        .find(|c| {
-            let any = c.our.as_ref().or(c.their.as_ref()).or(c.ancestor.as_ref());
-            any.is_some_and(|e| e.path == path.as_bytes())
-        })
-        .context("the conflict is gone from the index")
+    conflict_of(index, path)?.context("the conflict is gone from the index")
+}
+
+/// The conflict of `path` in `index`, or `None` where it holds none.
+fn conflict_of(index: &git2::Index, path: &str) -> Result<Option<IndexConflict>> {
+    Ok(index.conflicts()?.flatten().find(|c| {
+        let any = c.our.as_ref().or(c.their.as_ref()).or(c.ancestor.as_ref());
+        any.is_some_and(|e| e.path == path.as_bytes())
+    }))
 }
 
 /// Puts the conflict of `path` back into the index as its stages were.
@@ -154,12 +157,13 @@ pub(crate) fn editable(repo: &Repository, conflict: &IndexConflict) -> bool {
 fn opened_file(repo: &Repository, path: &str) -> Result<(PathBuf, Vec<u8>)> {
     let index = repo.index()?;
     let conflict =
-        conflict_at(&index, path).with_context(|| format!("{path} is not conflicted"))?;
+        conflict_of(&index, path)?.ok_or_else(|| NotOpened(format!("{path} is not conflicted")))?;
     if !editable(repo, &conflict) {
-        bail!(
+        return Err(NotOpened(format!(
             "the merge editor opens a file whose sides both hold text: resolve {path} by ours, \
              theirs, or as edited"
-        );
+        ))
+        .into());
     }
     let root = repo
         .workdir()
@@ -168,7 +172,10 @@ fn opened_file(repo: &Repository, path: &str) -> Result<(PathBuf, Vec<u8>)> {
     let file = root.join(path);
     // A link is looked at, never followed: what it points to may lie outside the repository.
     if !file.symlink_metadata().is_ok_and(|m| m.is_file()) {
-        bail!("{path} is no file in the working directory: resolve it by ours or theirs");
+        return Err(NotOpened(format!(
+            "{path} is no file in the working directory: resolve it by ours or theirs"
+        ))
+        .into());
     }
     let bytes = std::fs::read(&file)?;
     Ok((file, bytes))
@@ -182,8 +189,10 @@ pub(crate) fn load_merge_file(repo_path: &Path, path: &str) -> Result<MergeFile>
     let repo = crate::confine::open(repo_path)?;
     crate::guard::named_exactly(&repo, path)?;
     let (_, bytes) = opened_file(&repo, path)?;
-    let text = as_text(&bytes).with_context(|| {
-        format!("{path} no longer holds text in the working directory: resolve it as edited")
+    let text = as_text(&bytes).ok_or_else(|| {
+        NotOpened(format!(
+            "{path} no longer holds text in the working directory: resolve it as edited"
+        ))
     })?;
     Ok(MergeFile {
         text: text.to_string(),
