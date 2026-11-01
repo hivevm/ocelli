@@ -706,3 +706,26 @@ pub fn git2_panics() -> usize {
 pub fn panics_outside_tests() -> usize {
     panics().outside_tests.load(Ordering::SeqCst)
 }
+
+/// The turn of the repository whose common directory is `common`, taken as a tab's write takes
+/// it and held until it is dropped.
+pub async fn hold_turn(running: &Running, common: &Path) -> ocelli_server::turns::Turn {
+    let (turns, common) = (running.turns().unwrap().clone(), common.to_path_buf());
+    let never = std::sync::atomic::AtomicBool::new(false);
+    tokio::task::spawn_blocking(move || turns.take(common, &never))
+        .await
+        .unwrap()
+        .unwrap()
+}
+
+/// Waits until `n` writes wait for the repository whose common directory is `common`.
+pub async fn until_waiting(running: &Running, common: &Path, n: usize) {
+    let since = std::time::Instant::now();
+    while running.turns().unwrap().waiting(common) != n {
+        assert!(
+            since.elapsed() < Duration::from_secs(20),
+            "{n} never waited"
+        );
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+}
