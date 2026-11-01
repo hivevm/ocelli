@@ -10,6 +10,7 @@
 use crate::chips::RefContext;
 use crate::files::{self, FileRow, FileView};
 use crate::loader::{Msg, Request};
+use crate::merge::{MergeEditor, Outcome};
 use crate::raster::Glyphs;
 use crate::sidebar::{self, Action, Activated, Item};
 use crate::state::{DiffView as StoredDiffView, StoredTheme, ViewState};
@@ -244,6 +245,11 @@ pub struct App {
     pub select_again: Option<String>,
     /// Text for the terminal clipboard, taken by the event loop.
     pub clipboard: Option<String>,
+    /// The merge editor, full screen while open; it takes every key (ADR-0031).
+    pub merge: Option<MergeEditor>,
+    /// Whether the conflicts open again once the reload after a save has read the refs, showing
+    /// what still conflicts.
+    pub conflicts_after_load: bool,
 }
 
 /// The character a key types: one without a modifier, or one AltGr types,
@@ -293,6 +299,8 @@ impl App {
             notice: None,
             select_again: None,
             clipboard: None,
+            merge: None,
+            conflicts_after_load: false,
         }
     }
 
@@ -351,6 +359,15 @@ impl App {
                     });
                 }
             }
+            Msg::MergeFile { path, file } => self.open_merge(path, file),
+            // A save refused keeps the editor open, saying why (ADR-0031).
+            Msg::Written(Err(e)) if self.merge.as_ref().is_some_and(|m| m.saving) => {
+                self.writes.answered();
+                if let Some(editor) = self.merge.as_mut() {
+                    editor.saving = false;
+                    editor.said = Some(format!("Not saved: {e}"));
+                }
+            }
             Msg::WriteProgress(p) if self.writes.running() => self.status = p,
             Msg::WriteProgress(_) => {}
             Msg::Written(Err(e)) => {
@@ -370,9 +387,11 @@ impl App {
             // (ADR-0031).
             Msg::Written(Ok(made)) => {
                 self.writes.answered();
+                let saved = self.merge.as_ref().is_some_and(|m| m.saving);
                 let select_again = made.or_else(|| self.selected_sha());
                 self.open_repo(self.repo.clone(), "Written — reloading…");
                 self.select_again = select_again;
+                self.conflicts_after_load = saved;
             }
             Msg::Diff { sha, path, lines } => {
                 let current = self.files.as_ref().map(|f| f.sha.as_str()) == Some(sha.as_str());
@@ -417,7 +436,12 @@ impl App {
                 let found = history.search_from(&self.search.query, from);
                 self.search.matches.extend(found);
             }
-            (Event::Refs(refs), Some(data)) => data.set_refs(*refs),
+            (Event::Refs(refs), Some(data)) => {
+                data.set_refs(*refs);
+                if std::mem::take(&mut self.conflicts_after_load) && data.in_progress.is_some() {
+                    self.modal = Some(Modal::Conflicts { selected: 0 });
+                }
+            }
             (Event::Refs(_), None) => {}
             (Event::Ended(Err(e)), None) => self.status = format!("Error: {e}"),
             (Event::Ended(Ok(())), None) => {}
@@ -504,6 +528,9 @@ impl App {
 
     pub fn on_key(&mut self, key: KeyEvent) {
         self.notice = None;
+        if let Some(editor) = self.merge.take() {
+            return self.merge_key(editor, key);
+        }
         let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
         if ctrl && key.code == KeyCode::Char('c') {
             self.quit = true;
@@ -1047,7 +1074,8 @@ impl App {
     }
 
     /// In the conflicts: `j`/`k` move, `o`, `t`, `e` resolve the file by ours, theirs, or as
-    /// edited, `c` continues the operation, `A` aborts it once confirmed.
+    /// edited, `m` opens it in the merge editor, `c` continues the operation, `A` aborts it once
+    /// confirmed.
     fn conflicts_key(&mut self, mut selected: usize, key: KeyEvent) {
         let Some(stopped) = self.data.as_ref().and_then(|d| d.in_progress.clone()) else {
             return;
@@ -1066,6 +1094,12 @@ impl App {
             KeyCode::Char('o') => Some(Take::Ours),
             KeyCode::Char('t') => Some(Take::Theirs),
             KeyCode::Char('e') => Some(Take::AsEdited),
+            KeyCode::Char('m') => {
+                if let Some(conflict) = stopped.conflicts.get(selected) {
+                    self.read_merge(&stopped, &conflict.path);
+                }
+                None
+            }
             KeyCode::Char('c') => {
                 self.ask_or_queue(Write::Continue {
                     operation: stopped.operation,
@@ -1093,6 +1127,73 @@ impl App {
             return;
         }
         self.modal = Some(Modal::Conflicts { selected });
+    }
+
+    /// `m` in the conflicts: reads `path` for the merge editor, where the core says the editor
+    /// opens it; on any other file it says why not (ADR-0031).
+    fn read_merge(&mut self, stopped: &InProgress, path: &str) {
+        // A write's answer would reload the repository under the editor, its result with it.
+        if self.writes.running() {
+            self.status = "A write is still running".to_string();
+        } else if stopped.editable.iter().any(|p| p == path) {
+            self.status = format!("Opening {path}…");
+            self.requests.push(Request::MergeFile { path: path.into() });
+        } else {
+            self.status = format!(
+                "The merge editor opens a file whose sides both hold text: resolve {path} by \
+                 o, t, or e"
+            );
+        }
+    }
+
+    /// The conflicted file read: the editor opens on it full screen, while the conflicts are
+    /// still shown and the file still conflicts as the operation shows it.
+    fn open_merge(&mut self, path: String, file: Result<ocelli_core::merge::MergeFile, String>) {
+        if !matches!(self.modal, Some(Modal::Conflicts { .. })) {
+            return;
+        }
+        let conflict = self
+            .data
+            .as_ref()
+            .and_then(|d| d.in_progress.as_ref())
+            .and_then(|s| s.conflicts.iter().find(|c| c.path == path).cloned());
+        match (file, conflict) {
+            (Ok(file), Some(conflict)) => {
+                self.modal = None;
+                self.status = format!("Editing {path}");
+                self.merge = Some(MergeEditor::open(conflict, file));
+            }
+            (Ok(_), None) => self.status = format!("{path} no longer conflicts"),
+            (Err(e), _) => self.status = format!("Not opened: {e}"),
+        }
+    }
+
+    /// A key in the merge editor: Ctrl-S saves through the one write that runs, and leaving goes
+    /// back to the conflicts.
+    fn merge_key(&mut self, mut editor: MergeEditor, key: KeyEvent) {
+        match editor.key(key) {
+            Outcome::Stay => {}
+            Outcome::Save(write) => {
+                if self.writes.queue(write, Confirmation::Absent) {
+                    editor.saving = true;
+                    self.status = "Saving…".to_string();
+                } else {
+                    editor.said = Some("A write is still running".into());
+                }
+            }
+            Outcome::Leave => {
+                let selected = self
+                    .data
+                    .as_ref()
+                    .and_then(|d| d.in_progress.as_ref())
+                    .and_then(|s| s.conflicts.iter().position(|c| c.path == editor.path))
+                    .unwrap_or(0);
+                self.status = "Left the merge editor".to_string();
+                self.modal = Some(Modal::Conflicts { selected });
+                return;
+            }
+        }
+        self.merge = Some(editor);
     }
 
     /// `b` on a commit: asks for the name of a branch there.
@@ -2612,6 +2713,205 @@ pub(crate) mod tests {
         let mut app = loaded_app();
         press(&mut app, KeyCode::Char('!'));
         assert_eq!(app.status, "No operation is in progress");
+    }
+
+    /// The application stopped in a merge on `f` and `g`, the merge editor opening `f` alone.
+    fn stopped_in_a_merge() -> (App, InProgress) {
+        let conflict = |path: &str| ocelli_core::model::Conflict {
+            path: path.into(),
+            ancestor: Some("a".into()),
+            ours: Some("o".into()),
+            theirs: Some("t".into()),
+        };
+        let stopped = InProgress {
+            operation: ocelli_core::model::Operation::Merge,
+            conflicts: vec![conflict("f"), conflict("g")],
+            editable: vec!["f".into()],
+            head: "d".into(),
+        };
+        let mut app = loaded_app();
+        app.data.as_mut().unwrap().in_progress = Some(stopped.clone());
+        (app, stopped)
+    }
+
+    /// The merge editor's file `f`: one block, ours and theirs.
+    fn merge_file() -> ocelli_core::merge::MergeFile {
+        let text = "a\n<<<<<<< HEAD\nours\n=======\ntheirs\n>>>>>>> side\nz\n";
+        ocelli_core::merge::MergeFile {
+            text: text.into(),
+            blob: "b10b".into(),
+            blocks: ocelli_core::merge::blocks(text),
+        }
+    }
+
+    /// The editor opened on `f` from the conflicts with `m`, as the worker answers it.
+    fn editing() -> (App, InProgress) {
+        let (mut app, stopped) = stopped_in_a_merge();
+        press(&mut app, KeyCode::Char('!'));
+        app.requests.clear();
+        press(&mut app, KeyCode::Char('m'));
+        assert_eq!(app.requests, [Request::MergeFile { path: "f".into() }]);
+        app.on_msg(Msg::MergeFile {
+            path: "f".into(),
+            file: Ok(merge_file()),
+        });
+        assert!(app.merge.is_some());
+        assert_eq!(app.modal, None, "the editor takes the screen");
+        (app, stopped)
+    }
+
+    fn chord(app: &mut App, c: char, modifiers: KeyModifiers) {
+        app.on_key(KeyEvent::new(KeyCode::Char(c), modifiers));
+    }
+
+    #[test]
+    // Verifies: ADR-0031, G-15, G-18
+    fn m_opens_the_merge_editor_on_a_file_it_opens_and_says_why_not_on_another() {
+        let (app, _) = editing();
+        assert!(app.merge.as_ref().unwrap().text().contains("<<<<<<< HEAD"));
+
+        let (mut app, _) = stopped_in_a_merge();
+        press(&mut app, KeyCode::Char('!'));
+        press(&mut app, KeyCode::Char('j'));
+        app.requests.clear();
+        press(&mut app, KeyCode::Char('m'));
+        assert!(app.requests.is_empty(), "g is not opened");
+        assert!(
+            app.status.contains("resolve g by o, t, or e"),
+            "{}",
+            app.status
+        );
+        assert_eq!(app.modal, Some(Modal::Conflicts { selected: 1 }));
+
+        // A read refused says why, the conflicts still open.
+        let (mut app, _) = stopped_in_a_merge();
+        press(&mut app, KeyCode::Char('!'));
+        press(&mut app, KeyCode::Char('m'));
+        app.on_msg(Msg::MergeFile {
+            path: "f".into(),
+            file: Err("f no longer holds text".into()),
+        });
+        assert!(app.merge.is_none());
+        assert_eq!(app.status, "Not opened: f no longer holds text");
+    }
+
+    #[test]
+    // Verifies: ADR-0031, ADR-0033, Q-7
+    fn another_write_s_answer_never_reaches_the_editor_and_m_waits_for_it() {
+        let (mut app, _) = stopped_in_a_merge();
+        press(&mut app, KeyCode::Char('f'));
+        assert!(app.writes.running(), "a fetch runs");
+        press(&mut app, KeyCode::Char('!'));
+        app.requests.clear();
+        press(&mut app, KeyCode::Char('m'));
+        assert!(app.requests.is_empty());
+        assert_eq!(app.status, "A write is still running");
+
+        // A file read after the conflicts closed opens nothing over what came since.
+        let (mut app, _) = stopped_in_a_merge();
+        press(&mut app, KeyCode::Char('!'));
+        press(&mut app, KeyCode::Char('m'));
+        press(&mut app, KeyCode::Esc);
+        app.on_msg(Msg::MergeFile {
+            path: "f".into(),
+            file: Ok(merge_file()),
+        });
+        assert!(app.merge.is_none());
+
+        // A write that is not the editor's save, answered while it is open, leaves it alone.
+        let (mut app, _) = editing();
+        chord(&mut app, 'o', KeyModifiers::ALT);
+        app.on_msg(Msg::Written(Err("refused".into())));
+        assert_eq!(app.merge.as_ref().unwrap().said, None);
+        app.on_msg(Msg::Written(Ok(None)));
+        assert!(!app.conflicts_after_load);
+    }
+
+    #[test]
+    // Verifies: ADR-0031, G-15
+    fn alt_keys_in_the_editor_take_a_side_and_no_key_reaches_the_panes() {
+        let (mut app, _) = editing();
+        chord(&mut app, 't', KeyModifiers::ALT);
+        assert_eq!(app.merge.as_ref().unwrap().text(), "a\ntheirs\nz\n");
+        // q types into the text, rather than quitting.
+        press(&mut app, KeyCode::Char('q'));
+        assert!(!app.quit);
+        // The cursor stands after the side taken.
+        assert_eq!(app.merge.as_ref().unwrap().text(), "a\ntheirs\nqz\n");
+    }
+
+    #[test]
+    // Verifies: ADR-0031, G-15
+    fn ctrl_s_saves_and_the_conflicts_show_what_is_left_or_a_refusal_keeps_the_editor() {
+        let (mut app, stopped) = editing();
+        chord(&mut app, 'b', KeyModifiers::ALT);
+        chord(&mut app, 's', KeyModifiers::CONTROL);
+        let save = Write::SaveMerge {
+            path: "f".into(),
+            conflict: stopped.conflicts[0].clone(),
+            opened: "b10b".into(),
+            result: "a\nours\ntheirs\nz\n".into(),
+        };
+        assert_eq!(app.writes.queued(), Some((save, Confirmation::Absent)));
+        app.writes.take();
+        app.on_msg(Msg::Written(Err(
+            "f still holds a conflict marker line".into()
+        )));
+        let editor = app
+            .merge
+            .as_ref()
+            .expect("a refused save keeps the editor open");
+        assert_eq!(
+            editor.said.as_deref(),
+            Some("Not saved: f still holds a conflict marker line")
+        );
+        assert!(!editor.saving);
+
+        chord(&mut app, 's', KeyModifiers::CONTROL);
+        app.writes.take();
+        app.on_msg(Msg::Written(Ok(None)));
+        assert!(app.merge.is_none(), "saved, the editor closes");
+        // The reload reads what is left, and the conflicts show it.
+        let mut refs = crate::sidebar::tests::repo_refs();
+        refs.in_progress = Some(InProgress {
+            conflicts: stopped.conflicts[1..].to_vec(),
+            editable: Vec::new(),
+            ..stopped
+        });
+        let commits = vec![commit("d", 1, &[], &["main"])];
+        first_chunk(&mut app, Layout::new().lay_out(commits), refs);
+        assert_eq!(app.modal, Some(Modal::Conflicts { selected: 0 }));
+        let left = &app
+            .data
+            .as_ref()
+            .unwrap()
+            .in_progress
+            .as_ref()
+            .unwrap()
+            .conflicts;
+        assert_eq!(left.len(), 1);
+        assert_eq!(left[0].path, "g");
+    }
+
+    #[test]
+    // Verifies: ADR-0031, ADR-0033, Q-7
+    fn esc_with_a_result_not_saved_asks_first_and_leaves_only_on_y() {
+        let (mut app, _) = editing();
+        press(&mut app, KeyCode::Esc);
+        assert!(app.merge.is_none(), "nothing unsaved: it leaves at once");
+        assert_eq!(app.modal, Some(Modal::Conflicts { selected: 0 }));
+
+        let (mut app, _) = editing();
+        chord(&mut app, 'o', KeyModifiers::ALT);
+        press(&mut app, KeyCode::Esc);
+        assert!(app.merge.as_ref().unwrap().leaving);
+        press(&mut app, KeyCode::Char('n'));
+        assert!(app.merge.is_some(), "not confirmed: the editor stays open");
+        chord(&mut app, 'c', KeyModifiers::CONTROL);
+        assert!(!app.quit, "Ctrl-C asks as Esc does");
+        press(&mut app, KeyCode::Char('y'));
+        assert!(app.merge.is_none());
+        assert_eq!(app.modal, Some(Modal::Conflicts { selected: 0 }));
     }
 
     #[test]
