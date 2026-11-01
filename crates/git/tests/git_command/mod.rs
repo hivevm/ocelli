@@ -9,8 +9,49 @@
 //! same configuration out of reach and the repository's programs left on, which shows that the
 //! programs the test names would run where `git` performed what Ocelli performs.
 
+use git2::ConfigLevel;
 use std::path::Path;
 use std::process::Command;
+use std::sync::Once;
+
+/// Where libgit2 looks for configuration beyond the repository's own.
+const LEVELS: [ConfigLevel; 4] = [
+    ConfigLevel::ProgramData,
+    ConfigLevel::System,
+    ConfigLevel::XDG,
+    ConfigLevel::Global,
+];
+
+/// The developer's configuration out of reach of libgit2 in this test binary, the writer's and the
+/// reader's, as `bare` puts it out of reach of the test's own `git`: a write and `git` on a twin
+/// then both read the repository's own configuration and nothing else. Every way a test makes or
+/// starts a repository calls it first, `git` through `bare`, a scratch directory, and the fixture
+/// repository, so a new test is covered without a line of its own.
+pub fn libgit2_without_developer_configuration() {
+    static DONE: Once = Once::new();
+    DONE.call_once(|| {
+        for level in LEVELS {
+            // SAFETY: libgit2 reads its search paths with no lock, so no thread may use it while
+            // they change. A test reaches libgit2 only on a repository it made or started through
+            // one of the callers above, each of which waits here until the paths are set.
+            #[allow(unsafe_code)]
+            unsafe { git2::opts::set_search_path(level, "") }.unwrap();
+        }
+    });
+}
+
+/// libgit2 in this test binary reading the developer's configuration from `dir` alone, for a
+/// test of what Ocelli does with a developer's configuration. The paths every test gets are set
+/// first, so that a later `git` of the test leaves these in place.
+#[allow(dead_code)] // only the tests of a developer's configuration point libgit2 at one
+pub fn libgit2_with_developer_configuration_in(dir: &Path) {
+    libgit2_without_developer_configuration();
+    for level in LEVELS {
+        // SAFETY: as above; the caller sets them before any test of its binary uses libgit2.
+        #[allow(unsafe_code)]
+        unsafe { git2::opts::set_search_path(level, dir) }.unwrap();
+    }
+}
 
 /// What `git` would run otherwise, turned off.
 const OFF: &[(&str, &str)] = &[
@@ -67,6 +108,7 @@ pub fn git_running_its_programs(dir: impl AsRef<Path>) -> Command {
 /// `git` in `dir` with nothing but the configuration out of reach and the editors and prompts
 /// turned off, environment variables that any `git` honours.
 fn bare(dir: &Path) -> Command {
+    libgit2_without_developer_configuration();
     let mut command = Command::new("git");
     command
         .arg("-C")
@@ -83,6 +125,18 @@ fn bare(dir: &Path) -> Command {
         .env("GIT_TERMINAL_PROMPT", "0")
         .env_remove("GIT_DIR")
         .env_remove("GIT_WORK_TREE");
+    // The identity a test's commits carry is the repository's, as the writer's are: `git commit`
+    // exports the committing developer's to its hooks, and the pre-commit hook runs the tests.
+    for var in [
+        "GIT_AUTHOR_NAME",
+        "GIT_AUTHOR_EMAIL",
+        "GIT_AUTHOR_DATE",
+        "GIT_COMMITTER_NAME",
+        "GIT_COMMITTER_EMAIL",
+        "GIT_COMMITTER_DATE",
+    ] {
+        command.env_remove(var);
+    }
     command
 }
 

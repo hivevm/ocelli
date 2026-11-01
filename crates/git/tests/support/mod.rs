@@ -24,7 +24,14 @@ use std::process::Stdio;
 pub struct Scratch(pub PathBuf);
 
 impl Scratch {
+    /// `dir`, removed when the test ends, for a test that names its directory itself.
+    pub fn at(dir: PathBuf) -> Self {
+        git_command::libgit2_without_developer_configuration();
+        Scratch(dir)
+    }
+
     pub fn new(name: &str) -> Self {
+        git_command::libgit2_without_developer_configuration();
         let dir = std::env::temp_dir().join(format!(
             "ocelli-{}-{name}-{}",
             env!("CARGO_CRATE_NAME"),

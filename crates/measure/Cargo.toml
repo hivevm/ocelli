@@ -14,5 +14,9 @@ ocelli-core = { workspace = true }
 ocelli-git = { workspace = true }
 anyhow = "1"
 
+[dev-dependencies]
+# The shared test support puts the developer's git configuration out of libgit2's reach.
+git2 = { version = "0.20", default-features = false }
+
 [lints]
 workspace = true

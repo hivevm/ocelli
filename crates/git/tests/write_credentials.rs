@@ -14,7 +14,6 @@
 
 mod git_command;
 use git_command::git_command;
-use git2::ConfigLevel;
 use ocelli_core::port::{RepositoryWriter, Write};
 use ocelli_git::GitWriter;
 use std::io::{BufRead, BufReader, Write as _};
@@ -67,11 +66,7 @@ fn developer(root: &Path) -> PathBuf {
             ),
         )
         .unwrap();
-        for level in [ConfigLevel::Global, ConfigLevel::XDG, ConfigLevel::System] {
-            // SAFETY: set once, before any test of this binary uses libgit2.
-            #[allow(unsafe_code)]
-            unsafe { git2::opts::set_search_path(level, &global) }.unwrap();
-        }
+        git_command::libgit2_with_developer_configuration_in(&global);
     });
     ran
 }
@@ -91,6 +86,17 @@ fn repository(dir: &Path, url: &str, ran: &Path) {
         "credential.helper",
         &format!("!touch {}", ran.display()),
     ]);
+    // The developer's helper is still where libgit2 looks, or a test would pass for want of it.
+    let global = git2::Config::open_default()
+        .unwrap()
+        .open_level(git2::ConfigLevel::Global)
+        .unwrap();
+    assert!(
+        global
+            .get_string("credential.helper")
+            .is_ok_and(|helper| helper.starts_with("store --file")),
+        "the developer's credential helper is out of reach"
+    );
 }
 
 /// The credentials a request carried, decoded from its `Authorization: Basic` header. libgit2

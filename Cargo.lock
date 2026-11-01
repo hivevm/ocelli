@@ -2771,6 +2771,7 @@ name = "ocelli-measure"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "git2",
  "ocelli-core",
  "ocelli-git",
 ]
