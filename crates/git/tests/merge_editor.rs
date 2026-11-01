@@ -103,8 +103,52 @@ fn a_conflict_in_each_style_is_read_as_the_file_with_its_blob_and_blocks() {
         assert_eq!(file.blocks.len(), 1, "{style}");
         assert_eq!(file.blocks[0].ours, "ours\n", "{style}");
         assert_eq!(file.blocks[0].theirs, "theirs\n", "{style}");
-        assert_eq!(file.blocks[0].base.is_some(), has_base, "{style}");
+        assert_eq!(file.blocks[0].base_in_file, has_base, "{style}");
+        assert_eq!(file.blocks[0].base.as_deref(), Some("base\n"), "{style}");
     }
+}
+
+#[test]
+fn a_block_without_a_base_section_takes_the_base_of_the_index_s_stages_merged_in_memory() {
+    let repo = conflicted("read-merged-base", "merge");
+    let file = GitReader.load_merge_file(&repo.0, "f").unwrap();
+    assert_eq!(file.blocks[0].base.as_deref(), Some("base\n"));
+    assert!(!file.blocks[0].base_in_file);
+    assert_eq!(
+        file.text,
+        std::fs::read_to_string(repo.0.join("f")).unwrap()
+    );
+}
+
+#[test]
+fn a_block_whose_sides_were_edited_since_or_whose_index_holds_no_base_has_none() {
+    let repo = conflicted("read-edited-sides", "merge");
+    let text = std::fs::read_to_string(repo.0.join("f")).unwrap();
+    write_file(&repo.0, "f", &text.replace("ours\n", "mine\n"));
+    assert_eq!(
+        GitReader.load_merge_file(&repo.0, "f").unwrap().blocks[0].base,
+        None
+    );
+
+    // Both sides add the file: the index holds no base.
+    let s = Scratch::new("read-no-base");
+    let d = &s.0;
+    git(d, &["init", "--quiet", "-b", "main"]);
+    git(d, &["config", "user.name", "Ada"]);
+    git(d, &["config", "user.email", "ada@example.invalid"]);
+    git(d, &["commit", "--quiet", "--allow-empty", "-m", "root"]);
+    git(d, &["switch", "--quiet", "-c", "side"]);
+    write_file(d, "f", "theirs\n");
+    git(d, &["add", "f"]);
+    git(d, &["commit", "--quiet", "-m", "side"]);
+    git(d, &["switch", "--quiet", "main"]);
+    write_file(d, "f", "ours\n");
+    git(d, &["add", "f"]);
+    git(d, &["commit", "--quiet", "-m", "main"]);
+    assert!(!git_may_fail(d, &["merge", "side"]));
+    let file = GitReader.load_merge_file(d, "f").unwrap();
+    assert_eq!(file.blocks.len(), 1);
+    assert_eq!(file.blocks[0].base, None);
 }
 
 #[test]

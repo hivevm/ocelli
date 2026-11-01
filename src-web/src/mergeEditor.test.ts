@@ -1,31 +1,48 @@
 // Verifies: ADR-0031, ADR-0033, G-15, Q-7
 import { describe, expect, test } from 'bun:test';
-import { blockLines, saveRequest, unsaved, unsavedLoss } from './mergeEditor.ts';
+import { lineKinds, markerLines, saveRequest, sideText, unsaved, unsavedLoss } from './mergeEditor.ts';
 import type { Conflict, MergeFile } from './types.ts';
 
 const file: MergeFile = {
   text: 'a\r\n<<<<<<< HEAD\r\nours\r\n=======\r\ntheirs\r\n>>>>>>> side\r\nz\r\n',
   blob: 'b10b',
-  blocks: [{ firstLine: 2, lastLine: 6, ours: 'ours\r\n', theirs: 'theirs\r\n', base: null }],
+  blocks: [{ firstLine: 2, lastLine: 6, ours: 'ours\r\n', theirs: 'theirs\r\n', base: null, baseInFile: false }],
 };
 
-describe('blockLines', () => {
+describe('markerLines and lineKinds', () => {
   test('each block marks its markers and the lines of each side', () => {
-    expect([...blockLines(file.blocks)]).toEqual([
+    expect(markerLines(file.blocks[0])).toEqual([2, 4, 6]);
+    expect([...lineKinds([2, 4, 6])]).toEqual([
       [2, 'marker'], [3, 'ours'], [4, 'marker'], [5, 'theirs'], [6, 'marker'],
     ]);
   });
 
-  test('a block with a base marks the base between ours and theirs, an empty base none', () => {
-    const lines = blockLines([
-      { firstLine: 1, lastLine: 8, ours: 'o\n', theirs: 't\n', base: 'b1\nb2\n' },
-      { firstLine: 9, lastLine: 14, ours: 'o\n', theirs: 't\n', base: '' },
-    ]);
-    expect([...lines]).toEqual([
+  test('a base in the file is marked between ours and theirs, an empty base and one from memory not', () => {
+    const inFile = { firstLine: 1, lastLine: 8, ours: 'o\n', theirs: 't\n', base: 'b1\nb2\n', baseInFile: true };
+    const empty = { firstLine: 9, lastLine: 14, ours: 'o\n', theirs: 't\n', base: '', baseInFile: true };
+    const merged = { firstLine: 1, lastLine: 5, ours: 'o\n', theirs: 't\n', base: 'b\n', baseInFile: false };
+    expect(markerLines(inFile)).toEqual([1, 3, 6, 8]);
+    expect(markerLines(empty)).toEqual([9, 11, 12, 14]);
+    expect(markerLines(merged)).toEqual([1, 3, 5]);
+    expect([...lineKinds([1, 3, 6, 8])]).toEqual([
       [1, 'marker'], [2, 'ours'], [3, 'marker'], [4, 'base'], [5, 'base'], [6, 'marker'],
       [7, 'theirs'], [8, 'marker'],
-      [9, 'marker'], [10, 'ours'], [11, 'marker'], [12, 'marker'], [13, 'theirs'], [14, 'marker'],
     ]);
+  });
+
+  test('lines added inside a side are of that side', () => {
+    expect([...lineKinds([1, 4, 6])]).toEqual([
+      [1, 'marker'], [2, 'ours'], [3, 'ours'], [4, 'marker'], [5, 'theirs'], [6, 'marker'],
+    ]);
+  });
+});
+
+describe('sideText', () => {
+  test('ours, theirs, or both, ours first, in the editor\'s line endings', () => {
+    const block = file.blocks[0];
+    expect(sideText(block, 'ours')).toBe('ours\n');
+    expect(sideText(block, 'theirs')).toBe('theirs\n');
+    expect(sideText(block, 'both')).toBe('ours\ntheirs\n');
   });
 });
 
