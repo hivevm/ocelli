@@ -9,8 +9,29 @@
 //! same configuration out of reach and the repository's programs left on, which shows that the
 //! programs the test names would run where `git` performed what Ocelli performs.
 
+use git2::ConfigLevel;
 use std::path::Path;
 use std::process::Command;
+use std::sync::Once;
+
+/// The developer's global, XDG, and system configuration out of reach of libgit2 in this test
+/// binary, the writer's and the reader's, as `bare` puts it out of reach of the test's own `git`:
+/// a write and `git` on a twin then both read the repository's own configuration and nothing
+/// else. Every way a test makes or starts a repository calls it first, `git` through `bare`, a
+/// scratch directory, and the fixture repository, so a new test is covered without a line of
+/// its own.
+pub fn libgit2_without_developer_configuration() {
+    static DONE: Once = Once::new();
+    DONE.call_once(|| {
+        for level in [ConfigLevel::Global, ConfigLevel::XDG, ConfigLevel::System] {
+            // SAFETY: libgit2 reads its search paths with no lock, so no thread may use it while
+            // they change. A test reaches libgit2 only on a repository it made or started through
+            // one of the callers above, each of which waits here until the paths are set.
+            #[allow(unsafe_code)]
+            unsafe { git2::opts::set_search_path(level, "") }.unwrap();
+        }
+    });
+}
 
 /// What `git` would run otherwise, turned off.
 const OFF: &[(&str, &str)] = &[
@@ -67,6 +88,7 @@ pub fn git_running_its_programs(dir: impl AsRef<Path>) -> Command {
 /// `git` in `dir` with nothing but the configuration out of reach and the editors and prompts
 /// turned off, environment variables that any `git` honours.
 fn bare(dir: &Path) -> Command {
+    libgit2_without_developer_configuration();
     let mut command = Command::new("git");
     command
         .arg("-C")

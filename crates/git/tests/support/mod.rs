@@ -25,6 +25,7 @@ pub struct Scratch(pub PathBuf);
 
 impl Scratch {
     pub fn new(name: &str) -> Self {
+        git_command::libgit2_without_developer_configuration();
         let dir = std::env::temp_dir().join(format!(
             "ocelli-{}-{name}-{}",
             env!("CARGO_CRATE_NAME"),

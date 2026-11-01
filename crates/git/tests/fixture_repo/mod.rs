@@ -39,6 +39,7 @@ fn commit(
 }
 
 pub fn build(dir: &Path) -> Repository {
+    crate::support::git_command::libgit2_without_developer_configuration();
     let mut opts = git2::RepositoryInitOptions::new();
     opts.initial_head("main");
     let repo = Repository::init_opts(dir, &opts).unwrap();
@@ -46,8 +47,6 @@ pub fn build(dir: &Path) -> Repository {
         let mut cfg = repo.config().unwrap();
         cfg.set_str("user.name", "Ada").unwrap();
         cfg.set_str("user.email", "ada@example.org").unwrap();
-        // A system config (Git for Windows sets one) must not convert line endings.
-        cfg.set_bool("core.autocrlf", false).unwrap();
     }
     let t0 = 1_700_000_000;
     let a = commit(&repo, Some("HEAD"), "a.txt", "one\n", "first", t0, &[]);

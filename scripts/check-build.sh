@@ -39,7 +39,12 @@ run() {
 
 run "Build (Rust)" cargo build --workspace --locked
 run "Build (web interface)" bun run --cwd src-web build
-run "Test (Rust)" cargo test --workspace --locked
+# The Rust tests run with a developer's git configuration in reach that changes what a write does,
+# so a test that reads it again fails here rather than only on a machine whose configuration
+# differs. libgit2 reads it at the XDG level; a global ~/.gitconfig still overrides its keys, so
+# CI, which has none of them, is where this holds fully.
+run "Test (Rust)" env XDG_CONFIG_HOME="$ROOT/crates/git/tests/developer-config" \
+  cargo test --workspace --locked
 run "Test (web interface)" bun test src-web
 run "Format check" cargo fmt --all --check
 run "Lint (clippy)" cargo clippy --workspace --all-targets --locked -- -D warnings

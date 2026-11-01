@@ -1,0 +1,19 @@
+# A developer's git configuration that changes what a write does, put where libgit2 looks for one
+# while scripts/check-build.sh runs the Rust tests (XDG_CONFIG_HOME). The tests pass only where it
+# stays out of their reach: each key makes a write or a read differ from one on the repository's
+# own configuration.
+[core]
+	autocrlf = true
+[merge]
+	conflictStyle = zdiff3
+[pull]
+	rebase = true
+[init]
+	defaultBranch = trunk
+[user]
+	name = Developer
+	email = developer@example.invalid
+[commit]
+	gpgSign = true
+[tag]
+	gpgSign = true
