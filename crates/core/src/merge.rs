@@ -32,6 +32,21 @@ pub struct MergeBlock {
     pub base_in_file: bool,
 }
 
+/// Why the merge editor opens no conflicted file: a side deleted, a link, a submodule, or no
+/// text, or the file no longer conflicted or no longer a file. It names the file by its path below
+/// the repository alone, so every front end shows it as it stands, the browser's included
+/// (ADR-0031, ADR-0037).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NotOpened(pub String);
+
+impl std::fmt::Display for NotOpened {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
+impl std::error::Error for NotOpened {}
+
 /// Whether a line, its line ending left off, is one of the markers `git` writes into a
 /// conflicted file.
 pub fn is_marker(line: &str) -> bool {
