@@ -12,23 +12,23 @@
   "containerEnv": {
     "CLAUDE_CONFIG_DIR": "/home/vscode/.claude"
   },
-  // The host's agent config and GitHub CLI login, so a login made on either side holds on both and
-  // survives a rebuild. HOME is set on Linux and macOS, USERPROFILE on Windows; exactly one of the
-  // two is non-empty, so concatenating both yields the home directory on every host (the pattern
-  // the Dev Containers documentation recommends). gh reads its token from this directory only when
-  // the host keeps it there, not in the system keyring: log in on the host with
-  // `gh auth login --insecure-storage`. On Windows the host's gh keeps its config under %AppData%,
-  // so the directory starts empty and holds the container's own login.
+  // The host's agent config and GitHub CLI config, so a login survives a rebuild. HOME is set on
+  // Linux and macOS, USERPROFILE on Windows; exactly one of the two is non-empty, so concatenating
+  // both yields the home directory on every host (the pattern the Dev Containers documentation
+  // recommends). The container shares the host's gh login only where the host keeps the token in
+  // this directory rather than its keyring, and on Windows not at all, whose gh keeps its config
+  // under %AppData%: the README's "Dev Container" section, and SECURITY.md for what the container
+  // can then reach.
   "mounts": [
     "source=${localEnv:HOME}${localEnv:USERPROFILE}/.claude,target=/home/vscode/.claude,type=bind",
     "source=${localEnv:HOME}${localEnv:USERPROFILE}/.config/gh,target=/home/vscode/.config/gh,type=bind"
   ],
 
   // Runs on the host before the container is created. Ensures the bind-mount sources exist, so
-  // Docker neither refuses the mount nor creates them root-owned (which breaks credential writes
-  // inside the container). Written to work in both a POSIX shell and cmd.exe: one plain `mkdir`
-  // with the parents listed first (cmd.exe knows no `-p`), and `|| exit 0` so an already existing
-  // directory — an error for both shells — does not abort the container build.
+  // Docker does not refuse the mount. Written to work in both a POSIX shell and cmd.exe: one plain
+  // `mkdir`, the parent listed before its child for the POSIX shell (cmd.exe makes the parents
+  // itself but knows no `-p`), and `|| exit 0` so an already existing directory — an error for
+  // both shells — does not abort the container build.
   "initializeCommand": "mkdir \"${localEnv:HOME}${localEnv:USERPROFILE}/.claude\" \"${localEnv:HOME}${localEnv:USERPROFILE}/.config\" \"${localEnv:HOME}${localEnv:USERPROFILE}/.config/gh\" || exit 0",
 
   // Runs inside the container on every start, so the settings are set again should a session
