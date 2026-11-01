@@ -122,6 +122,17 @@ fn examples() -> Vec<Write> {
             },
             take: Take::AsEdited,
         },
+        Write::SaveMerge {
+            path: s("f"),
+            conflict: Conflict {
+                path: s("f"),
+                ancestor: None,
+                ours: Some(s("o")),
+                theirs: Some(s("t")),
+            },
+            opened: s("b"),
+            result: s("both\n"),
+        },
         Write::Continue {
             operation: Operation::CherryPick,
             head: s("h"),

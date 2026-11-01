@@ -170,6 +170,7 @@ describe('the JSON the core takes', () => {
     revert: { branch: true, tip: true, commit: true },
     reset: { branch: true, tip: true, commit: true, mode: true },
     resolve: { path: true, conflict: true, take: true },
+    saveMerge: { path: true, conflict: true, opened: true, result: true },
     continue: { operation: true, head: true },
     abort: { operation: true, head: true },
   };

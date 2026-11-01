@@ -12,21 +12,13 @@ use crate::refs::{conflicts_of, stopped};
 use anyhow::{Context, Result, bail};
 use git2::build::CheckoutBuilder;
 use git2::{
-    ErrorCode, IndexEntry, Oid, Repository, RepositoryState, ResetType, Status, StatusOptions,
+    ErrorCode, IndexConflict, IndexEntry, ObjectType, Oid, Repository, RepositoryState, ResetType,
+    Status, StatusOptions,
 };
+use ocelli_core::merge::{MergeFile, as_text, blocks_with_bases, has_marker, with_line_endings};
 use ocelli_core::model::{Conflict, Operation};
 use ocelli_core::port::Take;
 use std::path::{Path, PathBuf};
-
-/// Whether a line is one of the markers `git` writes into a conflicted file.
-fn is_marker(line: &str) -> bool {
-    ["<<<<<<< ", ">>>>>>> ", "||||||| "]
-        .iter()
-        .any(|m| line.starts_with(m))
-        || line == "======="
-        || line == "<<<<<<<"
-        || line == ">>>>>>>"
-}
 
 /// Resolves the conflicted file `path`, still in the conflict `expected`, by writing the side
 /// `take` names, or the working directory's file as the developer edited it, to the index, as
@@ -51,19 +43,11 @@ pub(crate) fn resolve(
     let there = file.symlink_metadata().ok();
     match take {
         Take::Ours | Take::Theirs => {
-            let conflict = index
-                .conflicts()?
-                .flatten()
-                .find(|c| {
-                    let any = c.our.as_ref().or(c.their.as_ref()).or(c.ancestor.as_ref());
-                    any.is_some_and(|e| e.path == path.as_bytes())
-                })
-                .context("the conflict is gone from the index")?;
-            let git2::IndexConflict {
+            let IndexConflict {
                 ancestor,
                 our: ours,
                 their: theirs,
-            } = conflict;
+            } = conflict_at(&index, path)?;
             let side = if take == Take::Ours { &ours } else { &theirs };
             let side = side.as_ref().map(|e| IndexEntry {
                 flags: e.flags & !STAGE_MASK,
@@ -94,12 +78,7 @@ pub(crate) fn resolve(
                         .and_then(|w| w.map_err(anyhow::Error::from));
                     if let Err(e) = written {
                         // The file could not be written: the conflict stays as it was.
-                        let mut index = repo.index()?;
-                        index.remove_path(Path::new(path))?;
-                        for staged in [&ancestor, &ours, &theirs].into_iter().flatten() {
-                            index.add(staged)?;
-                        }
-                        index.write()?;
+                        restore(repo, path, [&ancestor, &ours, &theirs])?;
                         return Err(e);
                     }
                 }
@@ -118,7 +97,7 @@ pub(crate) fn resolve(
         Take::AsEdited => {
             if there.as_ref().is_some_and(|m| m.is_file())
                 && let Ok(text) = std::fs::read(&file)
-                && String::from_utf8_lossy(&text).lines().any(is_marker)
+                && has_marker(&String::from_utf8_lossy(&text))
             {
                 bail!("{path} still holds a conflict marker: finish editing it first");
             }
@@ -131,6 +110,196 @@ pub(crate) fn resolve(
         }
     }
     Ok(())
+}
+
+/// The stages of the conflicted file `path` in `index`.
+fn conflict_at(index: &git2::Index, path: &str) -> Result<IndexConflict> {
+    index
+        .conflicts()?
+        .flatten()
+        .find(|c| {
+            let any = c.our.as_ref().or(c.their.as_ref()).or(c.ancestor.as_ref());
+            any.is_some_and(|e| e.path == path.as_bytes())
+        })
+        .context("the conflict is gone from the index")
+}
+
+/// Puts the conflict of `path` back into the index as its stages were.
+fn restore(repo: &Repository, path: &str, stages: [&Option<IndexEntry>; 3]) -> Result<()> {
+    let mut index = repo.index()?;
+    index.remove_path(Path::new(path))?;
+    for staged in stages.into_iter().flatten() {
+        index.add(staged)?;
+    }
+    index.write()?;
+    Ok(())
+}
+
+/// Whether both sides of `conflict`, ours and theirs, are files holding text, the conflicts the
+/// merge editor opens (ADR-0031): neither deleted, a link, or a submodule, and neither holding a
+/// NUL byte or anything but UTF-8.
+pub(crate) fn editable(repo: &Repository, conflict: &IndexConflict) -> bool {
+    [&conflict.our, &conflict.their].into_iter().all(|side| {
+        side.as_ref().is_some_and(|e| {
+            matches!(e.mode, 0o100644 | 0o100755)
+                && repo
+                    .find_blob(e.id)
+                    .is_ok_and(|b| as_text(b.content()).is_some())
+        })
+    })
+}
+
+/// The working directory's conflicted file `path`, read for the merge editor with the bytes it
+/// holds: refused where the editor does not open it.
+fn opened_file(repo: &Repository, path: &str) -> Result<(PathBuf, Vec<u8>)> {
+    let index = repo.index()?;
+    let conflict =
+        conflict_at(&index, path).with_context(|| format!("{path} is not conflicted"))?;
+    if !editable(repo, &conflict) {
+        bail!(
+            "the merge editor opens a file whose sides both hold text: resolve {path} by ours, \
+             theirs, or as edited"
+        );
+    }
+    let root = repo
+        .workdir()
+        .context("a bare repository has no working directory")?;
+    within(root, Path::new(path), &|_| false)?;
+    let file = root.join(path);
+    // A link is looked at, never followed: what it points to may lie outside the repository.
+    if !file.symlink_metadata().is_ok_and(|m| m.is_file()) {
+        bail!("{path} is no file in the working directory: resolve it by ours or theirs");
+    }
+    let bytes = std::fs::read(&file)?;
+    Ok((file, bytes))
+}
+
+/// Reads the conflicted file `path` for the merge editor: its text as the working directory
+/// holds it, edits made since included, its blob id, and its blocks, each with a base where the
+/// file or a merge of the index's stages in memory holds one (ADR-0031).
+pub(crate) fn load_merge_file(repo_path: &Path, path: &str) -> Result<MergeFile> {
+    crate::guard::repository_path(path)?;
+    let repo = crate::confine::open(repo_path)?;
+    crate::guard::named_exactly(&repo, path)?;
+    let (_, bytes) = opened_file(&repo, path)?;
+    let text = as_text(&bytes).with_context(|| {
+        format!("{path} no longer holds text in the working directory: resolve it as edited")
+    })?;
+    Ok(MergeFile {
+        text: text.to_string(),
+        blob: Oid::hash_object(ObjectType::Blob, &bytes)?.to_string(),
+        blocks: blocks_with_bases(text, &merged_in_memory(&repo, path).unwrap_or_default()),
+    })
+}
+
+/// The index's three stages of `path` merged in memory in the `diff3` style, as libgit2 merges
+/// them with no configuration read; empty where the index holds no base or the merge is no text,
+/// which gives no block a base. A merge that fails, a stage's blob missing, leaves the bases out
+/// rather than the editor closed.
+fn merged_in_memory(repo: &Repository, path: &str) -> Result<String> {
+    let IndexConflict {
+        ancestor,
+        our,
+        their,
+    } = conflict_at(&repo.index()?, path)?;
+    let (Some(ancestor), Some(ours), Some(theirs)) = (ancestor, our, their) else {
+        return Ok(String::new());
+    };
+    let mut options = git2::MergeFileOptions::new();
+    options.style_diff3(true);
+    let merged = repo.merge_file_from_index(&ancestor, &ours, &theirs, Some(&mut options))?;
+    Ok(as_text(merged.content()).unwrap_or_default().to_string())
+}
+
+/// Saves the merge editor's `result` as the resolution of `path`, still in the conflict
+/// `expected` and its file still the blob `opened`: the working directory gets the result, its
+/// line endings as the file had them, through libgit2's checkout, and the index what `git add`
+/// stages for the file holding it (ADR-0031).
+pub(crate) fn save_merge(
+    repo: &Repository,
+    path: &str,
+    expected: &Conflict,
+    opened: &str,
+    result: &str,
+) -> Result<()> {
+    crate::guard::named_exactly(repo, path)?;
+    let mut index = repo.index()?;
+    if conflicts_of(&index).iter().find(|c| c.path == path) != Some(expected) {
+        bail!("{path} no longer conflicts as it was shown: reload to see it as it is");
+    }
+    let (_, bytes) = opened_file(repo, path)?;
+    if Oid::hash_object(ObjectType::Blob, &bytes)?.to_string() != opened {
+        bail!(
+            "{path} changed in the working directory since the merge editor opened it: open it again"
+        );
+    }
+    if has_marker(result) {
+        bail!("{path} still holds a conflict marker: finish editing it first");
+    }
+    let written = with_line_endings(&String::from_utf8_lossy(&bytes), result);
+    let IndexConflict {
+        ancestor,
+        our: ours,
+        their: theirs,
+    } = conflict_at(&index, path)?;
+    let side = ours.as_ref().context("the conflict has no side of ours")?;
+    // The file as it is: its mode the working directory's, which `git add` takes, not ours.
+    let entry = IndexEntry {
+        flags: side.flags & !STAGE_MASK,
+        path: side.path.clone(),
+        id: repo.blob(written.as_bytes())?,
+        file_size: u32::try_from(written.len()).unwrap_or(u32::MAX),
+        mode: mode_of(repo, path, side.mode),
+        ..*side
+    };
+    index.conflict_remove(Path::new(path))?;
+    index.add(&entry)?;
+    index.write()?;
+    // The result as it stands, no filter between: `git add` below cleans it as it cleans a file.
+    let mut checkout = CheckoutBuilder::new();
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "the pattern matching is turned off, and the path is a conflict libgit2 read"
+    )]
+    checkout
+        .force()
+        .disable_filters(true)
+        .disable_pathspec_match(true)
+        .path(path);
+    let checked_out = crate::workdir::checkout_index(repo, &mut index, &mut checkout)
+        .and_then(|w| w.map_err(anyhow::Error::from));
+    // The conflict back as it was, so that `git add` meets the stages it meets: the file it
+    // stages is cleaned against them, a CRLF the result was written with taken back to LF.
+    restore(repo, path, [&ancestor, &ours, &theirs])?;
+    checked_out?;
+    let mut index = repo.index()?;
+    index.add_path(Path::new(path))?;
+    index.write()?;
+    Ok(())
+}
+
+/// The mode of the working directory's file at `path`, as `git add` stages it: executable where
+/// the file is and `core.fileMode` reads it, else `ours`'s.
+fn mode_of(repo: &Repository, path: &str, ours: u32) -> u32 {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let file_mode = repo
+            .config()
+            .and_then(|c| c.get_bool("core.fileMode"))
+            .unwrap_or(true);
+        if let (true, Some(root)) = (file_mode, repo.workdir())
+            && let Ok(meta) = root.join(path).symlink_metadata()
+        {
+            return if meta.permissions().mode() & 0o111 != 0 {
+                0o100755
+            } else {
+                0o100644
+            };
+        }
+    }
+    let _ = (repo, path);
+    ours
 }
 
 /// Refuses a `path` of the working directory below a link or a file, other than one `its_own`

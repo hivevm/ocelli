@@ -8,6 +8,7 @@ use crate::app::{App, Focus, Modal, StashPrompt, TagPrompt};
 use crate::chips::{Planned, RefKind, chip_width, chips, plan};
 use crate::diffsplit::{CellKind, SplitRow, split_rows};
 use crate::files::{FileRow, FileView};
+use crate::merge::{LineKind, MergeEditor};
 use crate::raster::{self, Glyphs, rasterize};
 use crate::sidebar::{self, Look, RailRow, RowKind};
 use crate::theme::{Palette, lane, palette};
@@ -55,6 +56,11 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
         Constraint::Length(1),
     ])
     .areas(frame.area());
+    if let Some(editor) = app.merge.as_mut() {
+        draw_merge(frame, editor, p, title.union(main));
+        draw_status(frame, app, p, status);
+        return;
+    }
     let side_width = if app.side.minimised {
         RAIL_WIDTH
     } else {
@@ -927,6 +933,9 @@ fn draw_dialog(frame: &mut Frame, p: &Palette, main: Rect, title: String, lines:
 /// [`STATUS_ROOM`] in the width the layout is designed for, so a hint names the keys that matter
 /// most there and groups the rest; search is on the title bar and is not repeated here.
 fn hints(app: &App) -> &'static str {
+    if app.merge.is_some() {
+        return "M-o/t/b · M-n/p · M-a base · ^S save · ^U undo · Esc leave";
+    }
     match &app.modal {
         Some(Modal::Open(_)) => return "type a path",
         Some(Modal::Confirm(_)) => return "y goes ahead · any other key keeps it",
@@ -936,7 +945,7 @@ fn hints(app: &App) -> &'static str {
         Some(Modal::Branch { .. }) => return "type the branch's name",
         Some(Modal::Reset { .. }) => return "Tab soft/mixed/hard · Enter reset",
         Some(Modal::Conflicts { .. }) => {
-            return "j/k move · o/t/e resolve · c continue · A abort";
+            return "j/k move · o/t/e resolve · m edit · c continue · A abort";
         }
         None => {}
     }
@@ -976,14 +985,105 @@ fn stopped_note(app: &App) -> String {
     }
 }
 
+/// The merge editor full screen, in one column at any width (ADR-0031): the path and what the
+/// editor says, the text with each block's lines set apart, ours above theirs, and the base of
+/// the block under the cursor beneath it while open.
+fn draw_merge(frame: &mut Frame, editor: &mut MergeEditor, p: &Palette, area: Rect) {
+    let base = editor
+        .base_open
+        .then(|| editor.base_here().map(str::to_string))
+        .flatten();
+    let base_rows = base.as_ref().map_or(0, |b| {
+        let rows = u16::try_from(b.lines().count()).unwrap_or(u16::MAX);
+        rows.saturating_add(2).min(area.height / 2)
+    });
+    let [head, text, below] = Layout::vertical([
+        Constraint::Length(1),
+        Constraint::Fill(1),
+        Constraint::Length(base_rows),
+    ])
+    .areas(area);
+
+    let said = if editor.leaving {
+        Span::styled(
+            " Leave and discard the result not saved? y leaves · any other key stays ",
+            Style::new().fg(p.amber).add_modifier(Modifier::BOLD),
+        )
+    } else {
+        Span::styled(
+            editor.said.clone().unwrap_or_default(),
+            Style::new().fg(p.red),
+        )
+    };
+    let [path, note] =
+        Layout::horizontal([Constraint::Fill(1), Constraint::Length(said.width() as u16)])
+            .areas(head);
+    frame.render_widget(
+        Paragraph::new(Line::from(vec![
+            Span::styled(
+                " Merge ",
+                Style::new().fg(p.accent).add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(editor.path.clone(), Style::new().fg(p.text_bright)),
+        ]))
+        .style(Style::new().bg(p.bg_chrome)),
+        path,
+    );
+    frame.render_widget(
+        Paragraph::new(Line::from(said)).style(Style::new().bg(p.bg_chrome)),
+        note,
+    );
+
+    let kinds = editor.line_kinds();
+    let area_text = &mut editor.area;
+    area_text.clear_custom_highlight();
+    for (row, kind) in kinds {
+        let style = match kind {
+            LineKind::Marker => Style::new().fg(p.text_muted).bg(p.bg_chrome),
+            LineKind::Ours => Style::new().bg(p.add_bg),
+            LineKind::Theirs => Style::new().bg(p.theirs_bg),
+        };
+        let end = area_text.lines()[row].chars().count();
+        area_text.custom_highlight(((row, 0), (row, end)), style, 1);
+    }
+    area_text.set_style(Style::new().bg(p.bg).fg(p.text));
+    area_text.set_cursor_line_style(Style::new());
+    area_text.set_line_number_style(Style::new().fg(p.text_dim).bg(p.bg_chrome));
+    frame.render_widget(&*area_text, text);
+
+    if let Some(base) = base {
+        frame.render_widget(
+            Paragraph::new(base)
+                .wrap(Wrap { trim: false })
+                .block(
+                    Block::bordered()
+                        .title(" Base ")
+                        .border_style(Style::new().fg(p.amber)),
+                )
+                .style(Style::new().bg(p.base_bg).fg(p.text)),
+            below,
+        );
+    }
+}
+
 /// The conflicted files of the operation in progress, the cursor on `selected` (ADR-0031).
 fn draw_conflicts(frame: &mut Frame, app: &App, selected: usize, p: &Palette, main: Rect) {
     let Some(stopped) = app.data.as_ref().and_then(|d| d.in_progress.as_ref()) else {
         return;
     };
+    // Why the last key did nothing, here rather than in the status bar, which an 80-column
+    // terminal gives no room beside the stopped operation's note.
+    let said: Vec<String> = app.notice.as_deref().map_or_else(Vec::new, |said| {
+        wrapped(
+            said,
+            usize::from(main.width.min(80).saturating_sub(2)).max(1),
+        )
+    });
     // The dialog opens a third down; the rows below it hold the list, a window that follows the
-    // selection where the list is longer.
-    let room = usize::from((main.height - main.height / 3).saturating_sub(3)).max(1);
+    // selection where the list is longer, and the reason beneath it.
+    let room = usize::from((main.height - main.height / 3).saturating_sub(3))
+        .saturating_sub(said.len())
+        .max(1);
     let first = selected.saturating_sub(room - 1);
     let mut lines: Vec<Line> = stopped
         .conflicts
@@ -1006,16 +1106,40 @@ fn draw_conflicts(frame: &mut Frame, app: &App, selected: usize, p: &Palette, ma
             Style::new().fg(p.text_muted),
         ));
     }
+    for line in said {
+        lines.push(Line::styled(line, Style::new().fg(p.red)));
+    }
     lines.push(Line::styled(
-        "o ours · t theirs · e as edited · c continue · A abort · Esc close",
+        "o ours · t theirs · e as edited · m edit · c continue · A abort · Esc close",
         Style::new().fg(p.text_dim),
     ));
     let title = format!(" {} in progress ", stopped.operation.name());
     draw_dialog(frame, p, main, title, lines);
 }
 
-/// The right of the status bar: the hint, then the theme and quit keys.
+/// `text` broken at its whitespace, line breaks included, into lines at most `width` cells wide
+/// on the terminal; a word wider than that stands on a line of its own and is cut there.
+fn wrapped(text: &str, width: usize) -> Vec<String> {
+    let cells = |s: &str| Span::raw(s).width();
+    let mut lines: Vec<String> = Vec::new();
+    for word in text.split_whitespace() {
+        match lines.last_mut() {
+            Some(line) if cells(line) + 1 + cells(word) <= width => {
+                line.push(' ');
+                line.push_str(word);
+            }
+            _ => lines.push(word.to_string()),
+        }
+    }
+    lines
+}
+
+/// The right of the status bar: the hint, then the theme and quit keys, which the merge editor
+/// takes as text.
 fn status_keys(app: &App, p: &Palette) -> Line<'static> {
+    if app.merge.is_some() {
+        return Line::styled(format!("{} ", hints(app)), Style::new().fg(p.text_dim));
+    }
     Line::from(vec![
         Span::styled(hints(app), Style::new().fg(p.text_dim)),
         Span::styled("  T ", Style::new().fg(p.accent)),
@@ -1065,6 +1189,162 @@ mod tests {
             .collect()
     }
 
+    /// The merge editor on a file of two blocks, the second's base found in memory.
+    fn merge_editor() -> MergeEditor {
+        let text = "a\n<<<<<<< HEAD\nours\n=======\ntheirs\n>>>>>>> side\nz\n";
+        let merged =
+            "a\n<<<<<<< ours\nours\n||||||| base\nthe base\n=======\ntheirs\n>>>>>>> t\nz\n";
+        let conflict = ocelli_core::model::Conflict {
+            path: "src/f.rs".into(),
+            ancestor: Some("a".into()),
+            ours: Some("o".into()),
+            theirs: Some("t".into()),
+        };
+        MergeEditor::open(
+            conflict,
+            ocelli_core::merge::MergeFile {
+                text: text.into(),
+                blob: "b".into(),
+                blocks: ocelli_core::merge::blocks_with_bases(text, merged),
+            },
+        )
+    }
+
+    #[test]
+    // Verifies: ADR-0031, ADR-0024, G-15, G-18
+    fn the_merge_editor_fills_an_80_column_terminal_in_one_column_its_sides_in_the_theme() {
+        use ratatui::crossterm::event::{KeyEvent, KeyModifiers};
+        for theme in [crate::theme::Theme::Dark, crate::theme::Theme::Light] {
+            let mut app = loaded_app();
+            app.theme = theme;
+            app.merge = Some(merge_editor());
+            let mut terminal = Terminal::new(TestBackend::new(80, 24)).unwrap();
+            terminal.draw(|f| draw(f, &mut app)).unwrap();
+            let buf = terminal.backend().buffer().clone();
+            let rows: Vec<String> = (0..24)
+                .map(|y| (0..80).map(|x| buf[(x, y)].symbol()).collect())
+                .collect();
+            assert!(rows[0].contains("Merge src/f.rs"), "{}", rows[0]);
+            let row_of = |text: &str| rows.iter().position(|r| r.contains(text)).unwrap();
+            let (ours, theirs) = (row_of("ours"), row_of("theirs"));
+            assert!(ours < theirs, "ours above theirs");
+            // Each side's line on its own background, as the theme names it; no graph beside.
+            let p = palette(theme);
+            let bg_at = |row: usize, text: &str| {
+                let x = rows[row].find(text).unwrap();
+                let x = rows[row][..x].chars().count() as u16;
+                buf[(x, row as u16)].bg
+            };
+            assert_eq!(bg_at(ours, "ours"), p.add_bg);
+            assert_eq!(bg_at(theirs, "theirs"), p.theirs_bg);
+            assert!(
+                !rows.iter().any(|r| r.contains("main")),
+                "the panes are covered"
+            );
+            assert!(
+                !rows.iter().any(|r| r.contains("the base")),
+                "the base is folded"
+            );
+            app.on_key(KeyEvent::new(KeyCode::Char('a'), KeyModifiers::ALT));
+            terminal.draw(|f| draw(f, &mut app)).unwrap();
+            let buf = terminal.backend().buffer().clone();
+            let rows: Vec<String> = (0..24)
+                .map(|y| (0..80).map(|x| buf[(x, y)].symbol()).collect())
+                .collect();
+            let base = rows.iter().position(|r| r.contains("the base")).unwrap();
+            assert!(base > theirs, "the base opens beneath the text");
+            let x = rows[base].find("the base").unwrap();
+            let x = rows[base][..x].chars().count() as u16;
+            assert_eq!(buf[(x, base as u16)].bg, p.base_bg);
+        }
+    }
+
+    #[test]
+    // Verifies: ADR-0031, G-18
+    fn the_merge_editor_s_keys_fit_an_80_column_terminal_beside_the_status_text() {
+        let mut app = loaded_app();
+        app.merge = Some(merge_editor());
+        let keys = status_keys(&app, palette(app.theme));
+        assert!(
+            keys.width() + usize::from(STATUS_ROOM) <= 80,
+            "{} columns: {}",
+            keys.width(),
+            hints(&app)
+        );
+        let rows = screen(&mut app, 80, 24);
+        assert!(rows[23].contains("Esc leave"), "{}", rows[23]);
+    }
+
+    #[test]
+    // Verifies: ADR-0031, G-15, G-18
+    fn why_m_opens_nothing_shows_in_the_conflicts_on_an_80_column_terminal() {
+        let mut app = loaded_app();
+        let conflict = ocelli_core::model::Conflict {
+            path: "blob.bin".into(),
+            ancestor: Some("a".into()),
+            ours: Some("o".into()),
+            theirs: Some("t".into()),
+        };
+        app.data.as_mut().unwrap().in_progress = Some(ocelli_core::model::InProgress {
+            operation: ocelli_core::model::Operation::Merge,
+            conflicts: vec![conflict],
+            editable: Vec::new(),
+            head: "d".into(),
+        });
+        press(&mut app, KeyCode::Char('!'));
+        press(&mut app, KeyCode::Char('m'));
+        let shown = screen(&mut app, 80, 24).join("\n");
+        // Wrapped within the dialog at 80 columns.
+        assert!(shown.contains("resolve blob.bin by"), "{shown}");
+        assert!(shown.contains("o, t, or e"), "{shown}");
+        press(&mut app, KeyCode::Char('j'));
+        let shown = screen(&mut app, 80, 24).join("\n");
+        assert!(
+            !shown.contains("resolve blob.bin"),
+            "until the next key: {shown}"
+        );
+    }
+
+    #[test]
+    fn a_reason_wraps_at_whitespace_within_the_cells_it_takes() {
+        assert_eq!(wrapped("ab cd ef", 5), ["ab cd", "ef"]);
+        assert_eq!(wrapped("abcdefg h", 3), ["abcdefg", "h"]);
+        assert_eq!(wrapped("aaaa  bb\ncc", 4), ["aaaa", "bb", "cc"]);
+        // A wide character takes two cells.
+        assert_eq!(wrapped("日本 語", 4), ["日本", "語"]);
+        assert!(wrapped("", 4).is_empty());
+    }
+
+    #[test]
+    // Verifies: ADR-0031, G-18
+    fn a_reason_beneath_a_long_list_of_conflicts_keeps_the_keys_and_the_border_on_screen() {
+        let mut app = loaded_app();
+        let conflicts = (0..40)
+            .map(|i| ocelli_core::model::Conflict {
+                path: format!("file{i:02}"),
+                ancestor: Some("a".into()),
+                ours: Some("o".into()),
+                theirs: Some("t".into()),
+            })
+            .collect();
+        app.data.as_mut().unwrap().in_progress = Some(ocelli_core::model::InProgress {
+            operation: ocelli_core::model::Operation::Merge,
+            conflicts,
+            editable: Vec::new(),
+            head: "d".into(),
+        });
+        press(&mut app, KeyCode::Char('!'));
+        press(&mut app, KeyCode::Char('m'));
+        let rows = screen(&mut app, 80, 24);
+        let shown = rows.join("\n");
+        assert!(shown.contains("resolve file00 by"), "{shown}");
+        assert!(shown.contains("A abort · Esc close"), "{shown}");
+        assert!(
+            rows[22].starts_with('╰'),
+            "the border above the status bar: {shown}"
+        );
+    }
+
     #[test]
     fn a_long_list_of_conflicts_scrolls_with_the_selection() {
         let mut app = loaded_app();
@@ -1079,6 +1359,7 @@ mod tests {
         app.data.as_mut().unwrap().in_progress = Some(ocelli_core::model::InProgress {
             operation: ocelli_core::model::Operation::Merge,
             conflicts,
+            editable: Vec::new(),
             head: "d".into(),
         });
         press(&mut app, KeyCode::Char('!'));
@@ -1528,6 +1809,10 @@ mod tests {
                 }),
             ),
             ("the conflicts", modal(Modal::Conflicts { selected: 0 })),
+            (
+                "the merge editor",
+                with(&|app: &mut App| app.merge = Some(merge_editor())),
+            ),
             (
                 "the search field",
                 with(&|app: &mut App| app.search.editing = true),

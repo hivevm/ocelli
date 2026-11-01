@@ -75,6 +75,10 @@ golden path and the test pattern an agent copies from are named here.
   ([ADR-0022](adr/0022-desktop-host-answers-what-the-core-decides.md)).
   `load.rs` runs a load session through the port, and a `LoadSession` is what a front end keeps of
   it, its `History` and its status line, for both front ends and the measurement alike.
+  `merge.rs` finds a conflicted file's blocks for the merge editor of G-15, once for every front
+  end, each with its base from the file or from a merge of the index's stages in memory, and
+  tells a marker line and text from anything else
+  ([ADR-0031](adr/0031-writes-what-git-writes.md)).
 - **Git adapter** (`crates/git`, `ocelli-git`) — `GitReader`, the repository port implemented with
   git2: the main line's tip, the history in chunks of 3 000 commits, the first with the stash and
   working-directory nodes, the refs the sidebar lists with whether each local branch is merged,
@@ -84,7 +88,9 @@ golden path and the test pattern an agent copies from are named here.
   [ADR-0018](adr/0018-synthetic-nodes-in-the-first-chunk.md)); the walk runs in commit-date order
   and turns libgit2's object cache off for the whole process. `operations.rs` holds the history
   operations of G-13 from a clean tree, stopping on a conflict in git's own state, and
-  `conflicts.rs` resolves such a conflict file by file and continues or aborts the operation;
+  `conflicts.rs` resolves such a conflict file by file, reads one whose sides both hold text for
+  the merge editor and saves its result as `git add` stages the file, and continues or aborts the
+  operation;
   the refs carry the operation in progress with its conflicts, read in `refs.rs` from git's
   state whoever started it. `GitWriter` implements the writer port in `write.rs`, which
   dispatches each write and holds the tag, index, commit, and branch writes, the stash's in
@@ -138,8 +144,9 @@ golden path and the test pattern an agent copies from are named here.
   `writes.rs` holds with the requests the keys build, as `writes.ts` does for the web interface,
   showing a
   transfer's progress in the status line and stopping a fetch or a pull on `Esc`, lists an
-  operation in progress with its conflicts, resolved, continued, or aborted from there, and keeps
-  its view state in a file
+  operation in progress with its conflicts, resolved, continued, or aborted from there, opens a
+  conflicted file in the merge editor of `merge.rs` on `tui-textarea-2`, its blocks the core's,
+  and keeps its view state in a file
   ([ADR-0029](adr/0029-terminal-application-ratatui.md), [ADR-0030](adr/0030-cli-state-file.md)).
 - **Measurement** (`crates/measure`, `ocelli-measure`) — a command that lays out a repository as
   the front ends do and measures a quality goal on it: the number of edge crossings for Q-1, next
@@ -249,8 +256,11 @@ golden path and the test pattern an agent copies from are named here.
   its ref chips' switch and delete, its merge, rebase, cherry-pick, revert, and reset onto the
   checked-out branch, and the working-directory node's stage toggles and commit form,
   the diff overlay, the search field, the banner of an operation in progress with its conflicted
-  files, the dialogs that describe a stash and confirm a write that discards work, the toolbar's
-  Fetch, Pull, and Push, which give way to a Cancel while a fetch or a pull runs, and themes;
+  files and the merge editor over the commit graph, CodeMirror 6, whose decisions are in
+  `mergeEditor.ts` and its blocks' state, a side taken undone with the text, in `mergeBlocks.ts`,
+  the dialogs that describe a stash and confirm a write that discards work,
+  the toolbar's Fetch, Pull, and Push, which give way to a Cancel while a fetch or a pull runs,
+  and themes;
   `writes.ts` holds the writes it hands the host, one at a time; the toolbar draws the transfers
   the host sends with the refs and the commit detail the history operations it sends with the
   selection, and `refChips.ts` decides which ref each chip switches to or deletes. It reaches

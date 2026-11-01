@@ -17,6 +17,7 @@ mod workdir;
 mod write;
 
 use anyhow::Result;
+use ocelli_core::merge::MergeFile;
 use ocelli_core::model::{CommitData, DiffLine, FileChange, RepoRefs};
 use ocelli_core::port::{RepositoryReader, RepositoryWriter, Write};
 use std::path::Path;
@@ -61,6 +62,10 @@ impl RepositoryReader for GitReader {
 
     fn load_file_diff(&self, repo: &Path, sha: &str, file_path: &str) -> Result<Vec<DiffLine>> {
         git::load_file_diff(repo, sha, file_path)
+    }
+
+    fn load_merge_file(&self, repo: &Path, path: &str) -> Result<MergeFile> {
+        conflicts::load_merge_file(repo, path)
     }
 }
 

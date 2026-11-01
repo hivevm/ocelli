@@ -76,6 +76,7 @@ pub const COMMANDS: &[(&str, Answered)] = &[
     ("rows_of", Answered::ByBoth),
     ("select_commit", Answered::ByBoth),
     ("get_file_diff", Answered::ByBoth),
+    ("get_merge_file", Answered::ByBoth),
     ("write_discards", Answered::ByBoth),
     ("perform_write", Answered::ByBothAsWrite),
     // Stops the write that runs; with none running it stops nothing.
@@ -298,6 +299,19 @@ impl Host {
         .await
         .map_err(git)??;
         serde_json::to_string(&lines).map_err(git)
+    }
+
+    /// The conflicted file `path` read for the merge editor, as JSON, or why the editor does not
+    /// open it (ADR-0031).
+    pub async fn get_merge_file(&self, path: String) -> Result<String, HostError> {
+        let (repo_path, guard) = self.repo()?;
+        let file = tokio::task::spawn_blocking(move || {
+            checked(&guard, &repo_path)?;
+            GitReader.load_merge_file(&repo_path, &path).map_err(git)
+        })
+        .await
+        .map_err(git)??;
+        serde_json::to_string(&file).map_err(git)
     }
 
     /// What `write` discards, in the core's words for the question the web interface puts
@@ -579,6 +593,14 @@ mod tests {
         }
 
         fn load_file_diff(&self, _: &Path, _: &str, _: &str) -> anyhow::Result<Vec<DiffLine>> {
+            unimplemented!()
+        }
+
+        fn load_merge_file(
+            &self,
+            _: &Path,
+            _: &str,
+        ) -> anyhow::Result<ocelli_core::merge::MergeFile> {
             unimplemented!()
         }
     }

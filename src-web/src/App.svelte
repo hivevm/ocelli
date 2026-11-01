@@ -3,6 +3,7 @@
   import { onMount } from 'svelte';
   import GraphCanvas, { EMPTY_GRAPH_WIDTH, REFS_WIDTH, graphAreaWidth } from './GraphCanvas.svelte';
   import DiffViewer from './DiffViewer.svelte';
+  import MergeEditor from './MergeEditor.svelte';
   import SearchBox from './SearchBox.svelte';
   import CommitDetail from './CommitDetail.svelte';
   import RepoSidebar from './RepoSidebar.svelte';
@@ -19,8 +20,9 @@
   import { avatarsOn } from './avatars.ts';
   import type {
     NodeJson, FileChange, DiffLine, RepoRefs, Growth, RowWindow, Relative, Selected, Found,
-    LoadedRefs, Offered, Transfer, Transfers, RepoWritten,
+    LoadedRefs, Offered, Transfer, Transfers, RepoWritten, Conflict, MergeFile,
   } from './types.ts';
+  import { saveRequest, unsaved, unsavedLoss } from './mergeEditor.ts';
   import { applyTheme, storedTheme, type Theme } from './theme/palette.ts';
 
   // ── Theme ────────────────────────────────────────────────────────────────
@@ -338,6 +340,7 @@
   // ── Actions ────────────────────────────────────────────────────────────────
   async function browseRepo(): Promise<void> {
     notice = null;
+    if (!await mayLeaveMerge()) return;
     if (remote) {
       choosingFolder = true;
       return;
@@ -368,7 +371,7 @@
   /// folder picker triggers, so the graph, the refs and the label all follow.
   async function openRepoPath(path: string): Promise<void> {
     notice = null;
-    if (!path) return;
+    if (!path || !await mayLeaveMerge()) return;
     status = 'Opening…';
     await invoke('open_repo', { path }).catch((e: unknown) => { status = 'Error: ' + e; });
   }
@@ -408,12 +411,17 @@
 
   /** Puts the question before a write that discards work; resolves with the answer. */
   function ask(lost: string, write: Write): Promise<boolean> {
+    return askBefore(lost, actionLabel(write));
+  }
+
+  /** Puts the question before what discards `lost`, `action` the button that goes ahead. */
+  function askBefore(lost: string, action: string): Promise<boolean> {
     // A question still open is answered no: only one stands at a time.
     question?.answer(false);
     return new Promise(resolve => {
       question = {
         lost,
-        action: actionLabel(write),
+        action,
         answer: (confirmed) => {
           question = null;
           resolve(confirmed);
@@ -484,6 +492,50 @@
   function closeDiff(): void {
     diffFile = null;
     diffLines = [];
+  }
+
+  /** The conflicted file open in the merge editor, why its last save was refused, and whether a
+      save runs. */
+  let merging = $state<{
+    conflict: Conflict; file: MergeFile; refused: string | null; saving: boolean;
+  } | null>(null);
+  let mergeEditor = $state<{ current: () => string } | undefined>();
+
+  /** Opens the conflicted file `path` in the merge editor (ADR-0031), over the commit graph as
+      the diff opens; a file open in it already is left first, as Close leaves it. */
+  async function openMerge(path: string): Promise<void> {
+    const conflict = repoRefs?.inProgress?.conflicts.find(c => c.path === path);
+    if (!conflict || !await mayLeaveMerge()) return;
+    try {
+      const json = await invoke<string>('get_merge_file', { path });
+      closeDiff();
+      merging = { conflict, file: JSON.parse(json), refused: null, saving: false };
+    } catch (e) {
+      report(e);
+    }
+  }
+
+  /** Saves the result as the file's resolution and closes the editor; a refusal keeps it open
+      and says why. */
+  async function saveMerge(result: string): Promise<void> {
+    if (!merging || merging.saving) return;
+    merging.saving = true;
+    const refused = await performWrite(saveRequest(merging.conflict, merging.file, result));
+    if (!merging) return;
+    merging.saving = false;
+    if (refused === null) merging = null;
+    else merging.refused = refused;
+  }
+
+  /** Leaves the editor, asking first where the result is not saved (Q-7); resolves with whether
+      it was left. */
+  async function mayLeaveMerge(): Promise<boolean> {
+    if (!merging) return true;
+    const result = mergeEditor?.current() ?? merging.file.text;
+    if (unsaved(merging.file, result)
+        && !await askBefore(unsavedLoss(merging.conflict.path), 'Leave')) return false;
+    merging = null;
+    return true;
   }
 </script>
 
@@ -558,7 +610,7 @@
 
 <!-- ── Main content area ──────────────────────────────────────────────────── -->
 {#if repoRefs?.inProgress}
-  <InProgress stopped={repoRefs.inProgress} onWrite={performWrite} />
+  <InProgress stopped={repoRefs.inProgress} onWrite={performWrite} onEdit={openMerge} />
 {/if}
 <div id="main">
   <div id="top-pane">
@@ -592,7 +644,13 @@
           {headRef}
         />
 
-        {#if diffFile !== null}
+        {#if merging}
+          <div id="diff-overlay">
+            <MergeEditor bind:this={mergeEditor} path={merging.conflict.path} file={merging.file}
+                         refused={merging.refused} saving={merging.saving}
+                         onSave={saveMerge} onLeave={() => void mayLeaveMerge()} />
+          </div>
+        {:else if diffFile !== null}
           <div id="diff-overlay">
             {#if diffLoading}
               <div class="diff-loading">

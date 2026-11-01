@@ -32,6 +32,7 @@ pub fn run() {
             commands::browse_repo,
             commands::select_commit,
             commands::get_file_diff,
+            commands::get_merge_file,
             commands::read_window,
             commands::select_row,
             commands::selection,

@@ -29,6 +29,7 @@ export type Write =
   | { kind: 'revert'; branch: string; tip: string; commit: string }
   | { kind: 'reset'; branch: string; tip: string; commit: string; mode: ResetMode }
   | { kind: 'resolve'; path: string; conflict: Conflict; take: Take }
+  | { kind: 'saveMerge'; path: string; conflict: Conflict; opened: string; result: string }
   | { kind: 'continue'; operation: Operation; head: string }
   | { kind: 'abort'; operation: Operation; head: string };
 

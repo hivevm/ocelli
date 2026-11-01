@@ -315,6 +315,9 @@ impl RepoRefs {
 pub struct InProgress {
     pub operation: Operation,
     pub conflicts: Vec<Conflict>,
+    /// The paths of the conflicted files whose sides ours and theirs both hold text, which the
+    /// merge editor opens (ADR-0031).
+    pub editable: Vec<String>,
     /// The commit `HEAD` is at, which continuing and aborting expect to find.
     pub head: String,
 }
