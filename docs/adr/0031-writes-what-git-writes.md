@@ -155,8 +155,12 @@ editor of Ocelli's own whose result the writer takes as the developer's edit.
   included, and its blob id. The core finds its blocks, once for every front end: each run from
   a `<<<<<<<` line to its `>>>>>>>` line, ours before `=======` and theirs after it. A block's
   base is the file's `|||||||` section where it has one; else, where the index holds a base, the
-  block of a merge of the three stages in memory in the `diff3` style that holds the same ours
-  and theirs; else the block has none.
+  bases of the first run, one or more blocks in a row, of a merge of the three stages in memory
+  in the `diff3` style whose ours and theirs, joined by the lines between them and without the
+  lines both sides share at its ends, are the block's, joined by the same lines; else the block
+  has none. Blocks take the runs in their order, each run once. The `merge` style `git` writes by
+  default moves those shared lines out of a block and joins conflicts close together into one,
+  which the `diff3` style does not.
 - **What it shows.** One column at any width: the file's text with each block set apart, ours
   above theirs, its base folded until the developer opens it. No language is highlighted. The
   terminal application, whose text widget folds no lines, sets a base section the file holds
