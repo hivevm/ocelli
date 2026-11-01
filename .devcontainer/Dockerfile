@@ -1,16 +1,13 @@
 # syntax=docker/dockerfile:1
 
-# ============================================================
-# Stage 1: Prepare base container
-# ============================================================
-FROM mcr.microsoft.com/devcontainers/base:debian AS base
+FROM mcr.microsoft.com/devcontainers/base:debian
 
 # -- System packages ----------------------------------------------------------
 # Includes the Tauri 2 Linux build dependencies (webkit2gtk 4.1).
 # Building bundles (deb/AppImage) works in-container; running the GUI via
-# `bun tauri dev` needs host display forwarding.
+# `bun tauri dev` needs host display forwarding. ShellCheck lets the pre-push hook run the shell
+# lint CI runs; without it the lint skips itself locally.
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    curl \
     libwebkit2gtk-4.1-dev \
     libgtk-3-dev \
     libayatana-appindicator3-dev \
@@ -22,6 +19,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     xdg-utils \
     pkg-config \
     file \
+    shellcheck \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
@@ -32,15 +30,5 @@ RUN ln -s /usr/bin/clang /usr/local/bin/clang-cl \
     && printf '#!/bin/sh\nexec lld-link /lib "$@"\n' > /usr/local/bin/llvm-lib \
     && chmod 755 /usr/local/bin/llvm-lib
 
-
-# ============================================================
-# Stage 2: Prepare development container
-# ============================================================
-FROM base
-
-ARG USERNAME=vscode
-
-USER ${USERNAME}
-
-# Ensure all paths are available
-ENV PATH="/home/${USERNAME}/.local/bin:${PATH}"
+USER vscode
+ENV PATH="/home/vscode/.local/bin:${PATH}"
