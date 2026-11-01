@@ -75,8 +75,10 @@ the web interface of the remote server, and the terminal application.
 
 - The core finds a conflicted file's blocks once for every front end: from its marker lines in
   the styles `merge`, `diff3`, and `zdiff3`, each block's base from the file's base section where
-  it has one, else from a merge of the index's three stages in memory in the `diff3` style where
-  its block holds the same ours and theirs. It also says whether the editor may open the file.
+  it has one, else from a merge of the index's three stages in memory in the `diff3` style, from
+  the run of its blocks that holds the same ours and theirs once joined by the lines between them
+  and shorn of the lines both sides share at its ends, as `git`'s `merge` style cuts a block. It
+  also says whether the editor may open the file.
 - The repository port gains a read of a conflicted file's text with its blob id and its blocks,
   and the writer a resolution that takes the edited result: refused while a marker line remains,
   or where the working directory's file or the conflict is no longer as read; else the index gets
@@ -129,6 +131,11 @@ the web interface of the remote server, and the terminal application.
 - [ADR-0035](../../adr/0035-remote-server-websocket-per-tab.md) and
   [ADR-0037](../../adr/0037-git-adapter-confined-to-the-server-root.md) bind the read and the save
   through the remote server.
+- Open, for the maintainer: ADR-0031 has the web interface edit with `@codemirror/state`,
+  `@codemirror/view`, and `@codemirror/commands` "alone"; `@codemirror/commands` brings
+  `@codemirror/language` and `@lezer/*` in as its own dependencies. Whether "alone" means the
+  direct dependencies, as built, or the whole tree is the maintainer's to say; the first needs at
+  most a clarifying sentence in ADR-0031, the second an editor without `@codemirror/commands`.
 - [ADR-0026](../../adr/0026-diff-overlay-and-file-list.md) for the overlay,
   [ADR-0024](../../adr/0024-themes-tokens-and-palettes.md) for the tokens,
   [ADR-0029](../../adr/0029-terminal-application-ratatui.md) for the terminal, and
