@@ -131,11 +131,11 @@ the web interface of the remote server, and the terminal application.
 - [ADR-0035](../../adr/0035-remote-server-websocket-per-tab.md) and
   [ADR-0042](../../adr/0042-server-root-confinement.md) bind the read and the save
   through the remote server.
-- Open, for the maintainer: ADR-0031 has the web interface edit with `@codemirror/state`,
-  `@codemirror/view`, and `@codemirror/commands` "alone"; `@codemirror/commands` brings
-  `@codemirror/language` and `@lezer/*` in as its own dependencies. Whether "alone" means the
-  direct dependencies, as built, or the whole tree is the maintainer's to say; the first needs at
-  most a clarifying sentence in ADR-0031, the second an editor without `@codemirror/commands`.
+- Answered by the maintainer on 2026-11-03: ADR-0031's "alone" for `@codemirror/state`,
+  `@codemirror/view`, and `@codemirror/commands` means the web interface's direct dependencies,
+  as built. What `@codemirror/commands` brings in as its own, `@codemirror/language` and
+  `@lezer/*`, is allowed. The next normalization carries the sentence into the ADR that restates
+  ADR-0031, with the transitive packages under its sources. No supersession before then.
 - [ADR-0026](../../adr/0026-diff-overlay-and-file-list.md) for the overlay,
   [ADR-0024](../../adr/0024-themes-tokens-and-palettes.md) for the tokens,
   [ADR-0029](../../adr/0029-terminal-application-ratatui.md) for the terminal, and
