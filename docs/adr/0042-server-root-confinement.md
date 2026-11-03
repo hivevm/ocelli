@@ -1,7 +1,7 @@
 # ADR-0042: The git adapter, confined to the server root, opens nothing whose files lie outside it, and the merge editor's reasons alone of its refusals reach the browser
 
-- **Status:** 🟡 proposed
-- **Date:** 2026-11-01
+- **Status:** 🟢 accepted
+- **Date:** 2026-11-03
 - **Deciders:** Markus Brigl
 - **Applies to:** every path a browser names to `ocelli-server`, the confinement of the git adapter in `crates/git/src/confine.rs` and the reads it changes in `refs.rs` and `git.rs`, the server root and its folder listing in `crates/server/src/root.rs`, the check `Host::guarded` in `crates/commands` makes before every command, the merge editor's `NotOpened` reason in `crates/core/src/merge.rs` and the `HostError` `crates/commands` makes of it, what `crates/server/src/socket.rs` lets leave the server, and the sidebar's submodule, worktree, and parent rows it serves
 - **Supersedes:** [ADR-0037](0037-git-adapter-confined-to-the-server-root.md)
