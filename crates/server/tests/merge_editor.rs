@@ -46,6 +46,49 @@ fn stopped_in(root: &Path, dir: &str) {
     assert!(!git_may_fail(root, &["merge", "side"]));
 }
 
+/// A merge stopped in `root` on files the merge editor does not open: `del` deleted on `side`,
+/// `bin` holding a NUL byte on `main`, `lnk` a link to another file on each side, and `sub` a
+/// submodule at another commit on each; and on `t1`, `t2`, and `t3`, text on both sides.
+fn stopped_on_kinds(root: &Path) {
+    std::fs::create_dir_all(root).unwrap();
+    git(root, &["init", "--quiet", "-b", "main"]);
+    git(root, &["config", "user.name", "Ada"]);
+    git(root, &["config", "user.email", "ada@example.invalid"]);
+    let texts = |content: &str| {
+        for f in ["t1", "t2", "t3"] {
+            write_file(root, f, content);
+        }
+    };
+    write_file(root, "del", "base\n");
+    write_file(root, "bin", "base\n");
+    texts("a\nbase\nz\n");
+    git(root, &["add", "."]);
+    git(root, &["commit", "--quiet", "-m", "base"]);
+    let one = git(root, &["rev-parse", "HEAD"]);
+    git(root, &["commit", "--quiet", "--allow-empty", "-m", "two"]);
+    let two = git(root, &["rev-parse", "HEAD"]);
+    for (branch, side, target, pinned) in
+        [("side", "theirs", "a", &one), ("main", "ours", "b", &two)]
+    {
+        if branch == "side" {
+            git(root, &["switch", "--quiet", "-c", "side"]);
+            git(root, &["rm", "--quiet", "del"]);
+            write_file(root, "bin", "theirs\n");
+        } else {
+            git(root, &["switch", "--quiet", "main"]);
+            write_file(root, "del", "ours\n");
+            write_file(root, "bin", "ours\0\n");
+        }
+        texts(&format!("a\n{side}\nz\n"));
+        std::os::unix::fs::symlink(target, root.join("lnk")).unwrap();
+        git(root, &["add", "."]);
+        let gitlink = format!("160000,{pinned},sub");
+        git(root, &["update-index", "--add", "--cacheinfo", &gitlink]);
+        git(root, &["commit", "--quiet", "-m", branch]);
+    }
+    assert!(!git_may_fail(root, &["merge", "side"]));
+}
+
 /// The conflict on `path` in `dir` as the web interface shows it, read off `git`.
 fn conflict(dir: &Path, path: &str) -> Conflict {
     let mut stages = [None, None, None];
@@ -138,6 +181,43 @@ async fn without_allow_writes_a_tab_reads_the_file_but_its_save_is_refused_and_n
         Err(ocelli_server::socket::WRITES_REFUSED.to_string())
     );
     assert_eq!(snapshot(&root), before);
+}
+
+#[tokio::test]
+// Verifies: ADR-0037, ADR-0031, G-15, G-18
+async fn a_tab_is_told_why_the_editor_opens_no_file_as_the_desktop_host_is() {
+    let mut pair = Pair::new("merge-editor-reasons", stopped_on_kinds).await;
+    // Since the load, t1 no longer holds text, t2 is no longer a file, and t3 no longer conflicts.
+    for dir in [pair.root.clone(), pair.other.clone()] {
+        write_file(&dir, "t1", "a\0\n");
+        std::fs::remove_file(dir.join("t2")).unwrap();
+        git(&dir, &["add", "t3"]);
+    }
+    let served = pair.root.to_string_lossy().into_owned();
+    for (path, why) in [
+        ("del", "both hold text"),
+        ("bin", "both hold text"),
+        ("lnk", "both hold text"),
+        ("sub", "both hold text"),
+        ("t1", "no longer holds text"),
+        ("t2", "is no file"),
+        ("t3", "is not conflicted"),
+    ] {
+        let desktop = pair
+            .desktop
+            .host
+            .get_merge_file(path.into())
+            .await
+            .unwrap_err()
+            .to_string();
+        let reason = read(&mut pair.tab, path).await.unwrap_err();
+        assert_eq!(reason, desktop, "{path}");
+        assert!(
+            reason.contains(path) && reason.contains(why),
+            "{path}: {reason}"
+        );
+        assert!(!reason.contains(&served), "{path}: {reason}");
+    }
 }
 
 #[tokio::test]
