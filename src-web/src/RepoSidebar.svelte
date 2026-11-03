@@ -134,7 +134,7 @@
   );
 
   const parent = $derived(repoRefs?.parent ?? null);
-  // A parent outside the remote server's root shows without its switch, saying why (ADR-0037).
+  // A parent outside the remote server's root shows without its switch, saying why (ADR-0042).
   const parentReason = $derived(parent ? parentBlocked(parent) : undefined);
 
   const tags = $derived(

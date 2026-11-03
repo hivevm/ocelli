@@ -11,7 +11,7 @@ const tauri: Transport = {
 };
 
 /** Whether the host is the remote server, which chooses a folder from its own listing in place of
-    the desktop's folder dialog (ADR-0037). */
+    the desktop's folder dialog (ADR-0042). */
 export const remote = !isTauri();
 
 const transport: Transport = remote

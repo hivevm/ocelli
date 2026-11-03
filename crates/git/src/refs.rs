@@ -383,7 +383,7 @@ fn load_submodules(repo: &Repository) -> Vec<Submodule> {
 
         // `workdir_id` is only set once the submodule has a working copy; an
         // absent one is exactly what "uninitialized" means.
-        // Confined, a submodule is opened only where it lies below the root (ADR-0037); one
+        // Confined, a submodule is opened only where it lies below the root (ADR-0042); one
         // that reaches out of it reads as one without a working copy, a row without its switch.
         let full = workdir.join(&path);
         let readable = match crate::confine::root_of(&full) {
@@ -446,7 +446,7 @@ fn find_parent(repo: &Repository) -> Option<ParentRepo> {
     let candidate = match crate::confine::root_of(workdir).ok()? {
         None => Repository::discover(above).ok()?,
         // Confined, the search upwards stops at the root, and a superproject that reaches out of
-        // it is none (ADR-0037).
+        // it is none (ADR-0042).
         Some(root) => {
             let root = root.as_path();
             // The folders above, links resolved, walked up to the root.

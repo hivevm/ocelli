@@ -5,7 +5,7 @@
 //! passes them; the server answers `{"id", "ok"}` with the value the Tauri command returns, or
 //! `{"id", "err"}` with the reason it rejects with. An event is `{"event", "payload"}`. Every
 //! event, and the failure of every command that reached the repository, leaves the server through
-//! `scrub`, so that no path outside the server root leaves it (ADR-0037). A write runs only where
+//! `scrub`, so that no path outside the server root leaves it (ADR-0042). A write runs only where
 //! the server was started with `--allow-writes`, through the shared `Host` as in the desktop
 //! host, taking turns with the other tabs' writes to its repository (ADR-0035).
 
@@ -135,7 +135,7 @@ pub async fn serve(
     let (tx, mut rx) = mpsc::channel::<String>(limits.queue);
     let overflowed = Arc::new(Notify::new());
     let guard_root = Arc::clone(&root);
-    // Every command that reaches the repository checks it again (ADR-0037).
+    // Every command that reaches the repository checks it again (ADR-0042).
     let host = Host::guarded(Arc::new(move |path| guard_root.verify(path)));
     // Set once the connection ends: a write still waiting for its turn then gives it up.
     let gone = Arc::new(AtomicBool::new(false));
@@ -356,7 +356,7 @@ async fn answer(tab: &Arc<Tab>, cmd: &str, a: Value) -> Result<Value, String> {
             value(())
         }
         // The counterpart of the desktop's folder dialog `browse_repo`, which the server does not
-        // answer: a command of the same name never answers otherwise (ADR-0035, ADR-0037).
+        // answer: a command of the same name never answers otherwise (ADR-0035, ADR-0042).
         "list_folders" => {
             let Folder { path } = args(a)?;
             let root = Arc::clone(&tab.root);

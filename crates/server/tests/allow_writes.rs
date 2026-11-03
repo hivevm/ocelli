@@ -89,7 +89,7 @@ async fn without_allow_writes_every_write_is_refused_and_nothing_changes() {
 }
 
 #[tokio::test]
-// Verifies: ADR-0035, ADR-0037
+// Verifies: ADR-0035, ADR-0042
 async fn with_allow_writes_a_write_refused_by_git_changes_nothing_and_names_no_path() {
     let tree = Tree::new("write-refused");
     let root = tree.root();
@@ -127,7 +127,7 @@ async fn with_allow_writes_a_write_refused_by_git_changes_nothing_and_names_no_p
 }
 
 #[tokio::test]
-// Verifies: ADR-0035, ADR-0037
+// Verifies: ADR-0035, ADR-0042
 async fn a_path_that_names_no_file_of_the_working_directory_is_refused_and_the_server_answers_on() {
     let panics = git2_panics();
     let tree = Tree::new("write-paths");

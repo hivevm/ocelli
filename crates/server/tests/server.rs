@@ -31,7 +31,7 @@ use tokio::net::TcpStream;
 use tokio_tungstenite::tungstenite::Message;
 
 #[tokio::test]
-// Verifies: ADR-0035, ADR-0036, ADR-0037, G-18
+// Verifies: ADR-0035, ADR-0036, ADR-0042, G-18
 async fn the_printed_url_opens_the_repository_at_the_root_and_its_rows_arrive_as_the_desktop_reads_them()
  {
     let tree = Tree::new("tracer");
@@ -168,7 +168,7 @@ async fn a_handshake_from_another_origin_or_none_and_a_foreign_host_are_refused(
 }
 
 #[tokio::test]
-// Verifies: ADR-0037
+// Verifies: ADR-0042
 async fn a_path_outside_the_server_root_is_refused() {
     let tree = Tree::new("outside");
     let running = server(&tree).await;
@@ -296,7 +296,7 @@ fn refused(path: &str) -> Result<Value, String> {
 /// upwards, the root itself inside a repository, and `core.worktree`. Each way out of its kind
 /// is a case of the confinement's own tests, `crates/git/tests/confine_checks.rs`.
 #[tokio::test]
-// Verifies: ADR-0037
+// Verifies: ADR-0042
 async fn a_repository_below_the_root_that_reaches_outside_it_is_refused() {
     let tree = Enclosed::new("ways-out");
     let root = tree.root();
@@ -350,7 +350,7 @@ async fn a_repository_below_the_root_that_reaches_outside_it_is_refused() {
 }
 
 #[tokio::test]
-// Verifies: ADR-0037, ADR-0035
+// Verifies: ADR-0042, ADR-0035
 async fn a_repository_swapped_for_a_way_out_after_it_opened_is_checked_again() {
     let tree = Enclosed::new("swap");
     let root = tree.root();
@@ -415,7 +415,7 @@ async fn a_repository_swapped_for_a_way_out_after_it_opened_is_checked_again() {
 }
 
 #[tokio::test]
-// Verifies: ADR-0037
+// Verifies: ADR-0042
 async fn the_sidebar_names_no_path_outside_the_root() {
     let tree = Tree::new("sidebar");
     let root = tree.root();
@@ -538,7 +538,7 @@ async fn a_tab_that_does_not_read_its_answers_is_closed() {
 
 #[cfg(unix)]
 #[tokio::test]
-// Verifies: ADR-0037
+// Verifies: ADR-0042
 async fn a_link_inside_the_git_directory_or_an_alternates_line_read_otherwise_is_refused() {
     // One case of each kind; the rest are cases of the confinement's own tests.
     let tree = Enclosed::new("inner-ways-out");
@@ -569,7 +569,7 @@ async fn a_link_inside_the_git_directory_or_an_alternates_line_read_otherwise_is
 }
 
 #[tokio::test]
-// Verifies: ADR-0037
+// Verifies: ADR-0042
 async fn the_sidebar_reads_no_superproject_or_submodule_outside_the_root() {
     let tree = Enclosed::new("sidebar-out");
     let root = tree.root();
@@ -623,7 +623,7 @@ async fn the_sidebar_reads_no_superproject_or_submodule_outside_the_root() {
 }
 
 #[tokio::test]
-// Verifies: ADR-0037
+// Verifies: ADR-0042
 async fn what_git_says_about_a_failed_read_reaches_the_browser_only_as_reading_failed() {
     let tree = Tree::new("git-says");
     let running = server(&tree).await;
@@ -717,7 +717,7 @@ async fn connections_and_tabs_past_their_bound_are_refused() {
 
 #[cfg(unix)]
 #[tokio::test]
-// Verifies: ADR-0037
+// Verifies: ADR-0042
 async fn a_linked_folder_or_a_path_leading_out_reads_nothing_outside_the_root() {
     let tree = Enclosed::new("workdir-link");
     let root = tree.root();
@@ -771,7 +771,7 @@ async fn a_linked_folder_or_a_path_leading_out_reads_nothing_outside_the_root() 
 }
 
 #[tokio::test]
-// Verifies: ADR-0037
+// Verifies: ADR-0042
 async fn a_git_directory_larger_than_the_walk_is_refused_as_too_large() {
     let tree = Enclosed::new("walk-cap");
     let root = tree.root();
@@ -954,7 +954,7 @@ async fn wrong_tokens_from_many_connections_wait_their_turn_for_the_whole_server
 }
 
 #[tokio::test]
-// Verifies: ADR-0037, ADR-0028
+// Verifies: ADR-0042, ADR-0028
 async fn a_submodule_and_a_worktree_below_the_root_open_through_their_rows_and_lead_back() {
     let tree = Tree::new("switch");
     let root = tree.root();
@@ -1006,7 +1006,7 @@ async fn a_submodule_and_a_worktree_below_the_root_open_through_their_rows_and_l
 }
 
 #[tokio::test]
-// Verifies: ADR-0037
+// Verifies: ADR-0042
 async fn each_way_out_of_the_root_is_refused_with_the_reason_that_names_it() {
     let tree = Tree::new("reasons");
     let root = tree.root();
@@ -1224,7 +1224,7 @@ async fn each_read_the_browser_asks_is_answered_as_the_desktop_host_answers_it()
     let (mut desktop, desktop_refs) = Desktop::open(&root).await;
 
     // The sidebar and the toolbar: the same refs and transfers; a working tree's path is the
-    // one thing told otherwise, relative to the server root (ADR-0037).
+    // one thing told otherwise, relative to the server root (ADR-0042).
     assert_eq!(refs["transfers"], desktop_refs["transfers"]);
     for key in [
         "locals",
@@ -1355,7 +1355,7 @@ async fn each_read_the_browser_asks_is_answered_as_the_desktop_host_answers_it()
 }
 
 #[tokio::test]
-// Verifies: ADR-0037, ADR-0035
+// Verifies: ADR-0042, ADR-0035
 async fn the_browser_chooses_a_repository_from_the_folders_below_the_root() {
     let tree = Enclosed::new("choose");
     let root = tree.root();

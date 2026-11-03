@@ -5,7 +5,7 @@
 //! helper does not run (Q-6).
 //!
 //! A remote on this machine is reached only where it lies below the server root, since libgit2
-//! opens it in-process (ADR-0037, ADR-0035): the tests' remote lies below it, beside the
+//! opens it in-process (ADR-0042, ADR-0035): the tests' remote lies below it, beside the
 //! repository, and one outside is refused; a remote over the network is the server account's to
 //! reach, with its own credentials. libgit2 reads the developer's global configuration from its search path, which holds
 //! for the whole process: these tests run in a binary of their own, every test setting it first.
@@ -216,7 +216,7 @@ async fn fetching_pulling_and_pushing_in_the_browser_end_as_the_desktop_leaves_t
 }
 
 #[tokio::test]
-// Verifies: ADR-0035, ADR-0037, Q-5
+// Verifies: ADR-0035, ADR-0042, Q-5
 async fn a_remote_on_this_machine_outside_the_root_is_neither_fetched_nor_pushed() {
     developer();
     let tree = Tree::new("transfers-outside");

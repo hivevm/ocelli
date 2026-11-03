@@ -49,7 +49,7 @@ pub struct Turn {
 }
 
 /// The reason a write whose repository's common directory cannot be read fails with: it is git's
-/// failure, which the browser reads only as such (ADR-0037).
+/// failure, which the browser reads only as such (ADR-0042).
 const NO_COMMON_DIR: &str = "The repository's common directory cannot be read";
 
 /// The reason a write is refused with where as many writes wait for its repository as may.

@@ -1130,7 +1130,7 @@ fn a_push_whose_branch_another_push_moved_on_is_not_confirmed_and_not_called_ref
 }
 
 #[test]
-// Verifies: ADR-0034, ADR-0037
+// Verifies: ADR-0034, ADR-0042
 fn the_read_back_reads_the_address_pushed_to_however_insteadof_would_rewrite_it_again() {
     let scratch = Scratch::new("push-insteadof");
     let root = scratch.0.join("root");

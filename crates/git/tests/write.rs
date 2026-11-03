@@ -1105,7 +1105,7 @@ const NO_FILE: &[&str] = &[
 ];
 
 #[test]
-// Verifies: ADR-0031, ADR-0037
+// Verifies: ADR-0031, ADR-0042
 fn a_path_that_names_no_file_of_the_working_directory_is_refused_by_every_write_and_read() {
     use ocelli_core::model::Conflict;
     use ocelli_core::port::Take;
@@ -2073,7 +2073,7 @@ fn link_where_side_adds_a_directory(name: &str) -> (Scratch, Scratch, String, St
 }
 
 #[test]
-// Verifies: ADR-0031, ADR-0037, Q-7
+// Verifies: ADR-0031, ADR-0042, Q-7
 fn a_switch_goes_through_no_link_the_index_does_not_hold() {
     let (scratch, outside, _, side) = link_where_side_adds_a_directory("link-switch");
     let switch = Write::SwitchBranch {
@@ -2085,7 +2085,7 @@ fn a_switch_goes_through_no_link_the_index_does_not_hold() {
 }
 
 #[test]
-// Verifies: ADR-0031, ADR-0037, Q-7
+// Verifies: ADR-0031, ADR-0042, Q-7
 fn a_merge_goes_through_no_link_the_index_does_not_hold() {
     let (scratch, outside, main, side) = link_where_side_adds_a_directory("link-merge");
     let merge = Write::Merge {
@@ -2099,7 +2099,7 @@ fn a_merge_goes_through_no_link_the_index_does_not_hold() {
 }
 
 #[test]
-// Verifies: ADR-0031, ADR-0037, Q-7
+// Verifies: ADR-0031, ADR-0042, Q-7
 fn a_cherry_pick_goes_through_no_link_the_index_does_not_hold() {
     let (scratch, outside, main, side) = link_where_side_adds_a_directory("link-pick");
     let pick = Write::CherryPick {
@@ -2112,7 +2112,7 @@ fn a_cherry_pick_goes_through_no_link_the_index_does_not_hold() {
 }
 
 #[test]
-// Verifies: ADR-0031, ADR-0037, Q-7
+// Verifies: ADR-0031, ADR-0042, Q-7
 fn a_revert_goes_through_no_link_the_index_does_not_hold() {
     let (scratch, outside) = beside_outside("link-revert");
     let d = &scratch.0;
@@ -2131,7 +2131,7 @@ fn a_revert_goes_through_no_link_the_index_does_not_hold() {
 }
 
 #[test]
-// Verifies: ADR-0031, ADR-0037, Q-7
+// Verifies: ADR-0031, ADR-0042, Q-7
 fn a_rebase_goes_through_no_link_the_index_does_not_hold_as_it_starts_or_steps() {
     // Its start checks out what it rebases onto.
     let (scratch, outside, main, side) = link_where_side_adds_a_directory("link-rebase-start");
@@ -2188,7 +2188,7 @@ fn a_rebase_goes_through_no_link_the_index_does_not_hold_as_it_starts_or_steps()
 }
 
 #[test]
-// Verifies: ADR-0031, ADR-0037, Q-7
+// Verifies: ADR-0031, ADR-0042, Q-7
 fn a_rebase_s_abort_goes_through_no_link_the_index_does_not_hold() {
     let (scratch, outside) = beside_outside("link-rebase-abort");
     let d = &scratch.0;
@@ -2221,7 +2221,7 @@ fn a_rebase_s_abort_goes_through_no_link_the_index_does_not_hold() {
 }
 
 #[test]
-// Verifies: ADR-0031, ADR-0037, Q-7
+// Verifies: ADR-0031, ADR-0042, Q-7
 fn a_hard_reset_goes_through_no_link_the_index_does_not_hold() {
     let reset_hard = |d: &Path| {
         let head = git(d, &["rev-parse", "HEAD"]);
@@ -2258,7 +2258,7 @@ fn a_hard_reset_goes_through_no_link_the_index_does_not_hold() {
 }
 
 #[test]
-// Verifies: ADR-0031, ADR-0037, Q-7
+// Verifies: ADR-0031, ADR-0042, Q-7
 fn a_stash_goes_through_no_link_the_index_does_not_hold() {
     // Only the checked-out commit still has the directory the link stands in.
     let (scratch, outside) = beside_outside("link-stash");
@@ -2308,7 +2308,7 @@ fn conflict_on_a_link(name: &str) -> (Scratch, Scratch) {
 }
 
 #[test]
-// Verifies: ADR-0031, ADR-0037, Q-7
+// Verifies: ADR-0031, ADR-0042, Q-7
 fn an_abort_and_a_resolve_go_through_no_link_the_index_does_not_hold() {
     let (scratch, outside) = conflict_on_a_link("link-abort");
     let d = &scratch.0;
@@ -2357,7 +2357,7 @@ fn file_and_directory_conflict(name: &str) -> (Scratch, Scratch, String, String)
 const FILE_AND_DIRECTORY: &str = "a file and a directory named x conflict";
 
 #[test]
-// Verifies: ADR-0031, ADR-0037, Q-7
+// Verifies: ADR-0031, ADR-0042, Q-7
 fn a_conflict_between_a_file_and_a_directory_is_refused_by_every_write_that_merges() {
     let (scratch, outside, main, side) = file_and_directory_conflict("df-merge");
     let merge = Write::Merge {
@@ -2421,7 +2421,7 @@ fn a_conflict_between_a_file_and_a_directory_is_refused_by_every_write_that_merg
 }
 
 #[test]
-// Verifies: ADR-0031, ADR-0037, Q-7
+// Verifies: ADR-0031, ADR-0042, Q-7
 fn a_conflict_libgit2_writes_through_a_link_or_beside_its_path_is_refused() {
     // Two files renamed to one name, whose sides libgit2 writes as c~HEAD and c~<commit>.
     let (scratch, outside) = beside_outside("rename-collision");
@@ -2668,7 +2668,7 @@ fn named_twice(
 }
 
 #[test]
-// Verifies: ADR-0031, ADR-0037, Q-7
+// Verifies: ADR-0031, ADR-0042, Q-7
 fn a_tree_naming_a_link_twice_is_never_written_through() {
     for (also, link_first, to_secret) in [
         ("directory", true, false),
@@ -2690,7 +2690,7 @@ fn a_tree_naming_a_link_twice_is_never_written_through() {
 }
 
 #[test]
-// Verifies: ADR-0031, ADR-0037, Q-7
+// Verifies: ADR-0031, ADR-0042, Q-7
 fn a_tree_naming_a_link_and_a_file_one_name_is_never_written_by_a_pull() {
     let (scratch, outside) = beside_outside("twice-pull");
     let d = &scratch.0;
@@ -2735,7 +2735,7 @@ fn a_tree_naming_a_link_and_a_file_one_name_is_never_written_by_a_pull() {
 }
 
 #[test]
-// Verifies: ADR-0031, ADR-0037, Q-7
+// Verifies: ADR-0031, ADR-0042, Q-7
 fn a_link_only_staged_is_never_written_through() {
     // A switch to a commit that adds a/x, the link staged where a stands.
     let (scratch, outside) = beside_outside("staged-switch");
@@ -2779,7 +2779,7 @@ fn a_link_only_staged_is_never_written_through() {
 }
 
 #[test]
-// Verifies: ADR-0031, ADR-0037
+// Verifies: ADR-0031, ADR-0042
 fn a_committed_link_a_write_turns_into_a_directory_is_replaced_not_written_through() {
     for what in ["switch", "reset", "cherry-pick"] {
         let (scratch, outside) = beside_outside(&format!("typechange-{what}"));
@@ -2804,7 +2804,7 @@ fn a_committed_link_a_write_turns_into_a_directory_is_replaced_not_written_throu
 }
 
 #[test]
-// Verifies: ADR-0031, ADR-0037
+// Verifies: ADR-0031, ADR-0042
 fn names_one_where_case_is_not_told_apart_are_refused_where_the_repository_says_so() {
     let scratch = with_file("ignorecase");
     let d = &scratch.0;
@@ -2849,7 +2849,7 @@ fn names_one_where_case_is_not_told_apart_are_refused_where_the_repository_says_
 }
 
 #[test]
-// Verifies: ADR-0031, ADR-0032, ADR-0037, Q-7
+// Verifies: ADR-0031, ADR-0032, ADR-0042, Q-7
 fn a_conflict_side_is_written_under_the_commit_id_not_its_subject() {
     // libgit2 names the side of a rename collision `<path>~<label>`, and left to itself takes
     // the label from the commit subject, which can hold `/` and `..`: a crafted subject would
@@ -2898,7 +2898,7 @@ fn a_conflict_side_is_written_under_the_commit_id_not_its_subject() {
 }
 
 #[test]
-// Verifies: ADR-0031, ADR-0037
+// Verifies: ADR-0031, ADR-0042
 fn a_rebase_replaying_a_root_commit_applies_it_without_a_false_refusal() {
     // A root commit has no parent: libgit2's step merges the empty tree, HEAD and the commit,
     // which the guard reads the same way, rather than a plain diff that would miss a conflict.
@@ -3018,7 +3018,7 @@ fn rename_collision(name: &str) -> (Scratch, Scratch, String, String) {
 }
 
 #[test]
-// Verifies: ADR-0031, ADR-0032, ADR-0037, Q-7
+// Verifies: ADR-0031, ADR-0032, ADR-0042, Q-7
 fn a_link_beside_a_conflict_is_found_as_the_file_system_folds_its_name() {
     // Where case is not told apart, `C~HEAD` is the `c~HEAD` libgit2 writes a side of `c` to.
     let (scratch, outside, main, side) = rename_collision("folded-sibling");

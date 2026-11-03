@@ -184,7 +184,7 @@ async fn without_allow_writes_a_tab_reads_the_file_but_its_save_is_refused_and_n
 }
 
 #[tokio::test]
-// Verifies: ADR-0037, ADR-0031, G-15, G-18
+// Verifies: ADR-0042, ADR-0031, G-15, G-18
 async fn a_tab_is_told_why_the_editor_opens_no_file_as_the_desktop_host_is() {
     let mut pair = Pair::new("merge-editor-reasons", stopped_on_kinds).await;
     // Since the load, t1 no longer holds text, t2 is no longer a file, and t3 no longer conflicts.
@@ -221,7 +221,7 @@ async fn a_tab_is_told_why_the_editor_opens_no_file_as_the_desktop_host_is() {
 }
 
 #[tokio::test]
-// Verifies: ADR-0037, ADR-0031
+// Verifies: ADR-0042, ADR-0031
 async fn a_conflicted_file_below_a_link_that_leads_outside_the_root_is_neither_read_nor_saved() {
     let scratch = Scratch::new("merge-editor-outside");
     let root = scratch.0.join("root");
