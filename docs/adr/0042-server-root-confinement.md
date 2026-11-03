@@ -1,4 +1,4 @@
-# ADR-draft-server-root-confinement: The git adapter, confined to the server root, opens nothing whose files lie outside it, and the merge editor's reasons alone of its refusals reach the browser
+# ADR-0042: The git adapter, confined to the server root, opens nothing whose files lie outside it, and the merge editor's reasons alone of its refusals reach the browser
 
 - **Status:** 🟡 proposed
 - **Date:** 2026-11-01
