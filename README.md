@@ -151,7 +151,7 @@ keeps does not name the address or the host name any more, or where only half of
 other accounts may read, is kept, and says what to remove. The browser opens
 the repository the server root is, or one chosen with Open Repo from the folders below the root,
 and nothing outside the root
-([ADR-0037](docs/adr/0037-git-adapter-confined-to-the-server-root.md));
+([ADR-0042](docs/adr/0042-server-root-confinement.md));
 every restart prints a new URL. The server only reads unless it is started with
 `--allow-writes`: then the browser writes, fetches, pulls, and pushes as the desktop application
 does, as the user the server runs as, with the identity and credentials git's configuration

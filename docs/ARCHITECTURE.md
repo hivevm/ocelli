@@ -41,7 +41,7 @@ loopback addresses of the machine holding the repositories and answers only a br
 logged in with the connection token it printed
 ([ADR-0036](adr/0036-remote-server-localhost-tls-session-cookie.md)),
 and only about the repositories below its server root
-([ADR-0037](adr/0037-git-adapter-confined-to-the-server-root.md));
+([ADR-0042](adr/0042-server-root-confinement.md));
 it only reads unless started with `--allow-writes`, and then writes as the user it runs as
 ([ADR-0035](adr/0035-remote-server-websocket-per-tab.md)).
 The
@@ -133,10 +133,10 @@ golden path and the test pattern an agent copies from are named here.
   it, and the working-directory node carries no author, which would come from configuration;
   the desktop and terminal applications never confine it. The configuration libgit2 reads, the
   developer's global and system files and what a repository's own includes with `include.path`
-  and `includeIf`, lies outside what ADR-0037 confines. Ocelli reads a working file itself only
+  and `includeIf`, lies outside what ADR-0042 confines. Ocelli reads a working file itself only
   to hash it for staging (`working_blob` in `git.rs`), as `git` does: a link as its target's
   text, and nothing through a linked folder
-  ([ADR-0037](adr/0037-git-adapter-confined-to-the-server-root.md)).
+  ([ADR-0042](adr/0042-server-root-confinement.md)).
 - **Terminal application** (`crates/tui`, `ocelli-cli`) — draws the core's graph with box-drawing
   characters on ratatui; it loads and lays out the history chunk by chunk on a loader thread, keeps
   the core's `History` at its event loop, reads files and diffs through `GitReader` on a worker
@@ -219,7 +219,7 @@ golden path and the test pattern an agent copies from are named here.
   the web interface's `repoSwitch.ts` shows as a row without its switch and says why, and
   whatever git says about a failed read reaches the browser only as "Reading the repository
   failed"
-  ([ADR-0037](adr/0037-git-adapter-confined-to-the-server-root.md)).
+  ([ADR-0042](adr/0042-server-root-confinement.md)).
   Started without `--allow-writes` it refuses every write with a reason the web interface shows;
   with it, a tab's `perform_write` and `cancel_write` reach its `Host` as the desktop's do, as the
   user the server runs as, a transfer with the SSH agent of the server's environment and the

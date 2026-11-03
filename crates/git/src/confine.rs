@@ -1,4 +1,4 @@
-//! Whether a repository lies wholly below a folder (ADR-0037): the remote server opens for a
+//! Whether a repository lies wholly below a folder (ADR-0042): the remote server opens for a
 //! browser only a repository whose working directory, git directory, common directory, and object
 //! stores all resolve below its server root. A repository can point outside itself through a
 //! `.git` file or link, a worktree's common directory, `core.worktree`, a link anywhere inside
@@ -320,7 +320,7 @@ mod below_tests {
     }
 
     #[test]
-    // Verifies: ADR-0037
+    // Verifies: ADR-0042
     fn the_root_itself_lies_below_it_however_either_is_spelled() {
         let scratch = Scratch::new("itself");
         let root = scratch.root();
@@ -331,7 +331,7 @@ mod below_tests {
     }
 
     #[test]
-    // Verifies: ADR-0037
+    // Verifies: ADR-0042
     fn a_path_with_forward_slashes_is_resolved_before_it_is_compared() {
         let scratch = Scratch::new("slashes");
         // As libgit2 spells a path on Windows: forward slashes, no `\\?\` prefix.
@@ -351,7 +351,7 @@ mod below_tests {
     }
 
     #[test]
-    // Verifies: ADR-0037
+    // Verifies: ADR-0042
     fn a_path_with_dot_dot_is_resolved_before_it_is_compared() {
         let scratch = Scratch::new("dotdot");
         let root = scratch.root();
@@ -361,7 +361,7 @@ mod below_tests {
     }
 
     #[test]
-    // Verifies: ADR-0037
+    // Verifies: ADR-0042
     fn a_missing_path_lies_below_nothing() {
         let scratch = Scratch::new("missing");
         let root = scratch.root();
@@ -371,7 +371,7 @@ mod below_tests {
 
     #[cfg(unix)]
     #[test]
-    // Verifies: ADR-0037
+    // Verifies: ADR-0042
     fn a_link_out_of_the_root_lies_outside_it() {
         let scratch = Scratch::new("link");
         let root = scratch.root();
@@ -388,7 +388,7 @@ mod tests {
     use super::*;
 
     #[test]
-    // Verifies: ADR-0037
+    // Verifies: ADR-0042
     fn alternates_are_read_as_libgit2_reads_them() {
         let objects = Path::new("/r/.git/objects");
         assert_eq!(
@@ -410,7 +410,7 @@ mod tests {
     }
 
     #[test]
-    // Verifies: ADR-0037, ADR-0035
+    // Verifies: ADR-0042, ADR-0035
     fn an_address_is_over_the_network_only_with_a_network_scheme_or_as_ssh_reads_host_and_path() {
         for network in [
             "https://example.org/r.git",

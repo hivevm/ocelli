@@ -129,7 +129,7 @@ the web interface of the remote server, and the terminal application.
 - [ADR-0033](../../adr/0033-discarding-work-only-after-confirmation.md): leaving a result not
   saved is asked by the front end, as ADR-0031 states; no write joins the core's list.
 - [ADR-0035](../../adr/0035-remote-server-websocket-per-tab.md) and
-  [ADR-0037](../../adr/0037-git-adapter-confined-to-the-server-root.md) bind the read and the save
+  [ADR-0042](../../adr/0042-server-root-confinement.md) bind the read and the save
   through the remote server.
 - Open, for the maintainer: ADR-0031 has the web interface edit with `@codemirror/state`,
   `@codemirror/view`, and `@codemirror/commands` "alone"; `@codemirror/commands` brings

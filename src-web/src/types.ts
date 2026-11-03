@@ -110,7 +110,7 @@ export interface Found {
   hits: NodeJson[];
 }
 
-/** A folder below the remote server's root, marked where it holds a `.git` (ADR-0037). */
+/** A folder below the remote server's root, marked where it holds a `.git` (ADR-0042). */
 export interface Folder {
   name: string;
   /** Relative to the server root, as `open_repo` and `list_folders` take it. */

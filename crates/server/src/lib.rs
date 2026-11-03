@@ -3,7 +3,7 @@
 //! both hosts share. It listens on the machine's loopback addresses, or over TLS alone on an
 //! address the developer names, and admits a browser only by
 //! the connection token it prints, exchanged for a session cookie, from its own origin (ADR-0036),
-//! and opens only the repositories below its server root (ADR-0037).
+//! and opens only the repositories below its server root (ADR-0042).
 
 pub mod auth;
 pub mod root;
@@ -31,7 +31,7 @@ use tokio::sync::Semaphore;
 /// What the server is started with.
 #[derive(Debug, PartialEq, Eq)]
 pub struct Options {
-    /// The server root: required, there is no default (ADR-0037).
+    /// The server root: required, there is no default (ADR-0042).
     pub root: PathBuf,
     /// The port on the loopback addresses; 0 lets the system choose a free one.
     pub port: u16,
@@ -230,7 +230,7 @@ pub async fn start(options: Options) -> Result<Running, String> {
         }
     };
     // Every repository the git adapter opens in this process is confined to the root: none is
-    // found by searching upwards (ADR-0037).
+    // found by searching upwards (ADR-0042).
     ocelli_git::confine::confine_to(root.path());
     let script_hashes = web::file("index.html")
         .map(|html| web::inline_script_hashes(&String::from_utf8_lossy(html)))
@@ -556,7 +556,7 @@ mod tests {
     }
 
     #[test]
-    // Verifies: ADR-0037
+    // Verifies: ADR-0042
     fn the_server_root_is_required() {
         assert_eq!(Options::parse(args(&["ocelli-server"])).unwrap_err(), USAGE);
         assert_eq!(

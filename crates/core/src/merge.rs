@@ -35,7 +35,7 @@ pub struct MergeBlock {
 /// Why the merge editor opens no conflicted file: a side deleted, a link, a submodule, or no
 /// text, or the file no longer conflicted or no longer a file. It names the file by its path below
 /// the repository alone, so every front end shows it as it stands, the browser's included
-/// (ADR-0031, ADR-0037).
+/// (ADR-0031, ADR-0042).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct NotOpened(pub String);
 

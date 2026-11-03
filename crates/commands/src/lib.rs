@@ -90,7 +90,7 @@ pub const COMMANDS: &[(&str, Answered)] = &[
 pub const SERVER_EVENTS: &[&str] = &["repo-written"];
 
 /// What a host checks a repository's path against before every command that reaches it: the
-/// remote server's server root (ADR-0037). It answers why it refuses.
+/// remote server's server root (ADR-0042). It answers why it refuses.
 pub type Guard = Arc<dyn Fn(&Path) -> Result<(), String> + Send + Sync>;
 
 /// What a host waits for before a write reaches the repository at the path: the remote server's
@@ -109,7 +109,7 @@ pub trait Turn: Send {
 
 /// Why a command of the `Host` failed. The kind, not the words, tells a host what it may pass
 /// on: the remote server lets a refusal's reason through to the browser and replaces what git
-/// said, which may name a path on the server (ADR-0037). The desktop host shows each as it reads.
+/// said, which may name a path on the server (ADR-0042). The desktop host shows each as it reads.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum HostError {
     /// No repository is open for the command to reach.
@@ -164,7 +164,7 @@ pub struct Host {
 impl Host {
     /// A host that checks the repository's path with `guard` before the load and before every
     /// command that reads or writes it, so that what changed on disk since it was opened is
-    /// checked again (ADR-0037).
+    /// checked again (ADR-0042).
     pub fn guarded(guard: Guard) -> Host {
         Host {
             guard: Some(guard),
@@ -305,7 +305,7 @@ impl Host {
 
     /// The conflicted file `path` read for the merge editor, as JSON, or why the editor does not
     /// open it (ADR-0031): a refusal of Ocelli's own, which names the file below the repository
-    /// alone and so reaches the browser as it stands (ADR-0037).
+    /// alone and so reaches the browser as it stands (ADR-0042).
     pub async fn get_merge_file(&self, path: String) -> Result<String, HostError> {
         let (repo_path, guard) = self.repo()?;
         let file = tokio::task::spawn_blocking(move || {
@@ -357,7 +357,7 @@ impl Host {
         let written = tokio::task::spawn_blocking(move || {
             checked(&guard, &repo_path)?;
             // Another host's write to the repository ends first; the root is checked again after
-            // the wait, and the write checks what it expects as it runs (ADR-0037, ADR-0035).
+            // the wait, and the write checks what it expects as it runs (ADR-0042, ADR-0035).
             let mut turn = match &take_turn {
                 Some(take) => {
                     let turn = take(&repo_path)?;
@@ -769,7 +769,7 @@ mod tests {
     }
 
     #[test]
-    // Verifies: ADR-0037
+    // Verifies: ADR-0042
     fn a_guarded_host_checks_the_repository_again_before_every_command_that_reaches_it() {
         let refusing = Arc::new(AtomicBool::new(false));
         let refuses = Arc::clone(&refusing);
@@ -812,7 +812,7 @@ mod tests {
     }
 
     #[test]
-    // Verifies: ADR-0037, ADR-0035
+    // Verifies: ADR-0042, ADR-0035
     fn a_write_waits_for_its_turn_after_the_root_and_the_root_is_checked_again_once_it_comes() {
         let refusing = Arc::new(AtomicBool::new(false));
         let refuses = Arc::clone(&refusing);
@@ -894,7 +894,7 @@ mod tests {
     }
 
     #[test]
-    // Verifies: ADR-0037
+    // Verifies: ADR-0042
     fn each_failure_of_a_command_carries_its_kind() {
         let runtime = tokio::runtime::Builder::new_current_thread()
             .build()

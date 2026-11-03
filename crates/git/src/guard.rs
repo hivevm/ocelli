@@ -630,7 +630,7 @@ mod tests {
     }
 
     #[test]
-    // Verifies: ADR-0031, ADR-0037
+    // Verifies: ADR-0031, ADR-0042
     fn a_path_is_taken_only_as_plain_names_below_the_working_directory_outside_any_git() {
         for plain in [
             "f",
