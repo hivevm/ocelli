@@ -15,8 +15,12 @@
 # needs the bundler toolchain of every target platform, and says nothing a per-change gate needs.
 #
 # Dependencies are expected to be installed ('bun install --frozen-lockfile'); this script builds
-# and tests, it does not provision. Every command runs even after an earlier one fails, so one run
-# reports everything that is wrong.
+# and tests, it does not provision. Where a direct dependency bun.lock names for a workspace is
+# missing from that workspace's node_modules/, or is there at another version than bun.lock locks,
+# as in a fresh worktree, which shares no node_modules/, the web interface's build, test, and lint
+# are not run but reported failed, under one line naming the command that installs them; bun has
+# no command that tells this without installing. Every other command runs even after an earlier
+# one fails, so one run reports everything that is wrong.
 #
 # Usage:
 #     scripts/check-build.sh        (or: bash scripts/check-build.sh)
@@ -37,8 +41,74 @@ run() {
   "$@" || failed+=("$label")
 }
 
+# web_unmet — the first direct dependency of a workspace in bun.lock that is not installed at the
+# version bun.lock locks, as its path and what was found there; nothing where each is. A package is
+# looked for as Node resolves it, in the workspace's node_modules/ and then the root's, so both of
+# bun's linkers, isolated and hoisted, are read. An optional or a peer dependency is not read: one
+# may be missing by design. A dependency bun.lock nests under the workspace's name is read at that
+# version. A bun.lock that names no direct dependency this reads, or none at all, is reported too:
+# a layout this does not know is no pass.
+web_unmet() {
+  local listed dir name want pkg got
+  listed="$(awk '
+    /^  "workspaces": \{/ { section = "workspaces"; next }
+    /^  "packages": \{/ { section = "packages"; next }
+    /^  [^ ]/ { section = "" }
+    section == "workspaces" && /^    "[^"]*": \{/ { split($0, q, "\""); dir = q[2]; kind = ""; next }
+    section == "workspaces" && /^      "name": "/ { split($0, q, "\""); named[dir] = q[4]; next }
+    section == "workspaces" && /^      "/ { split($0, q, "\""); kind = q[2]; next }
+    section == "workspaces" && /^        "/ && (kind == "dependencies" || kind == "devDependencies") {
+      split($0, q, "\""); n++; dirs[n] = dir; names[n] = q[2]; next
+    }
+    section == "packages" && /^    "[^"]*": \["/ {
+      split($0, q, "\""); match(q[4], /@[^@]*$/); locked[q[2]] = substr(q[4], RSTART + 1)
+    }
+    END {
+      for (i = 1; i <= n; i++) {
+        nested = named[dirs[i]] "/" names[i]
+        printf "%s|%s|%s\n", dirs[i], names[i], (nested in locked) ? locked[nested] : locked[names[i]]
+      }
+    }' bun.lock 2>&1)" || listed=""
+  if [[ -z "$listed" ]]; then
+    echo "bun.lock names no direct dependency this gate can read"
+    return
+  fi
+  while IFS='|' read -r dir name want; do
+    pkg="${dir:+$dir/}node_modules/$name/package.json"
+    [[ -f "$pkg" || -z "$dir" ]] || pkg="node_modules/$name/package.json"
+    if [[ ! -f "$pkg" ]]; then
+      echo "${dir:+$dir/}node_modules/$name is missing"
+      return
+    fi
+    got="$(grep -o -m1 '"version" *: *"[^"]*"' "$pkg" | sed 's/.*"\([^"]*\)"$/\1/')"
+    if [[ -z "$got" ]]; then
+      echo "${pkg%/package.json} has no version"
+      return
+    elif [[ "$got" != "$want" ]]; then
+      echo "${pkg%/package.json} is $got, bun.lock locks ${want:-none}"
+      return
+    fi
+  done <<< "$listed"
+}
+
+unmet="$(web_unmet)"
+if [[ -n "$unmet" ]]; then
+  printf "\nThe dependencies are not installed as bun.lock locks them (%s): run 'bun install --frozen-lockfile'.\n" "$unmet"
+fi
+
+# web <label> <command...> — run one of the web interface's commands, or, where its dependencies
+# are not installed, report it failed without running it.
+web() {
+  if [[ -n "$unmet" ]]; then
+    printf '\n==> %s\n%s\n' "$1" "Not run: the dependencies are not installed (above)."
+    failed+=("$1")
+  else
+    run "$@"
+  fi
+}
+
 run "Build (Rust)" cargo build --workspace --locked
-run "Build (web interface)" bun run --cwd src-web build
+web "Build (web interface)" bun run --cwd src-web build
 # The Rust tests run with a developer's git configuration in reach that changes what a write does,
 # so a test that reads it again fails here rather than only on a machine whose configuration
 # differs. libgit2 reads it at the XDG level; a global ~/.gitconfig still overrides its keys, so
@@ -49,10 +119,10 @@ trap 'rm -rf "$developer_config"' EXIT
 mkdir -p "$developer_config/git"
 cp "$ROOT/crates/git/tests/developer-config/git/config" "$developer_config/git/config"
 run "Test (Rust)" env XDG_CONFIG_HOME="$developer_config" cargo test --workspace --locked
-run "Test (web interface)" bun test src-web
+web "Test (web interface)" bun test src-web
 run "Format check" cargo fmt --all --check
 run "Lint (clippy)" cargo clippy --workspace --all-targets --locked -- -D warnings
-run "Lint (web interface)" bun run --cwd src-web lint
+web "Lint (web interface)" bun run --cwd src-web lint
 
 # The Windows build's lint, where cargo-xwin and its LLVM tools are installed: code under
 # cfg(windows), or a test whose helper only unix uses, fails only there, and CI's Windows runner
