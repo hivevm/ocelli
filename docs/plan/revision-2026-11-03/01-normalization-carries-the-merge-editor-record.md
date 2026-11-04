@@ -6,8 +6,8 @@
 ## What to build
 
 When the human next instructs a normalization (skill `normalize`), the ADR that restates ADR-0031
-carries four things the merge editor's spec and its tickets left for it, which no other document may
-hold, since ADR-0031 is accepted and only a normalization rewrites it
+carries five things the merge editor's spec, its tickets, and the design revision left for it,
+which no other document may hold, since ADR-0031 is accepted and only a normalization rewrites it
 ([`AGENTS.md` §3](../../../AGENTS.md#3-adr-rules), rule 5):
 
 1. **CodeMirror's "alone".** The maintainer answered on 2026-11-03 (commit 4914b37, in the spec now
@@ -38,6 +38,14 @@ hold, since ADR-0031 is accepted and only a normalization rewrites it
    one on writes, without changing either decision, and moves the `Verifies:` markers of the merge
    editor's tests by its map.
 
+5. **What is still a block after an edit.** The maintainer decided on 2026-11-04 (ticket
+   revision-2026-11-03/04) that both front ends hold the blocks the core found when the file was
+   read, each block's marker lines followed through every edit: a block an edit took a marker line
+   from, or moved one out of order, is no block, and a run of marker lines the developer types or
+   pastes is none either. The terminal application had found the blocks anew on every key. The
+   restated ADR says so in *What it starts from*; `crates/core/tests/fixtures/merge.json` holds the
+   cases both front ends' tests read.
+
 ## Acceptance criteria
 
 - [ ] Given the next normalization, when the ADR restating ADR-0031 lands, then its *Components*
@@ -45,6 +53,9 @@ hold, since ADR-0031 is accepted and only a normalization rewrites it
       transitive ones `bun.lock` holds.
 - [ ] Given that ADR, when a reader looks for a size limit, then its *Consequences* say there is
       none and give the measurements above.
+- [ ] Given that ADR, when a reader looks for what is a block once the developer edits, then
+      *What it starts from* says the blocks found when the file was read are followed through
+      every edit, and a run of marker lines typed or pasted is none.
 - [ ] Given the normalization, when the human decides whether the merge editor becomes an ADR of its
       own, then the decision is in the normalization's hand-off either way.
 

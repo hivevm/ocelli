@@ -283,3 +283,63 @@ fn the_offers_fixture_is_what_the_core_writes() {
         );
     }
 }
+
+/// What each front end's merge editor does with the blocks the core finds, the fixture
+/// `merge.json` the terminal application's `merge.rs` and the web interface's `mergeBlocks.test.ts`
+/// both read (ADR-0031): for each file, as the core hands it over, the text a side taken for a
+/// block leaves, and, once a run of marker lines is pasted at the start of a line, the first lines
+/// of the blocks still drawn. Which text a take leaves is this test's to say; that both front ends
+/// leave it is theirs.
+#[test]
+// Verifies: ADR-0031, G-15
+fn the_merge_fixture_is_what_the_core_writes() {
+    use ocelli_core::merge::{MergeFile, blocks};
+    let file = |text: &str| MergeFile {
+        text: text.into(),
+        blob: "b".into(),
+        blocks: blocks(text),
+    };
+    let one = "a\n<<<<<<< HEAD\nours\n=======\ntheirs\n>>>>>>> side\nz\n";
+    let two = "a\n<<<<<<< H\nx\n=======\ny\n>>>>>>> s\nm\n<<<<<<< H\n=======\nq\n>>>>>>> s";
+    let based = "a\n<<<<<<< HEAD\no\n||||||| base\nb\n=======\nt\n>>>>>>> side\nz\n";
+    // rustfmt cannot lay out what json! holds, so it is left as written.
+    #[rustfmt::skip]
+    let take = |text: &str, block: usize, side: &str, result: &str| {
+        serde_json::json!({ "file": file(text), "block": block, "side": side, "result": result })
+    };
+    #[rustfmt::skip]
+    let pasted = |text: &str, line: usize, paste: &str, blocks: &[usize]| {
+        serde_json::json!({ "file": file(text), "line": line, "paste": paste, "blocks": blocks })
+    };
+    // A run pasted before a marker line, or typed there, that begins as the marker line does: the
+    // edit is where the developer made it, not past the repeat.
+    let run = "<<<<<<< x\np\n=======\nq\n>>>>>>> y\n";
+    let fixture = serde_json::json!({
+        "takes": [
+            take(one, 0, "ours", "a\nours\nz\n"),
+            take(one, 0, "theirs", "a\ntheirs\nz\n"),
+            take(one, 0, "both", "a\nours\ntheirs\nz\n"),
+            take(two, 1, "ours", "a\n<<<<<<< H\nx\n=======\ny\n>>>>>>> s\nm\n"),
+            take(two, 1, "theirs", "a\n<<<<<<< H\nx\n=======\ny\n>>>>>>> s\nm\nq"),
+            take(based, 0, "both", "a\no\nt\nz\n"),
+        ],
+        "pasted": [
+            pasted(one, 1, run, &[7]),
+            pasted(one, 2, run, &[7]),
+            pasted(one, 2, "<", &[]),
+            pasted(one, 3, "<<<<<<< x\np\n=======\n", &[2]),
+            pasted(one, 4, ">>>>>>> y\n<<<<<<< x\n", &[2]),
+            pasted(one, 4, "=======\n", &[2]),
+        ],
+    });
+    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/merge.json");
+    let written = serde_json::to_string_pretty(&fixture).expect("the fixture serializes") + "\n";
+    let on_disk = fs::read_to_string(&path).unwrap_or_default();
+    if on_disk != written {
+        fs::write(&path, &written).expect("the fixture is written");
+        panic!(
+            "{} did not hold what the core writes; it is written anew, commit it",
+            path.display()
+        );
+    }
+}
