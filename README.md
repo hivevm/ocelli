@@ -87,7 +87,8 @@ The problem, the goals, and the success criteria live in
      rely on it, and the rule file names it. scripts/check-build.sh runs the build, test, and lint
      commands, locally through scripts/check-all.sh and in CI through the build job. -->
 
-Install the dependencies from the lockfile first, and again after a dependency changes:
+Install the dependencies from the lockfile first, in each clone and worktree, and again after a
+dependency changes:
 `bun install --frozen-lockfile`.
 
 - **Build:** `cargo build --workspace --locked` and `bun run --cwd src-web build`; the desktop
