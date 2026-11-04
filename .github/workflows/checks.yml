@@ -157,6 +157,14 @@ jobs:
         run: bash scripts/sensor-action-refs.sh --require sha
       - name: Self-test the review binding sensor
         run: bash scripts/test-sensor-review-binding.sh
+      - name: Self-test the accepted ADR text check
+        run: bash scripts/test-check-adr-text.sh
+      # Verifies: ADR-0001 — an accepted ADR's text changes only in a normalization. A force push
+      # leaves the previous tip unknown to the clone: the check then reads from main's merge base.
+      - name: Refuse a change to the text of an accepted ADR outside a normalization
+        run: bash scripts/check-adr-text.sh "$BASE"
+        env:
+          BASE: ${{ github.event.forced != true && (github.event.pull_request.base.sha || github.event.before) || '' }}
       # The repository settings sensor itself runs on a human's instruction (ADR-0002).
       - name: Self-test the repository settings sensor
         run: bash scripts/test-sensor-repo-settings.sh
