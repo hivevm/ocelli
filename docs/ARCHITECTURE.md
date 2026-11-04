@@ -6,7 +6,7 @@
 > is updated in the same change as the structure it describes
 > ([ADR-0001](adr/0001-agent-governance-model.md)).
 >
-> **Last design revision:** 2026-10-09, due after 20 changes. The revision that ran moves the
+> **Last design revision:** 2026-11-03, due after 20 changes. The revision that ran moves the
 > date; the number is this project's to set; a sensor counts the changes outside `docs/` since
 > the commit that set the date and says when the next is due
 > ([ADR-0004](adr/0004-feature-layer.md)).
@@ -218,7 +218,8 @@ golden path and the test pattern an agent copies from are named here.
   relative to the root, or empty where they lie outside, which
   the web interface's `repoSwitch.ts` shows as a row without its switch and says why, and
   whatever git says about a failed read reaches the browser only as "Reading the repository
-  failed"
+  failed", while a refusal of Ocelli's own, the merge editor's reasons for opening no file
+  among them, passes as it stands
   ([ADR-0042](adr/0042-server-root-confinement.md)).
   Started without `--allow-writes` it refuses every write with a reason the web interface shows;
   with it, a tab's `perform_write` and `cancel_write` reach its `Host` as the desktop's do, as the
@@ -279,7 +280,8 @@ input and the output the reference implementation produced, compared exactly
 (`crates/core/tests/layout_reference.rs`, `crates/git/tests/load_reference.rs`), beside the
 structural tests of the shape in `crates/core/tests/structure.rs`. A write is tested on a
 repository `git` made, and what it did is read back with `git` (`crates/git/tests/write.rs`,
-`crates/git/tests/history.rs`); a refused write goes through `refused`, which compares one
+`crates/git/tests/history.rs`, and the merge editor's save beside `git add` of the same file in
+`crates/git/tests/merge_editor.rs`); a refused write goes through `refused`, which compares one
 snapshot of the repository before and after. Each local write also runs beside the `git` command
 it stands for, on two copies of a repository in every state that changes its outcome
 (`crates/git/tests/git_parity.rs`), each departure listed with the ADR that decides it, and the
@@ -300,7 +302,9 @@ server that stalls a fetch). Each concern of the server is a test binary of its 
 links no part of Tauri or WebKit; `allow_writes.rs` what `--allow-writes` lets through and holds
 back, the turns of a repository's writes, and the programs a repository names, none of which its
 writes run while `git` performing the same writes runs each (Q-4);
-`command_list.rs` the shared list of commands each host answers; `tls.rs` where it listens and
+`command_list.rs` the shared list of commands each host answers; `merge_editor.rs` the merge
+editor's read and save in a tab, with and without `--allow-writes`, and the reasons it opens no
+file; `tls.rs` where it listens and
 its TLS; `hostile_commands.rs` every command sent hostile arguments.
 Where the web interface spells the JSON of a core value,
 the core's `tests/write_fixture.rs` writes an example to `crates/core/tests/fixtures/` and the web
@@ -357,6 +361,18 @@ lives between them. Only what a newcomer would otherwise reconstruct from code.
   same repository, which takes the commit the write made, or else the commit selected before, and
   names its row once a chunk lays it out, unless the developer has chosen another by then; the
   shared `Host` passes the row on with `history-grew`, and the front end selects it
+  ([ADR-0031](adr/0031-writes-what-git-writes.md)).
+- **Resolving in the merge editor.** A front end offers the merge editor on the conflicts the
+  refs list as editable, those whose sides both hold text. Opening one reads the working
+  directory's file through `GitReader`'s `load_merge_file`, which the shared `Host` answers as
+  `get_merge_file`, as a `MergeFile`:
+  its text, its blob id, and the blocks the core's `merge.rs` finds, each base from the file or
+  from the index's stages merged in memory; a file the editor does not open comes back as the
+  core's `NotOpened` reason. The front end then tracks the blocks through the developer's edits
+  itself, CodeMirror's state in the web interface, the core's blocks found again in the text in
+  the terminal application. Saving is the core's `Write::SaveMerge`, performed as every write,
+  which the git adapter refuses where a marker line remains, or the file or the conflict is no
+  longer as read; leaving with a result not saved is asked by the front end
   ([ADR-0031](adr/0031-writes-what-git-writes.md)).
 - **Transferring.** A fetch, a pull, or a push is a `Write` like any other, handed to
   `port::perform` with a callback that the git adapter tells how far the transfer has come and
