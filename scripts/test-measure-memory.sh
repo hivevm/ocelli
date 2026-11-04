@@ -50,7 +50,13 @@ pause="301.${$}"
   printf '  echo "$(git -C "$1" rev-list --count --all) commits" >&2\nfi\nsleep %s &\nwait\n' "$pause"
 } > "$work/runs"
 printf '#!/usr/bin/env bash\nexit 0\n' > "$work/exits"
-printf '#!/usr/bin/env bash\nsleep %s &\nwait\n' "$pause" > "$work/silent"
+# The silent one holds the same 128 MB, so that its empty runs settle on a busy machine as the
+# others' do, and never reports a loaded graph.
+# shellcheck disable=SC2016
+{
+  printf '#!/usr/bin/env bash\nheld=$(head -c 128000000 /dev/zero | tr "\\0" a)\n'
+  printf 'sleep %s &\nwait\n' "$pause"
+} > "$work/silent"
 # shellcheck disable=SC2016
 {
   printf '#!/usr/bin/env bash\necho "1 commits" >&2\n'
@@ -117,7 +123,7 @@ expect "less than the stand-in adds is missed and fails the run" 1 \
   "| 10 MB | missed |" OCELLI_DESKTOP="$work/runs" OCELLI_MEMORY_LIMIT_MB=10
 expect "an application that exits fails the run" 1 "the application exited" \
   OCELLI_DESKTOP="$work/exits"
-# The time limit holds the empty runs too, which must settle within it on a busy machine first.
+# The time limit holds the empty runs too, which settle within it first.
 expect "an application that never reports a loaded graph fails the run" 1 \
   "never reported a loaded graph" OCELLI_DESKTOP="$work/silent" OCELLI_MEMORY_COMMITS=10 \
   OCELLI_MEMORY_TIMEOUT=12
