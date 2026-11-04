@@ -1,15 +1,17 @@
 //! The terminal application's merge editor (ADR-0031, G-15, G-18): a conflicted file's text in
-//! `tui-textarea-2`, editable everywhere with undo, its blocks found by the core in the text as
-//! it is now. Alt-o, Alt-t, and Alt-b take ours, theirs, or both for the block under the cursor,
-//! Alt-n and Alt-p move between blocks, Alt-a opens and closes the block's base, Ctrl-S saves,
-//! and Esc leaves, asking first where the result is not saved (Q-7). Free of terminal I/O, as
-//! [`App`](crate::app::App) is, so that tests drive it.
+//! `tui-textarea-2`, editable everywhere with undo. Its blocks are those the core found in the file
+//! opened, each followed through every edit as the web interface follows its own: a block an edit
+//! took a marker line from, or moved one out of order, is no block, and a run of marker lines typed
+//! or pasted is none either. Alt-o, Alt-t, and Alt-b take ours, theirs, or both for the block under
+//! the cursor, Alt-n and Alt-p move between blocks, Alt-a opens and closes the block's base, Ctrl-S
+//! saves, and Esc leaves, asking first where the result is not saved (Q-7). Free of terminal I/O,
+//! as [`App`](crate::app::App) is, so that tests drive it.
 //!
 //! An 80-column terminal holds one column, not three parts a block (ADR-0031): a base the file
 //! holds between `|||||||` and `=======` is left out of the text the editor opens, which no
 //! resolution keeps, and shown with a base found in memory beneath the text while it is open.
 
-use ocelli_core::merge::{MergeBlock, MergeFile, blocks};
+use ocelli_core::merge::{MergeBlock, MergeFile};
 use ocelli_core::model::Conflict;
 use ocelli_core::port::Write;
 use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
@@ -42,12 +44,31 @@ pub enum Outcome {
     Leave,
 }
 
-/// A block as opened: its ours and theirs, by which it is found again, and its base where it
-/// has one, each in `\n` line endings.
-struct Opened {
-    ours: String,
-    theirs: String,
+/// A block as the editor holds it from the file opened: where its three marker lines start in
+/// the text as it is now, by byte, moved along with every edit, whether a side was taken for it,
+/// and its base where it has one, in `\n` line endings.
+#[derive(Clone)]
+struct Held {
+    markers: [usize; 3],
+    taken: bool,
     base: Option<String>,
+}
+
+/// A block an edit left whole: its index as opened, and the rows of its markers, counted from 0.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct Found {
+    index: usize,
+    rows: [usize; 3],
+}
+
+/// What each of a block's marker lines begins with, in their order.
+const MARKERS: [&str; 3] = ["<<<<<<<", "=======", ">>>>>>>"];
+
+/// The byte at which each line of `text` starts.
+fn line_starts(text: &str) -> Vec<usize> {
+    std::iter::once(0)
+        .chain(text.match_indices('\n').map(|(i, _)| i + 1))
+        .collect()
 }
 
 pub struct MergeEditor {
@@ -57,8 +78,10 @@ pub struct MergeEditor {
     blob: String,
     /// The text as opened, its base sections left out: a result that differs is not saved.
     opened: String,
-    /// The blocks as opened, in their order, with their bases.
-    bases: Vec<Opened>,
+    /// The blocks as opened, in their order, where they are in `last`.
+    held: Vec<Held>,
+    /// The text the blocks' markers were last moved along to.
+    last: String,
     pub area: TextArea<'static>,
     /// Whether the base of the block under the cursor is shown.
     pub base_open: bool,
@@ -79,11 +102,13 @@ fn count(text: &str) -> usize {
     text.matches('\n').count()
 }
 
-/// A side taken, as undo and redo find it again.
+/// A side taken, as undo and redo find it again, with the blocks before and after it.
 struct Take {
     before: String,
     after: String,
     edits: usize,
+    held_before: Vec<Held>,
+    held_after: Vec<Held>,
 }
 
 fn lf(text: &str) -> String {
@@ -107,13 +132,25 @@ impl MergeEditor {
     pub fn open(conflict: Conflict, file: MergeFile) -> Self {
         let text = lf(&file.text);
         let lines = without_bases(&text, &file.blocks);
-        let bases = file
+        let opened = lines.join("\n");
+        let starts = line_starts(&opened);
+        // The rows of each block's markers, less the base sections set aside above it.
+        let mut aside = 0;
+        let held = file
             .blocks
             .iter()
-            .map(|b| Opened {
-                ours: lf(&b.ours),
-                theirs: lf(&b.theirs),
-                base: b.base.as_deref().map(lf),
+            .map(|b| {
+                let first = b.first_line - 1 - aside;
+                let between = first + 1 + count(&b.ours);
+                let last = between + 1 + count(&b.theirs);
+                if b.base_in_file {
+                    aside += 1 + b.base.as_deref().map_or(0, count);
+                }
+                Held {
+                    markers: [starts[first], starts[between], starts[last]],
+                    taken: false,
+                    base: b.base.as_deref().map(lf),
+                }
             })
             .collect();
         let mut area = TextArea::new(lines);
@@ -124,8 +161,9 @@ impl MergeEditor {
             path: conflict.path.clone(),
             conflict,
             blob: file.blob,
-            opened: String::new(),
-            bases,
+            opened: opened.clone(),
+            held,
+            last: opened,
             area,
             base_open: false,
             said: None,
@@ -133,9 +171,8 @@ impl MergeEditor {
             saving: false,
             takes: Vec::new(),
         };
-        editor.opened = editor.text();
         if let Some(first) = editor.blocks().first() {
-            editor.jump(first.first_line - 1);
+            editor.jump(first.rows[0]);
         }
         editor
     }
@@ -150,23 +187,85 @@ impl MergeEditor {
         self.text() != self.opened
     }
 
-    /// The blocks of the text as it is now, as the core finds them.
-    pub fn blocks(&self) -> Vec<MergeBlock> {
-        blocks(&self.text())
+    /// The cursor's place in the text, by byte.
+    fn offset(&self) -> usize {
+        let (row, col) = self.area.cursor();
+        let lines = self.area.lines();
+        let above: usize = lines[..row].iter().map(|line| line.len() + 1).sum();
+        let line = &lines[row];
+        above + line.char_indices().nth(col).map_or(line.len(), |(i, _)| i)
+    }
+
+    /// Moves the blocks' markers along with the edit that made the text as it is now: the one
+    /// change between the span the two texts share at their start, up to `at` where the edit was
+    /// made there, and the one they share at their end. Where text put in repeats what follows it,
+    /// the change is so found where the developer typed it, not past the repeat. A marker before
+    /// the change stays, one after it moves by what the change adds, one at the start of what it
+    /// removes stays there, and one where it only puts text in, or inside or at the end of what it
+    /// replaces, goes past what it puts in, as CodeMirror maps a position kept with what follows
+    /// it in the web interface.
+    fn follow(&mut self, at: Option<usize>) {
+        let now = self.text();
+        if now == self.last {
+            return;
+        }
+        let (old, new) = (self.last.as_bytes(), now.as_bytes());
+        let start = old.iter().zip(new).take_while(|(a, b)| a == b).count();
+        let start = at.map_or(start, |at| start.min(at));
+        let room = old.len().min(new.len()) - start;
+        let end = old
+            .iter()
+            .rev()
+            .zip(new.iter().rev())
+            .take(room)
+            .take_while(|(a, b)| a == b)
+            .count();
+        let (to, put) = (old.len() - end, new.len() - end - start);
+        for held in &mut self.held {
+            for marker in &mut held.markers {
+                *marker = if *marker < start || (*marker == start && to > start) {
+                    *marker
+                } else if *marker > to {
+                    *marker - to + start + put
+                } else {
+                    start + put
+                };
+            }
+        }
+        self.last = now;
+    }
+
+    /// The blocks an edit left whole, in their order: no side taken, and each marker still at the
+    /// start of a line that begins as it did, below the one before it.
+    fn blocks(&self) -> Vec<Found> {
+        let starts = line_starts(&self.last);
+        self.held
+            .iter()
+            .enumerate()
+            .filter(|(_, held)| !held.taken)
+            .filter_map(|(index, held)| {
+                let mut rows = [0; 3];
+                for (i, &marker) in held.markers.iter().enumerate() {
+                    let row = starts.binary_search(&marker).ok()?;
+                    if !self.last[marker..].starts_with(MARKERS[i]) || (i > 0 && row <= rows[i - 1])
+                    {
+                        return None;
+                    }
+                    rows[i] = row;
+                }
+                Some(Found { index, rows })
+            })
+            .collect()
     }
 
     /// What each line of the blocks is now, by row counted from 0.
     pub fn line_kinds(&self) -> Vec<(usize, LineKind)> {
         let mut kinds = Vec::new();
-        for block in self.blocks() {
-            let between = block.first_line + count(&block.ours);
-            for row in block.first_line - 1..block.last_line {
-                let kind = if row + 1 == block.first_line
-                    || row + 1 == block.last_line
-                    || row == between
-                {
+        for Found { rows, .. } in self.blocks() {
+            for row in rows[0]..=rows[2] {
+                let kind = if rows.contains(&row) {
                     LineKind::Marker
-                } else if row < between {
+                } else if row < rows[1] {
                     LineKind::Ours
                 } else {
                     LineKind::Theirs
@@ -178,31 +277,16 @@ impl MergeEditor {
     }
 
     /// The block under the cursor.
-    fn block_here(&self) -> Option<MergeBlock> {
+    fn block_here(&self) -> Option<Found> {
         let row = self.area.cursor().0;
         self.blocks()
             .into_iter()
-            .find(|b| b.first_line - 1 <= row && row < b.last_line)
+            .find(|b| b.rows[0] <= row && row <= b.rows[2])
     }
 
-    /// The base of the block under the cursor: that of the block in its place as opened while
-    /// no block was taken or made, its sides edited or not, else that of the block opened with
-    /// its ours and theirs.
+    /// The base of the block under the cursor.
     pub fn base_here(&self) -> Option<&str> {
-        let row = self.area.cursor().0;
-        let found = self.blocks();
-        let index = found
-            .iter()
-            .position(|b| b.first_line - 1 <= row && row < b.last_line)?;
-        let opened = if found.len() == self.bases.len() {
-            self.bases.get(index)
-        } else {
-            let (ours, theirs) = (lf(&found[index].ours), lf(&found[index].theirs));
-            self.bases
-                .iter()
-                .find(|b| b.ours == ours && b.theirs == theirs)
-        };
-        opened?.base.as_deref()
+        self.held[self.block_here()?.index].base.as_deref()
     }
 
     /// Moves the cursor to the start of `row`. A jump reaches row 65,535 at most; the rows past
@@ -219,18 +303,26 @@ impl MergeEditor {
     /// Replaces the block under the cursor, its markers included, by `side` as it holds it now,
     /// one change that undo puts back.
     fn take(&mut self, side: Side) {
-        let Some(block) = self.block_here() else {
+        let Some(Found { index, rows }) = self.block_here() else {
             self.said = Some("The cursor is in no block".into());
             return;
         };
-        let mut insert = lf(&match side {
-            Side::Ours => block.ours,
-            Side::Theirs => block.theirs,
-            Side::Both => block.ours + &block.theirs,
-        });
+        let lines = |from: usize, to: usize| -> String {
+            self.area.lines()[from..to]
+                .iter()
+                .map(|line| format!("{line}\n"))
+                .collect()
+        };
+        let (ours, theirs) = (lines(rows[0] + 1, rows[1]), lines(rows[1] + 1, rows[2]));
+        let mut insert = match side {
+            Side::Ours => ours,
+            Side::Theirs => theirs,
+            Side::Both => ours + &theirs,
+        };
         let before = self.text();
-        let last = block.last_line - 1;
-        self.jump(block.first_line - 1);
+        let held_before = self.held.clone();
+        let last = rows[2];
+        self.jump(rows[0]);
         self.area.start_selection();
         if last + 1 < self.area.lines().len() {
             self.jump(last + 1);
@@ -242,10 +334,14 @@ impl MergeEditor {
         let edits = if insert.is_empty() { 1 } else { 2 };
         self.area.insert_str(insert);
         self.area.cancel_selection();
+        self.follow(None);
+        self.held[index].taken = true;
         self.takes.push(Take {
             before,
             after: self.text(),
             edits,
+            held_before,
+            held_after: self.held.clone(),
         });
     }
 
@@ -253,17 +349,38 @@ impl MergeEditor {
     fn undo(&mut self) {
         let text = self.text();
         let take = self.takes.iter().rev().find(|t| t.after == text);
-        for _ in 0..take.map_or(1, |t| t.edits) {
+        let (edits, back) = take.map_or((1, None), |t| {
+            (t.edits, Some((t.before.clone(), t.held_before.clone())))
+        });
+        for _ in 0..edits {
             self.area.undo();
         }
+        self.restore(back);
     }
 
     /// Ctrl-R: redoes the edit undone last, a side taken whole.
     fn redo(&mut self) {
         let text = self.text();
         let take = self.takes.iter().rev().find(|t| t.before == text);
-        for _ in 0..take.map_or(1, |t| t.edits) {
+        let (edits, back) = take.map_or((1, None), |t| {
+            (t.edits, Some((t.after.clone(), t.held_after.clone())))
+        });
+        for _ in 0..edits {
             self.area.redo();
+        }
+        self.restore(back);
+    }
+
+    /// The blocks as a side taken left them, where undo or redo made the text that take left or
+    /// started from; else moved along with the edit undone or redone. The take is found by its
+    /// text, which an edit since and its own undo can make again without the take being next.
+    fn restore(&mut self, back: Option<(String, Vec<Held>)>) {
+        match back {
+            Some((text, held)) if text == self.text() => {
+                self.held = held;
+                self.last = text;
+            }
+            _ => self.follow(None),
         }
     }
 
@@ -271,14 +388,14 @@ impl MergeEditor {
     fn step(&mut self, forward: bool) {
         let row = self.area.cursor().0;
         let found = self.blocks();
-        let start = self.block_here().map_or(row, |b| b.first_line - 1);
+        let start = self.block_here().map_or(row, |b| b.rows[0]);
         let to = if forward {
-            found.iter().find(|b| b.first_line - 1 > row)
+            found.iter().find(|b| b.rows[0] > row)
         } else {
-            found.iter().rev().find(|b| b.first_line - 1 < start)
+            found.iter().rev().find(|b| b.rows[0] < start)
         };
         match to {
-            Some(block) => self.jump(block.first_line - 1),
+            Some(block) => self.jump(block.rows[0]),
             None => self.said = Some("No block that way".into()),
         }
     }
@@ -305,6 +422,7 @@ impl MergeEditor {
             };
         }
         self.said = None;
+        let before = self.offset();
         let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
         let alt = key.modifiers.contains(KeyModifiers::ALT);
         match key.code {
@@ -337,6 +455,8 @@ impl MergeEditor {
                 self.area.input(key);
             }
         }
+        // An edit a key makes, it makes where the cursor was or is now.
+        self.follow(Some(before.min(self.offset())));
         Outcome::Stay
     }
 
@@ -354,7 +474,7 @@ impl MergeEditor {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use ocelli_core::merge::blocks_with_bases;
+    use ocelli_core::merge::{blocks, blocks_with_bases};
 
     const TEXT: &str = "a\n<<<<<<< HEAD\nours\n=======\ntheirs\n>>>>>>> side\nm\n\
                         <<<<<<< HEAD\no2\n||||||| base\nb2\n=======\nt2\n>>>>>>> side\nz\n";
@@ -437,6 +557,25 @@ mod tests {
             e.key(ctrl('r'));
             assert_eq!(e.text(), taken, "{key}: redo takes it again");
         }
+    }
+
+    #[test]
+    // Verifies: ADR-0031, G-15
+    fn a_take_s_blocks_come_back_only_with_the_text_it_left_or_started_from() {
+        let mut e = editor();
+        e.key(alt('o'));
+        e.key(ctrl('u'));
+        assert_eq!(e.blocks().len(), 2);
+        // Typed and taken back: the text the take started from, its redo gone with the typing.
+        e.key(plain(KeyCode::Char('x')));
+        e.key(plain(KeyCode::Backspace));
+        e.key(ctrl('r'));
+        assert!(!e.unsaved(), "{}", e.text());
+        assert_eq!(
+            e.blocks().len(),
+            2,
+            "no block is taken that the text still holds"
+        );
     }
 
     #[test]
@@ -614,5 +753,77 @@ mod tests {
         assert!(!e.leaving, "the editor stays open");
         assert_eq!(e.key(ctrl('c')), Outcome::Stay);
         assert_eq!(e.key(plain(KeyCode::Char('y'))), Outcome::Leave);
+    }
+
+    /// The cases of `crates/core/tests/fixtures/merge.json`, which the core writes and the web
+    /// interface's `mergeBlocks.test.ts` reads too.
+    fn fixture() -> serde_json::Value {
+        serde_json::from_str(include_str!("../../core/tests/fixtures/merge.json"))
+            .expect("the fixture is JSON")
+    }
+
+    /// A file of the fixture, as the core handed it over.
+    fn file_of(file: &serde_json::Value) -> MergeFile {
+        let text = |v: &serde_json::Value| v.as_str().expect("a text").to_string();
+        let line = |v: &serde_json::Value| v.as_u64().expect("a line") as usize;
+        MergeFile {
+            text: text(&file["text"]),
+            blob: text(&file["blob"]),
+            blocks: file["blocks"]
+                .as_array()
+                .expect("blocks")
+                .iter()
+                .map(|b| MergeBlock {
+                    first_line: line(&b["firstLine"]),
+                    last_line: line(&b["lastLine"]),
+                    ours: text(&b["ours"]),
+                    theirs: text(&b["theirs"]),
+                    base: b["base"].as_str().map(str::to_string),
+                    base_in_file: b["baseInFile"].as_bool().expect("baseInFile"),
+                })
+                .collect(),
+        }
+    }
+
+    #[test]
+    // Verifies: ADR-0031, G-15
+    fn a_side_taken_leaves_the_text_the_core_says() {
+        for case in fixture()["takes"].as_array().expect("takes") {
+            let mut e = MergeEditor::open(conflict(), file_of(&case["file"]));
+            for _ in 0..case["block"].as_u64().expect("a block") {
+                e.key(alt('n'));
+            }
+            let side = case["side"].as_str().expect("a side");
+            e.key(alt(side.chars().next().expect("ours, theirs, or both")));
+            assert_eq!(
+                e.text(),
+                case["result"].as_str().expect("a result"),
+                "{side}"
+            );
+        }
+    }
+
+    #[test]
+    // Verifies: ADR-0031, G-15
+    fn a_run_of_marker_lines_typed_is_no_block_and_the_blocks_opened_stay_whole() {
+        for case in fixture()["pasted"].as_array().expect("pasted") {
+            let mut e = MergeEditor::open(conflict(), file_of(&case["file"]));
+            e.jump(case["line"].as_u64().expect("a line") as usize - 1);
+            for c in case["paste"].as_str().expect("a paste").chars() {
+                e.key(plain(if c == '\n' {
+                    KeyCode::Enter
+                } else {
+                    KeyCode::Char(c)
+                }));
+            }
+            let drawn: Vec<u64> = e.blocks().iter().map(|b| b.rows[0] as u64 + 1).collect();
+            let want: Vec<u64> = case["blocks"]
+                .as_array()
+                .expect("blocks")
+                .iter()
+                .map(|line| line.as_u64().expect("a line"))
+                .collect();
+            assert_eq!(drawn, want, "{}", e.text());
+        }
     }
 }
