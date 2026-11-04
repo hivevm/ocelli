@@ -11,8 +11,11 @@
 //! replaces, a name this system cannot give a file, a tree naming one entry twice or two entries
 //! one name where case is folded, a conflict between a file and a directory, or a link at a
 //! conflicted path or beside it under its name with `~` refuses the write before libgit2 is
-//! called. A link only staged is never trusted. `clippy.toml` disallows these calls everywhere but
-//! here. A write that checks out a result index libgit2 built itself, a merge, a stash's apply or
+//! called. A link only staged is never trusted, and every look reads a link as itself, never what
+//! it points to. Another program that swaps a directory for a link, or a file for a hard link to
+//! one outside, between the look and the write is not caught: a local attacker racing the write,
+//! whom the threat model leaves out. `clippy.toml` disallows these calls everywhere but here.
+//! A write that checks out a result index libgit2 built itself, a merge, a stash's apply or
 //! a rebase step, reads the trees it merged too: libgit2 fills the result from the three trees
 //! without an fsck of its own (`index_from_diff_list`), so a malformed side could in principle
 //! leave a stage-0 link `a` beside `a/x` in the result that the result's own conflict check does
