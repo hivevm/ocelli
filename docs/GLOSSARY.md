@@ -9,6 +9,10 @@ sentences, and list under _Avoid:_ the synonyms it displaces, where there are an
 specification, an ADR, or the code uses without an entry here is a gap to close, not a convention
 to invent.
 
+- **Block** — a run of a conflicted file from a `<<<<<<<` line to its `>>>>>>>` line: ours,
+  theirs, and the base where the file or a merge of the index's stages holds one, which the merge
+  editor sets apart.
+  _Avoid:_ hunk, conflict region, chunk (a run of commits).
 - **Branch edge** — an edge that leaves the lane of a commit to reach a child in another lane,
   where a branch forks off.
   _Avoid:_ fork line.
@@ -81,6 +85,10 @@ to invent.
 - **Merge edge** — an edge that joins a parent in another lane to a merge commit, where a branch
   is merged.
   _Avoid:_ merge line.
+- **Merge editor** — the editor in which a front end resolves a conflict whose sides both hold
+  text: its blocks set apart, a side taken for a block, the text edited, and the result saved as
+  the file's resolution.
+  _Avoid:_ merge tool, mergetool (a program `git`'s configuration names).
 - **Operation in progress** — a merge, rebase, cherry-pick, or revert stopped on a conflict, in
   `git`'s own state, whoever started it; continued or aborted once its conflicts are resolved.
   _Avoid:_ stopped write, pending merge.

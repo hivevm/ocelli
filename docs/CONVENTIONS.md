@@ -114,6 +114,9 @@ skimmed. The design revision drops what prevented nothing
   command sets the status bar, and ESLint rejects a `.catch` whose handler takes no error; in a
   script a failure exits non-zero and says what failed. A count that cannot be read, or a
   measurement taken before the state it measures was reached, is a failure, not a zero or a pass.
+  Nor is a failure renamed: a reason goes only on the case it names, an absence an `Option` made
+  into that refusal, never a context laid over a `Result`, which gives every failure behind it
+  the same reason, as one that read a failed index as "is not conflicted" did.
 - **An answer is taken only while what asked for it still stands.** A result that comes back
   after an await is checked against the load, the commit, and the request it answers before it
   changes any state, and dropped where the developer or a reload has moved on; what is remembered
