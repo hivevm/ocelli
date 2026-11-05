@@ -64,7 +64,9 @@ verifies.
   - **References.** Each step moves its references with a map, old to new, applied by the map
     script of the `normalize` skill. The map stands in the hand-off and the
     commit body, and in no document. A commit older than the normalization cites the numbers it
-    had then.
+    had then. Each commit of the normalization that changes an accepted ADR carries the trailer
+    `Normalization: <date>`, kept through any later rewrite of the branch: it is the one mark by
+    which `scripts/check-adr-text.sh` lets a commit rewrite an accepted ADR.
 - **Cite only what exists.** Every `ADR-NNNN` reference names a file already in this directory.
   An anticipated follow-up is described by topic ("a follow-up ADR on session storage"), never by
   a number. In Markdown, cite an ADR as a link to its own file.
