@@ -2,8 +2,10 @@
 import { describe, expect, test } from 'bun:test';
 import { EditorState, type TransactionSpec } from '@codemirror/state';
 import { history, redo, undo } from '@codemirror/commands';
+import { join } from 'node:path';
 import { blockLineKinds, blocksField, drawn, takeSide, toggledBase, undoableTakes } from './mergeBlocks.ts';
-import type { MergeBlock } from './types.ts';
+import type { Side } from './mergeEditor.ts';
+import type { MergeBlock, MergeFile } from './types.ts';
 
 const text = 'a\n<<<<<<< HEAD\nours\n=======\ntheirs\n>>>>>>> side\nm\n'
   + '<<<<<<< HEAD\no2\n||||||| base\nb2\n=======\nt2\n>>>>>>> side';
@@ -148,5 +150,38 @@ describe('drawn', () => {
       { kind: 'bar', index: 1, at: state.doc.line(4).from, base: true, open: false },
       { kind: 'fold', from: state.doc.line(5).from, to: state.doc.line(5).to },
     ]);
+  });
+});
+
+describe('what both merge editors do, as the core says', () => {
+  // The fixture is written by the core's test (crates/core/tests/write_fixture.rs); the terminal
+  // application's merge editor reads the same cases (crates/tui/src/merge.rs).
+  const fixture = join(import.meta.dir, '..', '..', 'crates', 'core', 'tests', 'fixtures', 'merge.json');
+  const cases = async () => (await Bun.file(fixture).json()) as {
+    takes: { file: MergeFile; block: number; side: Side; result: string }[];
+    pasted: { file: MergeFile; line: number; paste: string; blocks: number[] }[];
+  };
+
+  const open = (file: MergeFile) => {
+    const field = blocksField(file.blocks);
+    return { field, state: EditorState.create({ doc: file.text, extensions: [field] }) };
+  };
+
+  test('a side taken leaves the text the core says', async () => {
+    for (const { file, block, side, result } of (await cases()).takes) {
+      const { field, state } = open(file);
+      const spec = takeSide(state, field, block, side);
+      if (!spec) throw new Error(`no block ${block} to take`);
+      expect(state.update(spec).state.doc.toString()).toBe(result);
+    }
+  });
+
+  test('a run of marker lines pasted is no block, and the blocks opened stay whole', async () => {
+    for (const { file, line, paste, blocks: lines } of (await cases()).pasted) {
+      const { field, state: opened } = open(file);
+      const state = opened.update({ changes: { from: opened.doc.line(line).from, insert: paste } }).state;
+      const bars = drawn(state, state.field(field)).filter((d) => d.kind === 'bar');
+      expect(bars.map((bar) => state.doc.lineAt(bar.at).number)).toEqual(lines);
+    }
   });
 });
