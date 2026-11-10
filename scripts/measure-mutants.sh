@@ -30,7 +30,7 @@ jobs="${OCELLI_MUTANTS_JOBS:-2}"
 out="$(mktemp -d)"
 trap 'rm -rf "$out"' EXIT
 
-if ! cargo mutants --version 2>/dev/null | grep -qx "cargo-mutants $VERSION"; then
+if ! grep -qx "cargo-mutants $VERSION" <<< "$(cargo mutants --version 2>/dev/null)"; then
   cargo install cargo-mutants --locked --version "$VERSION" || {
     echo "Mutants: cargo-mutants $VERSION cannot be installed." >&2
     exit 1

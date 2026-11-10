@@ -134,7 +134,7 @@ missing=()
 for tool in cargo-xwin llvm-lib clang-cl; do
   command -v "$tool" >/dev/null 2>&1 || missing+=("$tool")
 done
-rustup target list --installed 2>/dev/null | grep -qx x86_64-pc-windows-msvc ||
+grep -qx x86_64-pc-windows-msvc <<< "$(rustup target list --installed 2>/dev/null)" ||
   missing+=("the x86_64-pc-windows-msvc target")
 if ((${#missing[@]})); then
   echo "Skipped: ${missing[*]} not installed."

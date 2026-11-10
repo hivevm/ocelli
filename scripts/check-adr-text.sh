@@ -159,7 +159,7 @@ while IFS= read -r c; do
     hits+=("$short changes $n line$( ((n == 1)) || echo s) of $adr ($path), which is accepted, the first at line ${found#*$'\t'}")
   done < <(touched "$before" "$c")
   ((${#hits[@]})) || continue
-  if git log -1 --format='%(trailers:key=Normalization,valueonly)' "$c" | grep -q '[^[:space:]]'; then
+  if grep -q '[^[:space:]]' <<< "$(git log -1 --format='%(trailers:key=Normalization,valueonly)' "$c")"; then
     trailed+=("$short $(git log -1 --format=%s "$c")")
   else
     findings+=("${hits[@]}")

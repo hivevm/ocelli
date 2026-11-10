@@ -173,7 +173,8 @@ this ADR. The self-test of the `normalize` skill's map script
 this ADR too: it decides that a map moves every reference once, a swap included, and leaves the
 record it describes to the normalization. One gate routes a specification change to a human
 without judging it: [`.github/CODEOWNERS`](../../.github/CODEOWNERS) requires the owner's review
-once the repository enables it ([**Repository settings**](../../README.md#repository-settings)).
+once the repository enables it
+([**Repository settings**](../../CONTRIBUTING.md#repository-settings)).
 That no other document holds a rule, that the
 overview matches the system, that the glossary's terms are the ones in use, that no convention
 stands where a check could, and that a normalization changed no decision, is review only.

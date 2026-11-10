@@ -6,9 +6,9 @@
 > is updated in the same change as the structure it describes
 > ([ADR-0001](adr/0001-agent-governance-model.md)).
 >
-> **Last design revision:** 2026-11-03, due after 20 changes. The revision that ran moves the
-> date; the number is this project's to set; a sensor counts the changes outside `docs/` since
-> the commit that set the date and says when the next is due
+> **Last design revision:** 2026-11-03, due after 20 changes. The revision that took the count
+> moves the date; the number is this project's to set; a sensor counts the changes outside
+> `docs/` since the commit that set the date and says when the next is due
 > ([ADR-0004](adr/0004-feature-layer.md)).
 
 ## Context

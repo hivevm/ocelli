@@ -5,8 +5,8 @@
   "build": {
     "dockerfile": "Dockerfile"
   },
-  "workspaceFolder": "/workspace",
-  "workspaceMount": "source=${localWorkspaceFolder},target=/workspace,type=bind",
+  // No workspaceFolder or workspaceMount: the default, /workspaces/<directory name>, keeps each
+  // project under a path of its own, and an agent keys its memory by the path (ADR-0009).
 
   "remoteUser": "vscode",
   "containerEnv": {
@@ -17,7 +17,7 @@
   // both yields the home directory on every host (the pattern the Dev Containers documentation
   // recommends). The container shares the host's gh login only where the host keeps the token in
   // this directory rather than its keyring, and on Windows not at all, whose gh keeps its config
-  // under %AppData%: the README's "Dev Container" section, and SECURITY.md for what the container
+  // under %AppData%: the "Dev Container" section of CONTRIBUTING.md, and SECURITY.md for what the container
   // can then reach.
   "mounts": [
     "source=${localEnv:HOME}${localEnv:USERPROFILE}/.claude,target=/home/vscode/.claude,type=bind",
@@ -34,7 +34,7 @@
   // Runs inside the container on every start, so the settings are set again should a session
   // have changed them: the repository's git hooks under .githooks/ and the merge settings they
   // rely on. What each refuses, and the same commands for a clone outside the container,
-  // are under "Git hooks" in the README.
+  // are under "Git hooks" in CONTRIBUTING.md.
   "postStartCommand": {
     "hooks": "git config core.hooksPath .githooks",
     "merge": "git config merge.ff false && git config pull.ff only",
@@ -49,7 +49,7 @@
 
   // DevContainer Features layered on top of the base image. The container intentionally has NO
   // access to the host Docker daemon (no socket mount) — see ADR-0009. Manage the host's containers
-  // from a host-side VS Code extension instead (README → "Host container management").
+  // from a host-side VS Code extension instead (CONTRIBUTING.md → "Host container management").
   "features": {
     // GitHub CLI (`gh`) — used by the coding agent for GitHub operations and as the git
     // credential helper. A push and every gh action wait for a human instruction
