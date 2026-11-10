@@ -1,0 +1,260 @@
+{
+  "pasted": [
+    {
+      "blocks": [
+        7
+      ],
+      "file": {
+        "blob": "b",
+        "blocks": [
+          {
+            "base": null,
+            "baseInFile": false,
+            "firstLine": 2,
+            "lastLine": 6,
+            "ours": "ours\n",
+            "theirs": "theirs\n"
+          }
+        ],
+        "text": "a\n<<<<<<< HEAD\nours\n=======\ntheirs\n>>>>>>> side\nz\n"
+      },
+      "line": 1,
+      "paste": "<<<<<<< x\np\n=======\nq\n>>>>>>> y\n"
+    },
+    {
+      "blocks": [
+        7
+      ],
+      "file": {
+        "blob": "b",
+        "blocks": [
+          {
+            "base": null,
+            "baseInFile": false,
+            "firstLine": 2,
+            "lastLine": 6,
+            "ours": "ours\n",
+            "theirs": "theirs\n"
+          }
+        ],
+        "text": "a\n<<<<<<< HEAD\nours\n=======\ntheirs\n>>>>>>> side\nz\n"
+      },
+      "line": 2,
+      "paste": "<<<<<<< x\np\n=======\nq\n>>>>>>> y\n"
+    },
+    {
+      "blocks": [],
+      "file": {
+        "blob": "b",
+        "blocks": [
+          {
+            "base": null,
+            "baseInFile": false,
+            "firstLine": 2,
+            "lastLine": 6,
+            "ours": "ours\n",
+            "theirs": "theirs\n"
+          }
+        ],
+        "text": "a\n<<<<<<< HEAD\nours\n=======\ntheirs\n>>>>>>> side\nz\n"
+      },
+      "line": 2,
+      "paste": "<"
+    },
+    {
+      "blocks": [
+        2
+      ],
+      "file": {
+        "blob": "b",
+        "blocks": [
+          {
+            "base": null,
+            "baseInFile": false,
+            "firstLine": 2,
+            "lastLine": 6,
+            "ours": "ours\n",
+            "theirs": "theirs\n"
+          }
+        ],
+        "text": "a\n<<<<<<< HEAD\nours\n=======\ntheirs\n>>>>>>> side\nz\n"
+      },
+      "line": 3,
+      "paste": "<<<<<<< x\np\n=======\n"
+    },
+    {
+      "blocks": [
+        2
+      ],
+      "file": {
+        "blob": "b",
+        "blocks": [
+          {
+            "base": null,
+            "baseInFile": false,
+            "firstLine": 2,
+            "lastLine": 6,
+            "ours": "ours\n",
+            "theirs": "theirs\n"
+          }
+        ],
+        "text": "a\n<<<<<<< HEAD\nours\n=======\ntheirs\n>>>>>>> side\nz\n"
+      },
+      "line": 4,
+      "paste": ">>>>>>> y\n<<<<<<< x\n"
+    },
+    {
+      "blocks": [
+        2
+      ],
+      "file": {
+        "blob": "b",
+        "blocks": [
+          {
+            "base": null,
+            "baseInFile": false,
+            "firstLine": 2,
+            "lastLine": 6,
+            "ours": "ours\n",
+            "theirs": "theirs\n"
+          }
+        ],
+        "text": "a\n<<<<<<< HEAD\nours\n=======\ntheirs\n>>>>>>> side\nz\n"
+      },
+      "line": 4,
+      "paste": "=======\n"
+    }
+  ],
+  "takes": [
+    {
+      "block": 0,
+      "file": {
+        "blob": "b",
+        "blocks": [
+          {
+            "base": null,
+            "baseInFile": false,
+            "firstLine": 2,
+            "lastLine": 6,
+            "ours": "ours\n",
+            "theirs": "theirs\n"
+          }
+        ],
+        "text": "a\n<<<<<<< HEAD\nours\n=======\ntheirs\n>>>>>>> side\nz\n"
+      },
+      "result": "a\nours\nz\n",
+      "side": "ours"
+    },
+    {
+      "block": 0,
+      "file": {
+        "blob": "b",
+        "blocks": [
+          {
+            "base": null,
+            "baseInFile": false,
+            "firstLine": 2,
+            "lastLine": 6,
+            "ours": "ours\n",
+            "theirs": "theirs\n"
+          }
+        ],
+        "text": "a\n<<<<<<< HEAD\nours\n=======\ntheirs\n>>>>>>> side\nz\n"
+      },
+      "result": "a\ntheirs\nz\n",
+      "side": "theirs"
+    },
+    {
+      "block": 0,
+      "file": {
+        "blob": "b",
+        "blocks": [
+          {
+            "base": null,
+            "baseInFile": false,
+            "firstLine": 2,
+            "lastLine": 6,
+            "ours": "ours\n",
+            "theirs": "theirs\n"
+          }
+        ],
+        "text": "a\n<<<<<<< HEAD\nours\n=======\ntheirs\n>>>>>>> side\nz\n"
+      },
+      "result": "a\nours\ntheirs\nz\n",
+      "side": "both"
+    },
+    {
+      "block": 1,
+      "file": {
+        "blob": "b",
+        "blocks": [
+          {
+            "base": null,
+            "baseInFile": false,
+            "firstLine": 2,
+            "lastLine": 6,
+            "ours": "x\n",
+            "theirs": "y\n"
+          },
+          {
+            "base": null,
+            "baseInFile": false,
+            "firstLine": 8,
+            "lastLine": 11,
+            "ours": "",
+            "theirs": "q\n"
+          }
+        ],
+        "text": "a\n<<<<<<< H\nx\n=======\ny\n>>>>>>> s\nm\n<<<<<<< H\n=======\nq\n>>>>>>> s"
+      },
+      "result": "a\n<<<<<<< H\nx\n=======\ny\n>>>>>>> s\nm\n",
+      "side": "ours"
+    },
+    {
+      "block": 1,
+      "file": {
+        "blob": "b",
+        "blocks": [
+          {
+            "base": null,
+            "baseInFile": false,
+            "firstLine": 2,
+            "lastLine": 6,
+            "ours": "x\n",
+            "theirs": "y\n"
+          },
+          {
+            "base": null,
+            "baseInFile": false,
+            "firstLine": 8,
+            "lastLine": 11,
+            "ours": "",
+            "theirs": "q\n"
+          }
+        ],
+        "text": "a\n<<<<<<< H\nx\n=======\ny\n>>>>>>> s\nm\n<<<<<<< H\n=======\nq\n>>>>>>> s"
+      },
+      "result": "a\n<<<<<<< H\nx\n=======\ny\n>>>>>>> s\nm\nq",
+      "side": "theirs"
+    },
+    {
+      "block": 0,
+      "file": {
+        "blob": "b",
+        "blocks": [
+          {
+            "base": "b\n",
+            "baseInFile": true,
+            "firstLine": 2,
+            "lastLine": 8,
+            "ours": "o\n",
+            "theirs": "t\n"
+          }
+        ],
+        "text": "a\n<<<<<<< HEAD\no\n||||||| base\nb\n=======\nt\n>>>>>>> side\nz\n"
+      },
+      "result": "a\no\nt\nz\n",
+      "side": "both"
+    }
+  ]
+}

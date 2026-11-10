@@ -182,6 +182,8 @@ run "Action references sensor self-test" scripts/test-sensor-action-refs.sh
 run "Action references (ADR-0010)" scripts/sensor-action-refs.sh --require sha
 run "Review binding sensor self-test" scripts/test-sensor-review-binding.sh
 run "Review binding sensor" scripts/sensor-review-binding.sh
+run "Accepted ADR text self-test" scripts/test-check-adr-text.sh
+run "Accepted ADR text" scripts/check-adr-text.sh
 # The repository settings sensor reads GitHub and runs on a human's instruction (ADR-0002); its
 # self-test runs here.
 # On instruction: scripts/sensor-repo-settings.sh
@@ -192,6 +194,7 @@ run "Shell lint self-test" scripts/test-check-shell.sh
 run "Shell lint" scripts/check-shell.sh
 run "Dev Container toolchain self-test" scripts/test-check-devcontainer-toolchain.sh
 run "Dev Container toolchain" scripts/check-devcontainer-toolchain.sh
+run "Build gate self-test" scripts/test-check-build.sh
 run "Build, test, lint" scripts/check-build.sh
 run "Measurement self-test" scripts/test-measure-crossings.sh
 run "Memory measurement self-test" scripts/test-measure-memory.sh
