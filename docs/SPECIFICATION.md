@@ -19,7 +19,7 @@ developers work: on the desktop, in a browser against a remote machine, and in a
 It is worth solving because a layout exists that draws the whole commit graph, every branch
 included, as readably as GitKraken does: each branch in a lane of its own, the main line as a
 straight line on the left, and few edge crossings. GitGraph, the viewer this repository built
-before Ocelli, proved it.
+before Ocelli, proved it; Ocelli's layout carries it and Q-1 measures it.
 
 ## Mission
 
