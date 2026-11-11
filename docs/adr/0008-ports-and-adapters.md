@@ -32,7 +32,7 @@ own that depends on `core`, and `core` depends on no adapter and on no technolog
 
 **Out of scope:** the names of the adapter crates and the ports, which the golden path shows and
 [`docs/ARCHITECTURE.md`](../ARCHITECTURE.md) lists; the internal structure of `core`, of which
-the layout's is [ADR-0012](0012-functional-core-layout.md)'s; and the web interface, which
+the layout's is [ADR-0014](0014-functional-core-layout.md)'s; and the web interface, which
 talks to an adapter and not to `core`.
 
 ## Alternatives considered
@@ -63,7 +63,7 @@ talks to an adapter and not to `core`.
   operation that `git` does natively is phrased through a port first.
 - Follow-ups: what counts as a technology in Rust, stated in the conventions with the golden
   path. The Git access behind the repository port is
-  [ADR-0017](0017-git2-repository-reader.md).
+  [ADR-0022](0022-git2-repository-reader.md).
 
 ## Enforcement
 

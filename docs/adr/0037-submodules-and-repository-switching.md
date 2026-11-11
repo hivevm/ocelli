@@ -1,4 +1,4 @@
-# ADR-0028: Submodules appear in the repository sidebar, and the sidebar switches the viewed repository
+# ADR-0037: Submodules appear in the repository sidebar, and the sidebar switches the viewed repository
 
 - **Status:** 🟢 accepted
 - **Date:** 2026-10-04
@@ -7,7 +7,7 @@
 
 ## Context
 
-The repository sidebar of [ADR-0027](0027-repository-sidebar.md) answers what a repository
+The repository sidebar of [ADR-0036](0036-sidebar-worktrees-filter.md) answers what a repository
 consists of: its branches, remote branches, worktrees, and tags. A submodule belongs to the same
 answer. It is repository state in the sense a worktree is, something the repository contains and
 points at, and invisible in a view that only draws history.
@@ -27,15 +27,15 @@ Forces:
 - **Showing starts nothing and fetches nothing.** Reading `.gitmodules`, the index entry, a
   submodule's checked-out commit, and another worktree's `HEAD` is reading. An uninitialised
   submodule is shown as uninitialised: cloning it would be a request
-  [ADR-0025](0025-no-egress-hardened-webview.md) does not allow while showing, and opening a
+  [ADR-0034](0034-no-egress-hardened-webview.md) does not allow while showing, and opening a
   submodule is held to Q-4 like any repository.
-- **The chunked load** ([ADR-0016](0016-history-loads-in-chunks.md)) makes an ordinary ref inert,
+- **The chunked load** ([ADR-0018](0018-history-loads-in-chunks.md)) makes an ordinary ref inert,
   while its chunk has not loaded, for a different reason than a submodule's; the two must not be
   confused on screen.
-- **Reading goes through the port** in `ocelli-git` ([ADR-0017](0017-git2-repository-reader.md)).
+- **Reading goes through the port** in `ocelli-git` ([ADR-0022](0022-git2-repository-reader.md)).
 - **Repository state is not a graph row**, the precedent of
-  [ADR-0018](0018-synthetic-nodes-in-the-first-chunk.md) and
-  [ADR-0027](0027-repository-sidebar.md).
+  [ADR-0019](0019-synthetic-nodes-in-the-first-chunk.md) and
+  [ADR-0036](0036-sidebar-worktrees-filter.md).
 
 `git2` already offers `Repository::submodules`, `Submodule::{name, path, url, head_id,
 workdir_id}`, and, for the way back, `Repository::{is_worktree, commondir, discover}`, so no
@@ -72,7 +72,7 @@ parent, through the ordinary load of a repository.
 
 **Out of scope:** initialising, updating, syncing, or removing submodules and adding or pruning
 worktrees, which belong with the decisions on Ocelli's writes, none of which, in
-[ADR-0031](0031-writes-what-git-writes.md), offers them; opening a submodule at its recorded commit
+[ADR-0023](0023-writes-what-git-writes.md), offers them; opening a submodule at its recorded commit
 rather than at its `HEAD`; a list of recent repositories or a back stack of several steps.
 
 ## Alternatives considered

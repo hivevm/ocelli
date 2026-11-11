@@ -1,5 +1,5 @@
-// Verifies: ADR-0026
-//! The changed-files list in its two views (ADR-0026): flat, and a directory
+// Verifies: ADR-0035
+//! The changed-files list in its two views (ADR-0035): flat, and a directory
 //! tree with folders first and single-folder chains collapsed — as the
 //! desktop's `fileTree.ts`. The tree is flattened into rows for a list widget,
 //! skipping the contents of collapsed folders.

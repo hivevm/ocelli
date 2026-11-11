@@ -199,7 +199,7 @@ run "Build, test, lint" scripts/check-build.sh
 run "Measurement self-test" scripts/test-measure-crossings.sh
 run "Memory measurement self-test" scripts/test-measure-memory.sh
 run "Window measurement self-test" scripts/test-measure-windows.sh
-# The release pipeline builds and publishes the installers on a tag (ADR-0038) and checks nothing.
+# The release pipeline builds and publishes the installers on a tag (ADR-0012) and checks nothing.
 # Not a gate: .github/workflows/release.yml
 # The measurements run weekly in .github/workflows/measure.yml: they clone real repositories,
 # build in release, and mutate the git adapter, so each skips itself here unless

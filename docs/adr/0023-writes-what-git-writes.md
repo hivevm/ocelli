@@ -1,9 +1,9 @@
-# ADR-0031: Ocelli writes through libgit2 what `git` writes for the same command, refusing first where `git` would or an ADR departs, running no program, and resolves a conflicted file's text in a merge editor of its own
+# ADR-0023: Ocelli writes through libgit2 what `git` writes for the same command, refusing first where `git` would or an ADR departs, and running no program
 
 - **Status:** 🟢 accepted
 - **Date:** 2026-10-31
 - **Deciders:** Markus Brigl
-- **Applies to:** the `RepositoryWriter` port in `crates/core/src/port.rs`, the writes of `crates/git/src/` in `write.rs`, `guard.rs`, `checkout.rs`, `workdir.rs`, `message.rs`, `operations.rs`, `conflicts.rs`, and `stash.rs`, the working directory a pull's fast-forward writes from `remote.rs`, the reading of a stopped operation in `refs.rs`, every call of the writer from a front end and how a front end shows a stopped operation, `crates/git/tests/git_parity.rs`, the tests of Q-4, and the merge editor: the blocks the core finds in a conflicted file, the merge editor of the web interface and of the terminal application, and their dependencies on CodeMirror and `tui-textarea-2`
+- **Applies to:** the `RepositoryWriter` port in `crates/core/src/port.rs`, the writes of `crates/git/src/` in `write.rs`, `guard.rs`, `checkout.rs`, `workdir.rs`, `message.rs`, `operations.rs`, `conflicts.rs`, and `stash.rs`, the working directory a pull's fast-forward writes from `remote.rs`, the reading of a stopped operation in `refs.rs`, every call of the writer from a front end and how a front end shows a stopped operation, `crates/git/tests/git_parity.rs`, and the tests of Q-4
 
 ## Context
 
@@ -26,37 +26,27 @@ libgit2 writes otherwise than `git` in corners: it reads none of the configurati
 brings, its rebase keeps its steps in other files than `git`'s, and its stash applies only over
 an index without a staged change. A write acts on what the developer saw, while another tool can
 change the repository underneath, and after a write what the front ends show must follow; the
-history loads in chunks into a load session ([ADR-0016](0016-history-loads-in-chunks.md),
-[ADR-0019](0019-front-ends-read-row-windows.md)). After a commit, the developer looks for the
+history loads in chunks into a load session ([ADR-0018](0018-history-loads-in-chunks.md),
+[ADR-0020](0020-row-window-margin.md)). After a commit, the developer looks for the
 commit just made. The working-directory node they committed from may be gone, or still hold what
 was left unstaged.
 
-G-15 asks for a merge editor: the developer opens a conflicted file, sees both sides and the
-result, edits the result, and Ocelli takes it as the file's resolution. G-18 asks for it in each
-front end, the terminal application on an 80-column terminal included. A conflicted file is
-written by libgit2 with `git`'s markers, in the style `merge.conflictStyle` names, so it holds
-the base between `|||||||` and `=======` only under `diff3` or `zdiff3`, under the labels
-[ADR-0032](0032-conflict-labels-path-safe.md) decides; the developer may have edited it in an
-editor of their own before opening it in Ocelli. Not every conflict is text on both sides: a
-side may be deleted, a link, or a submodule, and a file may be binary. A text editor is a
-component neither front end has: the web interface runs in a WebView whose style sources allow
-inline styles ([ADR-0025](0025-no-egress-hardened-webview.md)), the terminal application draws
-with ratatui 0.30 ([ADR-0029](0029-terminal-application-ratatui.md)), and every component counts
-against the memory Q-3 allows.
+G-15 asks for a merge editor whose result Ocelli takes as a conflicted file's resolution; the
+editor is a decision of its own ([ADR-0025](0025-merge-editor.md)), and what it saves is a write
+like any other.
 
 ## Decision
 
 We will write to a repository only through a `RepositoryWriter` port of the core, implemented
 with libgit2 through git2 in `ocelli-git`, each write doing what `git` does for the same command
 and refused before anything changes where `git` would refuse it or a departure below decides
-otherwise, with no write running a program, and resolve a conflicted file's text in a merge
-editor of Ocelli's own whose result the writer takes as the developer's edit.
+otherwise, with no write running a program.
 
 ### The writer
 
 - **The port.** Every write goes through `RepositoryWriter`; `GitWriter` implements it in
   `ocelli-git`. Writes run where reads run, off the thread that draws
-  ([ADR-0017](0017-git2-repository-reader.md)).
+  ([ADR-0022](0022-git2-repository-reader.md)).
 - **What `git` does.** Where libgit2 differs from `git`, a name `git` refuses, a message `git`
   cleans up, a file in the way `git` will not overwrite, the writer follows `git`. It weighs what
   `git` weighs for the command: the working directory, the index, an operation in progress, and
@@ -112,7 +102,7 @@ editor of Ocelli's own whose result the writer takes as the developer's edit.
   refused, with `git`'s state cleared.
 - **Reset** moves the checked-out branch to the selected commit, soft, mixed, or hard; a hard
   reset discards work and runs only after the developer confirms it
-  ([ADR-0033](0033-discarding-work-only-after-confirmation.md)).
+  ([ADR-0026](0026-discarding-work-only-after-confirmation.md)).
 - **On a conflict** the operation stops, leaving the conflicted index, the conflict markers in the
   working directory, and `git`'s state files, `MERGE_HEAD`, `CHERRY_PICK_HEAD`, `REVERT_HEAD`, or
   the rebase's directory, as `git` would; nothing is committed. A merge, a cherry-pick, or a
@@ -125,8 +115,9 @@ editor of Ocelli's own whose result the writer takes as the developer's edit.
 - **Resolving a file.** Ours or theirs writes that side to the working directory and the index;
   it replaces what the developer may have edited in that file, so it runs only after they confirm
   it. As edited takes the working directory's file, refused while it still holds a conflict
-  marker line (`<<<<<<<`, `=======`, `>>>>>>>`). The merge editor's result is taken as an edit
-  of the file. A path below a link or a file in the working directory is refused.
+  marker line (`<<<<<<<`, `=======`, `>>>>>>>`). The merge editor's saved result is taken as an
+  edit of the file ([ADR-0025](0025-merge-editor.md)). A path below a link or a file in the
+  working directory is refused.
 - **Continuing** is refused while a file is conflicted. A merge commits with both parents and the
   message `git` prepared, cleaned up as `git merge --continue` cleans it up; a cherry-pick or a
   revert commits as it would have without the conflict; a rebase Ocelli started commits the step
@@ -139,47 +130,12 @@ editor of Ocelli's own whose result the writer takes as the developer's edit.
 - **Aborting** puts the branch, the index, and the working directory back as they were before the
   operation, as `git <operation> --abort` does, a rebase from the `head-name` and `orig-head` that
   `git` and libgit2 both write; it discards the resolutions made, so it runs only after the
-  developer confirms it ([ADR-0033](0033-discarding-work-only-after-confirmation.md)). A file the
+  developer confirms it ([ADR-0026](0026-discarding-work-only-after-confirmation.md)). A file the
   operation brought in or removed cleanly, which the developer changed or made since, makes the
   abort refuse, as `git merge --abort` refuses, rather than lose it, a file made inside a
   directory in its place, or in a conflicted file's place, included. Below a link or a file
   nothing is written, one the operation itself put there moved aside first. An abort libgit2
   cannot finish keeps the operation stopped with its conflicts.
-
-### The merge editor
-
-- **Where it opens.** On a conflicted file whose sides ours and theirs both hold text: neither
-  side deleted, a link, or a submodule, and neither holding a NUL byte or anything but UTF-8.
-  Any other conflict is resolved by ours, theirs, or as edited alone.
-- **What it starts from.** The working directory's file as it is, edits made in another editor
-  included, and its blob id. The core finds its blocks, once for every front end: each run from
-  a `<<<<<<<` line to its `>>>>>>>` line, ours before `=======` and theirs after it. A block's
-  base is the file's `|||||||` section where it has one; else, where the index holds a base, the
-  bases of the first run, one or more blocks in a row, of a merge of the three stages in memory
-  in the `diff3` style whose ours and theirs, joined by the lines between them and without the
-  lines both sides share at its ends, are the block's, joined by the same lines; else the block
-  has none. Blocks take the runs in their order, each run once. The `merge` style `git` writes by
-  default moves those shared lines out of a block and joins conflicts close together into one,
-  which the `diff3` style does not.
-- **What it shows.** One column at any width: the file's text with each block set apart, ours
-  above theirs, its base folded until the developer opens it. No language is highlighted. The
-  terminal application, whose text widget folds no lines, sets a base section the file holds
-  aside when the editor opens and shows it, as a base found in memory, beneath the text while
-  open; no line outside a base section is changed, and no saved result could keep one, since it
-  holds a marker line.
-- **What it does.** A block is replaced by ours, by theirs, or by both, ours first; the text is
-  editable everywhere, the blocks included, with undo.
-- **Saving** takes the result as the file's resolution, refused while it holds a marker line, as
-  as edited is, and refused, with nothing changed, where the working directory's file is no
-  longer the one opened or the conflict no longer as shown. The index gets what `git add` stages
-  for the file holding the result, and the working directory the result through libgit2's
-  checkout, its line endings as the file had them. It is a write like any other: through the
-  remote server only where writes are allowed.
-- **Leaving** the merge editor with a result not saved discards it, so the front end asks the
-  developer first (Q-7).
-- **Components.** The web interface edits with CodeMirror 6, `@codemirror/state`,
-  `@codemirror/view`, and `@codemirror/commands` alone, the blocks drawn as its decorations; the
-  terminal application with `tui-textarea-2` on ratatui 0.30.
 
 ### Stashes
 
@@ -239,14 +195,13 @@ A difference from `git` that no clause here decides is a mistake: the comparison
 `MISMATCHES`, asserted to still differ, so that a fix removes it.
 
 **Out of scope:** which writes discard work and how they are confirmed
-([ADR-0033](0033-discarding-work-only-after-confirmation.md)); fetching, pulling, and pushing
-([ADR-0034](0034-remotes-through-libgit2-transports.md)), but for the working directory a
+([ADR-0026](0026-discarding-work-only-after-confirmation.md)); fetching, pulling, and pushing
+([ADR-0027](0027-remotes-through-libgit2-transports.md)), but for the working directory a
 pull's fast-forward writes; signing in Ocelli; interactive rebase; choosing a mainline; merge
 strategies and options beyond libgit2's default; rebasing onto other than the selected commit;
-`--autostash`; a merge editor for a conflict that is not text on both sides; highlighting a
-language in the merge editor; a limit on the size of a file it opens; `git rerere`; skipping a
-rebase step; applying a stash by hand where libgit2 refuses; `git stash push` of chosen paths;
-`git stash branch`.
+`--autostash`; the merge editor, which [ADR-0025](0025-merge-editor.md) decides; `git rerere`;
+skipping a rebase step; applying a stash by hand where libgit2 refuses; `git stash push` of
+chosen paths; `git stash branch`.
 
 ## Alternatives considered
 
@@ -273,32 +228,6 @@ rebase step; applying a stash by hand where libgit2 refuses; `git stash push` of
   state, but nothing that conflicts could be merged or rebased from Ocelli, which G-14 asks for.
 - **A state of Ocelli's own for a stopped operation** — free of `git`'s file formats, but `git`
   could not carry on with it, nor Ocelli with one `git` started.
-- **The configured merge tool** — the developer's own, but a program the configuration names
-  (Q-4).
-- **No merge editor, an edit in the developer's own editor taken as edited** — what the record
-  chose until 2026-10-31, no component of Ocelli's own for what a text editor and one of the two
-  sides already do; G-15 asks for the editor in Ocelli, in every front end.
-- **Three columns, ours, the result, and theirs, or both sides above the result** — the layout of
-  most merge editors, but neither fits an 80-column terminal, and a front end that stacks them
-  there is two layouts to keep in step.
-- **Editing the whole file only, sides taken per file** — less to build, but a file with several
-  blocks is resolved by hand where one key would take a side.
-- **Starting from a merge of the index's stages** — a base for every block, but it drops what the
-  developer edited in another editor, and saving would discard it.
-- **The base always shown, or never** — always is three parts per block on a narrow terminal;
-  never hides what both sides changed from.
-- **Opening a delete or modify conflict with the deleted side empty** — one editor for more
-  conflicts, but the choice is to keep the file or not, which ours or theirs makes.
-- **A limit on the size of a file the editor opens** — keeps a huge file from stalling a front
-  end, but a number nobody has measured; it can follow a measurement.
-- **Monaco** — the most complete editor, but several megabytes in the WebView (Q-3).
-- **CodeMirror's `@codemirror/merge`, or its `codemirror` bundle** — a merge view ready to use,
-  but one of two documents, not a conflict of three; the bundle brings completion, linting, and
-  languages the editor does not use.
-- **An editor component of Ocelli's own in the web interface or the terminal** — no dependency,
-  but undo, selection, and cursor movement written twice.
-- **`tui-textarea` 0.7.0** — the widget most used, but it needs ratatui 0.29, whose types do not
-  meet 0.30's, and has had no release since October 2024.
 - **Resolving only what Ocelli started** — simpler, but a conflict `git` left would block the
   developer in Ocelli.
 - **Following `git` in every state, stashes and ignored files included** — the fewest surprises,
@@ -324,18 +253,6 @@ rebase step; applying a stash by hand where libgit2 refuses; `git stash push` of
   and "How conflicts are presented", `git rebase`, `git cherry-pick`, `git revert`, `git reset`,
   `git add`, `githooks`, and `git-config` — <https://git-scm.com/docs>
 - The comparison of every local write with `git`, `crates/git/tests/git_parity.rs`.
-- `git merge-file`, `merge.conflictStyle`, and the `diff3` and `zdiff3` styles —
-  <https://git-scm.com/docs/git-merge-file>, <https://git-scm.com/docs/git-config>; libgit2's
-  `git_merge_file_from_index` and its `GIT_MERGE_FILE_STYLE_DIFF3` —
-  <https://libgit2.org/libgit2/>
-- CodeMirror 6, `@codemirror/view` 6.43.15, `@codemirror/state` 6.7.6, and `@codemirror/merge`
-  6.12.3, MIT, from the npm registry on 2026-10-31 — <https://codemirror.net/docs/>; its styles
-  are mounted at run time by `style-mod`, which the WebView's `style-src 'self' 'unsafe-inline'`
-  allows.
-- `tui-textarea` 0.7.0, its dependency `ratatui ^0.29.0`, and `tui-textarea-2` 0.13.2, MIT, on
-  `ratatui-core ^0.1.0` and `ratatui-widgets ^0.3.0` with `crossterm ^0.29`, from crates.io on
-  2026-10-31 — <https://crates.io/crates/tui-textarea-2>
-- The merge editors of VS Code and IntelliJ IDEA, three columns each.
 
 ## Consequences
 
@@ -343,21 +260,15 @@ rebase step; applying a stash by hand where libgit2 refuses; `git stash push` of
   behaviour, and every departure is listed in one place; writes run no code of the repository
   (Q-4); no write lands on a state the developer did not see, stops halfway, deletes a file no
   commit holds, or drops an operation in progress (Q-7); a stopped operation is one `git` and
-  Ocelli both carry on with; after a commit the commit just made is in view; a conflict is
-  resolved in Ocelli, block by block or by hand, in every front end (G-15, G-18), from the file
-  as the developer left it, and a result not saved is not lost by accident (Q-7).
+  Ocelli both carry on with; after a commit the commit just made is in view.
 - Negative / trade-offs: hooks a team relies on do not run; a repository that signs every commit
   cannot commit from Ocelli; uncommitted changes are committed or stashed before an operation; a
   merge commit is picked or reverted with `git`; libgit2's merge is not `git`'s `ort` in every
   corner; a rebase is continued by the side that started it; a developer who stashes during a merge,
   applies a stash over a staged change, or has an ignored file in a target's way clears it first or
-  uses `git`; a write on a large history waits for its first chunk again; three direct dependencies
-  of the web interface and one of the terminal application, a fork with fewer users than the widget
-  it forks; a binary file or one side deleted is still resolved by ours or theirs; a large
-  conflicted file is opened whole, which Q-2 and Q-3 do not measure.
+  uses `git`; a write on a large history waits for its first chunk again.
 - Follow-ups: signing from Ocelli; the hooks of a commit, should a team need them; choosing a
-  mainline; interactive rebase; skipping a rebase step; highlighting a language in the merge
-  editor; a limit on the size of a file it opens, should one stall a front end; applying a stash
+  mainline; interactive rebase; skipping a rebase step; applying a stash
   beside a staged change, should libgit2 allow it; the stash commits' messages, one line break
   longer than `git`'s, which the comparison lists as a mismatch.
 
@@ -378,10 +289,4 @@ conflicted files read as `git status` lists them, each way of resolving compared
 link, continuing and aborting compared with `git <operation> --continue` and `--abort`; the
 stash's refusals. The core's tests name a hard reset, an abort, and taking a side as discarding
 work; the tests of both front ends cite it for selecting the commit a write made after the
-reload; the structural tests keep the writer off the thread that draws. The core's tests of the
-merge editor cite it and G-15: blocks found in the `merge`, `diff3`, and `zdiff3` styles and in a
-file edited since, a base from the stages where the file holds none, a binary file, a link, a
-submodule, and a deleted side offered no editor, each block action; the git adapter's tests save
-a result and compare the index and the working directory with `git add` of the same file, and
-refuse one with a marker line or over a file changed since it was opened, with nothing changed;
-the tests of both front ends cite it for asking before a result not saved is left.
+reload; the structural tests keep the writer off the thread that draws.

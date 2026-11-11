@@ -1,4 +1,4 @@
-# ADR-0013: The commit graph is laid out after Pvigier chunk by chunk, each chunk below the ones before, in an index arena kept for the load
+# ADR-0015: The commit graph is laid out after Pvigier chunk by chunk, each chunk below the ones before, in an index arena kept for the load
 
 - **Status:** 🟢 accepted
 - **Date:** 2026-10-06
@@ -19,13 +19,13 @@ Pierre Vigier's *Commit Graph Drawing Algorithms* answers both in two phases. Vi
 crossings in exchange for straight branches; Q-1 holds the layout to the crossings recorded for
 its corpus. His rows come from a depth-first traversal over the whole set, which places a parent
 right below its child even when it is far older. The history loads in chunks
-([ADR-0016](0016-history-loads-in-chunks.md)): laid out over the whole history, older commits
+([ADR-0018](0018-history-loads-in-chunks.md)): laid out over the whole history, older commits
 would appear between the newest ones, and the top of the graph would change with every chunk that
 arrives. The maintainer decided that the newest commits are laid out as a load of them alone would
 be, and that the picture must not shift while older chunks arrive.
 
 The layout is a functional core of pure functions over values
-([ADR-0012](0012-functional-core-layout.md)) and walks the graph in both directions, from a
+([ADR-0014](0014-functional-core-layout.md)) and walks the graph in both directions, from a
 commit to its parents and to its children. Nodes that hold mutable references to each other
 cannot be expressed directly in Rust; the borrow checker rejects them. Laid out chunk by chunk,
 the graph is wired up for as long as the load runs, since a later chunk joins its commits to
@@ -51,7 +51,7 @@ from the chunks before it, so that the first chunk is laid out exactly as a load
      the chunks before it, and row 0 is the newest commit of the first chunk.
 
   The walk yields a commit after its children unless a child carries an older committer date
-  ([ADR-0016](0016-history-loads-in-chunks.md)), so a later chunk holds, but for such **late
+  ([ADR-0018](0018-history-loads-in-chunks.md)), so a later chunk holds, but for such **late
   children**, only ancestors of the chunks before it, and placing a chunk below the ones before
   keeps every parent below its children. A late child is laid out in its chunk like any other
   commit, below its parent, which keeps its place, and is joined to it by an edge that runs up to
@@ -62,11 +62,11 @@ from the chunks before it, so that the first chunk is laid out exactly as a load
   A parent that arrives in a later chunk than its child joins the child after the parents laid
   out with it: the child's first line was drawn as the branch it continues, and it stays that, so
   an edge already shown keeps its type and its shape
-  ([ADR-0015](0015-edge-shapes-and-tracks-out-of-the-main-line.md)).
+  ([ADR-0017](0017-edge-shapes-and-tracks-out-of-the-main-line.md)).
 - **Lanes: straight branches, carried across chunks.** Commits are processed top to bottom; the
   active branch lines, the lanes in use, and the rows they were last used at carry on from one
   chunk to the next. Where the history has a main line, it holds lane 0 alone and these steps
-  assign the lanes from 1 on ([ADR-0014](0014-main-line-in-the-leftmost-lane.md)). For each
+  assign the lanes from 1 on ([ADR-0016](0016-main-line-in-the-leftmost-lane.md)). For each
   commit `c`:
   1. Determine its branch children (for which `c` is the first parent) and its merge children.
   2. Compute the **forbidden lanes J(c)** over the row range of its incoming merge edges, from the
@@ -86,11 +86,11 @@ from the chunks before it, so that the first chunk is laid out exactly as a load
   chunks after needs; the commit's details go with the chunk.
 
 **Out of scope:** keeping the main line in the leftmost lane, which is
-[ADR-0014](0014-main-line-in-the-leftmost-lane.md); reducing edge crossings below what the phases
+[ADR-0016](0016-main-line-in-the-leftmost-lane.md); reducing edge crossings below what the phases
 yield; the shape of edges, which is
-[ADR-0015](0015-edge-shapes-and-tracks-out-of-the-main-line.md); how chunks are loaded, which is
-[ADR-0016](0016-history-loads-in-chunks.md); the history the front ends read, which is
-[ADR-0019](0019-front-ends-read-row-windows.md).
+[ADR-0017](0017-edge-shapes-and-tracks-out-of-the-main-line.md); how chunks are loaded, which is
+[ADR-0018](0018-history-loads-in-chunks.md); the history the front ends read, which is
+[ADR-0020](0020-row-window-margin.md).
 
 ## Alternatives considered
 
@@ -161,7 +161,7 @@ yield; the shape of edges, which is
   commit near the end of a chunk appears in the next chunk rather than directly below it, so a merge
   edge can reach across a chunk boundary; a late child stands below its parent, the one exception
   G-5 makes, with an edge running down to it, which the edge shapes of
-  [ADR-0015](0015-edge-shapes-and-tracks-out-of-the-main-line.md) do not keep clear of commits, the
+  [ADR-0017](0017-edge-shapes-and-tracks-out-of-the-main-line.md) do not keep clear of commits, the
   one exception G-4 makes; carrying the lane state is state in the core; the algorithm reads as
   index arithmetic, and an index carries no guarantee beyond the bounds check; the layout and the
   history each hold an index of the load's SHAs, one on the loading thread and one where the front

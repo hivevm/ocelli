@@ -1,10 +1,9 @@
-# ADR-0041: A repository sidebar lists branches, remotes, every worktree, and tags under one filter, and selecting a branch or tag reveals its commit
+# ADR-0036: A repository sidebar lists branches, remotes, every worktree, and tags under one filter, and selecting a branch or tag reveals its commit
 
 - **Status:** 🟢 accepted
 - **Date:** 2026-10-31
 - **Deciders:** Markus Brigl
 - **Applies to:** `src-web/src/RepoSidebar.svelte`, `src-web/src/refTree.ts`, `crates/git/src/refs.rs`, the `RepoRefs` value in `crates/core/src/model.rs`, and `crates/tui/src/sidebar.rs`
-- **Supersedes:** [ADR-0027](0027-repository-sidebar.md)
 
 ## Context
 
@@ -19,14 +18,14 @@ Forces:
 
 - **The Non-Goal on hosting** rules out the pull-request, issue, and team sections those clients
   put in the same panel; they are excluded, not deferred.
-- **No request of Ocelli's own** ([ADR-0025](0025-no-egress-hardened-webview.md)): every number in
+- **No request of Ocelli's own** ([ADR-0034](0034-no-egress-hardened-webview.md)): every number in
   the panel, ahead and behind included, is computed from refs already on disk; nothing fetches.
 - **Reading goes through the port** ([ADR-0008](0008-ports-and-adapters.md),
-  [ADR-0017](0017-git2-repository-reader.md)): the refs are read by `ocelli-git` through
+  [ADR-0022](0022-git2-repository-reader.md)): the refs are read by `ocelli-git` through
   `RepositoryReader`, off the thread that draws.
-- **The history loads in chunks** ([ADR-0016](0016-history-loads-in-chunks.md)), so a ref can point
+- **The history loads in chunks** ([ADR-0018](0018-history-loads-in-chunks.md)), so a ref can point
   at a commit whose chunk has not loaded yet; the panel must handle that rather than jump nowhere.
-- **Synthetic nodes** ([ADR-0018](0018-synthetic-nodes-in-the-first-chunk.md)) are for points in
+- **Synthetic nodes** ([ADR-0019](0019-synthetic-nodes-in-the-first-chunk.md)) are for points in
   history; a worktree is a place a repository is checked out, not one.
 
 `git2` already offers `Repository::worktrees`, `branches`, `tag_names`, `remotes`, and
@@ -57,7 +56,7 @@ points at.
    results and the parent and child links of the commit detail. An entry whose commit lies outside
    the loaded set is drawn inert and says so, rather than silently doing nothing. A worktree
    switches the repository being viewed instead, as
-   [ADR-0028](0028-submodules-and-repository-switching.md) decides.
+   [ADR-0037](0037-submodules-and-repository-switching.md) decides.
 4. **Sections are collapsible and counted**, so that a repository with 300 remote branches does not
    push the tags out of view.
 5. **One filter narrows every section at once**, in both front ends: an entry stays where its full
@@ -65,8 +64,8 @@ points at.
    blanks; a folder holding a match opens, and a section counts what passes.
 
 **Out of scope:** the operations on refs, creating, switching, and deleting branches and tags (G-12,
-G-16), which [ADR-0031](0031-writes-what-git-writes.md) decides; submodules and what switching the
-viewed repository involves, which [ADR-0028](0028-submodules-and-repository-switching.md) decides.
+G-16), which [ADR-0023](0023-writes-what-git-writes.md) decides; submodules and what switching the
+viewed repository involves, which [ADR-0037](0037-submodules-and-repository-switching.md) decides.
 
 ## Alternatives considered
 
@@ -78,8 +77,10 @@ viewed repository involves, which [ADR-0028](0028-submodules-and-repository-swit
   wanted. One read keeps "the repository was read" one moment in time.
 - **No sidebar, search alone** — search matches ref names, but answers where one is, not what
   there is; the two complement each other.
-- **The linked worktrees alone, as ADR-0027 decided** — what `Repository::worktrees` reports, but
-  the checkout the developer most often returns to is then the one the sidebar cannot reach.
+- **The linked worktrees alone** — what `Repository::worktrees` reports, and what the sidebar
+  first listed, with no filter and the main working tree left as a follow-up; but the checkout
+  the developer most often returns to is then the one the sidebar cannot reach, so it did not
+  stand, and the filter came with the main working tree.
 - **No filter, or one per section** — no field to keep, or a narrower match, but a long list of
   remote branches is scrolled by hand, and one field over every section finds a name wherever it
   is filed.
@@ -105,12 +106,12 @@ viewed repository involves, which [ADR-0028](0028-submodules-and-repository-swit
 - Positive: refs become discoverable, not only recognisable; a branch tip far down the history is
   one selection away; every checkout of the repository, the main one included, is one selection
   away; a ref is found by any part of its name in every section at once; nothing is fetched or
-  sent, so [ADR-0025](0025-no-egress-hardened-webview.md) holds.
+  sent, so [ADR-0034](0034-no-egress-hardened-webview.md) holds.
 - Negative / trade-offs: a second value and a second event to keep in step with the commit graph;
   a fourth pane competing for width with the commit graph and the commit detail; ahead and behind
   reflect the last fetch and can be stale until the developer fetches.
 - Follow-ups: the operations on refs from the sidebar, which the ref chips offer
-  ([ADR-0031](0031-writes-what-git-writes.md)); whether stashes earn a section of their own beside
+  ([ADR-0023](0023-writes-what-git-writes.md)); whether stashes earn a section of their own beside
   their nodes; the glossary gains *worktree* and *repository sidebar*.
 
 ## Enforcement

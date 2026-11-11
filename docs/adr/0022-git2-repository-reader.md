@@ -1,4 +1,4 @@
-# ADR-0017: git2 reads repositories behind the repository port, off the thread that draws
+# ADR-0022: git2 reads repositories behind the repository port, off the thread that draws
 
 - **Status:** 🟢 accepted
 - **Date:** 2026-10-04
@@ -10,12 +10,12 @@
 `core` reaches a repository only through its ports ([ADR-0008](0008-ports-and-adapters.md)); the
 reading port is the trait `RepositoryReader` in `crates/core/src/port.rs`, and something has to
 implement it. Loading a repository is I/O-bound and takes noticeable time, chunk after chunk over
-the whole history ([ADR-0016](0016-history-loads-in-chunks.md)), and G-17 requires that the front
+the whole history ([ADR-0018](0018-history-loads-in-chunks.md)), and G-17 requires that the front
 end keeps responding and reports progress while it runs. Q-4 requires that showing a repository
 starts no program the repository names, such as `core.fsmonitor`, a hook, or a filter driver.
 
 The Git library is therefore chosen together with the way a front end calls it: the desktop host
-runs on Tokio, which Tauri requires ([ADR-0021](0021-tauri-desktop-host.md)), and the terminal
+runs on Tokio, which Tauri requires ([ADR-0028](0028-tauri-desktop-host.md)), and the terminal
 application runs a plain event loop of its own.
 
 ## Decision
@@ -26,7 +26,7 @@ thread that draws: the desktop host on Tokio's blocking pool through `tokio::tas
 the terminal application on a `std::thread` of its own.
 
 **Out of scope:** the operations that write (G-12 to G-14 and G-16), which may reach a repository
-through other means behind ports of their own, which is [ADR-0031](0031-writes-what-git-writes.md);
+through other means behind ports of their own, which is [ADR-0023](0023-writes-what-git-writes.md);
 the remote server's threading.
 
 ## Alternatives considered
@@ -63,7 +63,7 @@ the remote server's threading.
   linking libgit2 makes cross-compiling harder than a pure-Rust library would; that libgit2 starts
   nothing is a property of a C library Ocelli does not control and holds only while a test says so.
 - Follow-ups: `gitoxide`, if it matures enough to drop the C dependency. The means of the writing
-  operations is [ADR-0031](0031-writes-what-git-writes.md).
+  operations is [ADR-0023](0023-writes-what-git-writes.md).
 
 ## Enforcement
 

@@ -1,4 +1,4 @@
-# ADR-0038: A pushed version tag builds the installers and a Flatpak into a draft release
+# ADR-0012: A pushed version tag builds the installers and a Flatpak into a draft release
 
 - **Status:** 🟢 accepted
 - **Date:** 2026-10-04
@@ -15,7 +15,7 @@ packaging for each.
 
 Distribution independence is Flatpak's core property: one bundle, built against a fixed runtime,
 runs on any distribution with Flatpak installed, so there is nothing to build per distribution.
-Tauri ([ADR-0021](0021-tauri-desktop-host.md)) already bundles the distribution-native `.deb`,
+Tauri ([ADR-0028](0028-tauri-desktop-host.md)) already bundles the distribution-native `.deb`,
 `.rpm`, and AppImage beside it.
 
 The pipeline runs third-party actions with a token that can write releases, so every action is

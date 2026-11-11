@@ -1,4 +1,4 @@
-# ADR-0012: The layout of the commit graph is a functional core of pure functions over values
+# ADR-0014: The layout of the commit graph is a functional core of pure functions over values
 
 - **Status:** 🟢 accepted
 - **Date:** 2026-10-04
@@ -25,7 +25,7 @@ and their parents, it returns the lanes, the rows, and the edges, and it perform
 no clock, starts no thread, and draws no randomness.
 
 **Out of scope:** the layout algorithm itself, which is
-[ADR-0013](0013-layout-after-pvigier-by-chunk.md); the rest of `core`, which may hold state; and
+[ADR-0015](0015-layout-after-pvigier-by-chunk.md); the rest of `core`, which may hold state; and
 how a front end draws the result.
 
 ## Alternatives considered
@@ -49,8 +49,8 @@ how a front end draws the result.
 - Negative / trade-offs: incremental loading (Q-2) is the shell's job, feeding the layout in
   chunks it can process as values; parallelism, if the layout needs it, is a separate decision.
 - Follow-ups: none. The layout algorithm is
-  [ADR-0013](0013-layout-after-pvigier-by-chunk.md), and the chunked feeding of a million commits
-  is [ADR-0016](0016-history-loads-in-chunks.md).
+  [ADR-0015](0015-layout-after-pvigier-by-chunk.md), and the chunked feeding of a million commits
+  is [ADR-0018](0018-history-loads-in-chunks.md).
 
 ## Enforcement
 

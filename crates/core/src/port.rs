@@ -10,9 +10,9 @@ use std::path::Path;
 /// Reads a repository's history and state.
 pub trait RepositoryReader {
     /// Loads the whole history in chunks of [`crate::model::CHUNK_COMMITS`] in walk order, the
-    /// first with the stash and working-directory nodes added (ADR-0018), handing each to
+    /// first with the stash and working-directory nodes added (ADR-0019), handing each to
     /// `on_chunk` as it is read; `on_chunk` returns whether to go on, so a new load session can cancel the walk
-    /// (ADR-0016). `progress` receives one message per step.
+    /// (ADR-0018). `progress` receives one message per step.
     fn load_chunks(
         &self,
         repo: &Path,
@@ -20,7 +20,7 @@ pub trait RepositoryReader {
         on_chunk: &mut dyn FnMut(Vec<CommitData>) -> bool,
     ) -> Result<()>;
 
-    /// The tip of the main line (ADR-0014): the commit of the local branch `origin/HEAD` names,
+    /// The tip of the main line (ADR-0016): the commit of the local branch `origin/HEAD` names,
     /// else of `main`, else of `master`, else the checked-out commit; none where `HEAD` does not
     /// resolve either.
     fn load_main_tip(&self, repo: &Path) -> Result<Option<String>>;
@@ -36,12 +36,12 @@ pub trait RepositoryReader {
     /// uncommitted diff.
     fn load_file_diff(&self, repo: &Path, sha: &str, file_path: &str) -> Result<Vec<DiffLine>>;
 
-    /// Reads the conflicted file `path` for the merge editor (ADR-0031): refused, saying why,
+    /// Reads the conflicted file `path` for the merge editor (ADR-0025): refused, saying why,
     /// where the editor does not open it.
     fn load_merge_file(&self, repo: &Path, path: &str) -> Result<MergeFile>;
 }
 
-/// A write to a repository (ADR-0031), naming the state it expects to find: a write whose expected
+/// A write to a repository (ADR-0023), naming the state it expects to find: a write whose expected
 /// state the repository no longer holds is refused with nothing changed. A front end out of process
 /// hands it over as JSON, its kind in `kind`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -113,45 +113,45 @@ pub enum Write {
         tip: String,
         merged: bool,
     },
-    /// Fetches `remote`, updating its remote branches (ADR-0034).
+    /// Fetches `remote`, updating its remote branches (ADR-0027).
     Fetch { remote: String },
     /// Pulls the checked-out branch `branch`, expected at `tip`, from its upstream, fast-forward
-    /// only (ADR-0034).
+    /// only (ADR-0027).
     Pull { branch: String, tip: String },
     /// Pushes the checked-out branch `branch`, expected at `tip`, to its upstream, or to the
     /// remote's branch of its name, set as its upstream, where it has none; never by force
-    /// (ADR-0034).
+    /// (ADR-0027).
     Push { branch: String, tip: String },
     /// Merges `commit`, named `name` in the message where it is a branch, into the checked-out
-    /// branch `branch`, expected at `tip` (ADR-0031).
+    /// branch `branch`, expected at `tip` (ADR-0023).
     Merge {
         branch: String,
         tip: String,
         commit: String,
         name: Option<String>,
     },
-    /// Rebases the checked-out branch `branch`, expected at `tip`, onto `onto` (ADR-0031).
+    /// Rebases the checked-out branch `branch`, expected at `tip`, onto `onto` (ADR-0023).
     Rebase {
         branch: String,
         tip: String,
         onto: String,
     },
     /// Applies `commit` onto the checked-out branch `branch`, expected at `tip`, and commits it
-    /// (ADR-0031).
+    /// (ADR-0023).
     CherryPick {
         branch: String,
         tip: String,
         commit: String,
     },
     /// Applies the inverse of `commit` onto the checked-out branch `branch`, expected at `tip`,
-    /// and commits it (ADR-0031).
+    /// and commits it (ADR-0023).
     Revert {
         branch: String,
         tip: String,
         commit: String,
     },
     /// Moves the checked-out branch `branch`, expected at `tip`, to `commit`, as `mode` says
-    /// (ADR-0031).
+    /// (ADR-0023).
     Reset {
         branch: String,
         tip: String,
@@ -159,7 +159,7 @@ pub enum Write {
         mode: ResetMode,
     },
     /// Resolves the conflicted file `path`, whose conflict is expected to be `conflict`, as
-    /// `take` says (ADR-0031).
+    /// `take` says (ADR-0023).
     Resolve {
         path: String,
         conflict: Conflict,
@@ -167,7 +167,7 @@ pub enum Write {
     },
     /// Saves the merge editor's `result` as the resolution of the conflicted file `path`, whose
     /// conflict is expected to be `conflict` and whose file in the working directory is expected
-    /// to be the blob `opened`, the one the editor was opened on (ADR-0031).
+    /// to be the blob `opened`, the one the editor was opened on (ADR-0025).
     SaveMerge {
         path: String,
         conflict: Conflict,
@@ -175,9 +175,9 @@ pub enum Write {
         result: String,
     },
     /// Continues the operation in progress, `HEAD` expected at `head`, once nothing conflicts
-    /// (ADR-0031).
+    /// (ADR-0023).
     Continue { operation: Operation, head: String },
-    /// Aborts the operation in progress, back to where the developer was (ADR-0031).
+    /// Aborts the operation in progress, back to where the developer was (ADR-0023).
     Abort { operation: Operation, head: String },
 }
 
@@ -207,7 +207,7 @@ pub use crate::model::{Conflict, Operation};
 
 impl Write {
     /// What the write discards, in the words a confirmation names it with, or `None` for a write
-    /// that discards nothing (ADR-0033).
+    /// that discards nothing (ADR-0026).
     pub fn discards(&self) -> Option<String> {
         match self {
             Write::CreateTag { .. }
@@ -272,7 +272,7 @@ impl Write {
     }
 }
 
-/// Whether the developer confirmed a write (ADR-0033).
+/// Whether the developer confirmed a write (ADR-0026).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Confirmation {
     /// The developer was asked and said yes.
@@ -281,7 +281,7 @@ pub enum Confirmation {
     Absent,
 }
 
-/// Writes to a repository, running no program (ADR-0031).
+/// Writes to a repository, running no program (ADR-0023).
 pub trait RepositoryWriter {
     /// Performs `write`, or refuses it with nothing changed and says why. Returns the commit the
     /// write made, which the load after it selects, where it made one. A transfer tells
@@ -300,7 +300,7 @@ pub trait RepositoryWriter {
 }
 
 /// Hands `write` to `writer`, refusing a write that discards work before it reaches the
-/// repository unless the developer has confirmed it (ADR-0033). Every front end writes through
+/// repository unless the developer has confirmed it (ADR-0026). Every front end writes through
 /// here.
 pub fn perform(
     writer: &impl RepositoryWriter,
@@ -363,7 +363,7 @@ mod tests {
     }
 
     #[test]
-    // Verifies: ADR-0033, Q-7
+    // Verifies: ADR-0026, Q-7
     fn each_write_that_discards_work_names_what_it_discards() {
         assert_eq!(create().discards(), None);
         let stash = Write::CreateStash {
@@ -447,7 +447,7 @@ mod tests {
     }
 
     #[test]
-    // Verifies: ADR-0033, Q-7
+    // Verifies: ADR-0026, Q-7
     fn a_write_that_discards_work_without_a_confirmation_never_reaches_the_repository() {
         let writer = Recorder::default();
         let repo = Path::new("/repo");

@@ -9,7 +9,7 @@
 
 The template references actions by major version tag. Ocelli runs third-party actions (a Bun
 setup, a desktop bundler, a Flatpak builder, as GitGraph did before it), and runs them in a
-release pipeline whose token can write releases ([ADR-0038](0038-tag-triggered-release.md)). A
+release pipeline whose token can write releases ([ADR-0012](0012-tag-triggered-release.md)). A
 tag can be repointed; a repointed tag runs in CI before anyone sees a diff, as with
 `tj-actions/changed-files` in 2025. The catalogue's entry fits a full SHA to third-party actions,
 a release pipeline, or a token with write access, and Ocelli has all three.

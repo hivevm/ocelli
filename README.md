@@ -40,7 +40,7 @@ The layout follows the algorithms described in Pierre Vigier's article
 [*Commit Graph Drawing Algorithms*](https://pvigier.github.io/2019/05/06/commit-graph-drawing-algorithms.html).
 The problem, the goals, and the success criteria live in
 [`docs/SPECIFICATION.md`](docs/SPECIFICATION.md), the algorithm in
-[ADR-0013](docs/adr/0013-layout-after-pvigier-by-chunk.md), and the vocabulary in
+[ADR-0015](docs/adr/0015-layout-after-pvigier-by-chunk.md), and the vocabulary in
 [`docs/GLOSSARY.md`](docs/GLOSSARY.md).
 
 ### Features
@@ -130,7 +130,7 @@ deselects (closing the diff first if one is open).
 names, a results panel lists them for click-to-jump, and `Enter`/`Shift+Enter` cycle through the
 hits. Avatars in the detail panel are loaded from Gravatar only after the toggle in the status bar
 is switched on — a fresh installation makes no network requests
-([ADR-0025](docs/adr/0025-no-egress-hardened-webview.md)).
+([ADR-0034](docs/adr/0034-no-egress-hardened-webview.md)).
 
 ### In a browser
 
@@ -139,7 +139,7 @@ same web interface to a browser, as VS Code's remote development does. It listen
 machine's loopback addresses only, on the port `--port` names or a free one, and prints once a
 URL that carries a secret token; opening it logs the browser in with a session cookie, and a
 request without it, or from another web page, is refused
-([ADR-0036](docs/adr/0036-remote-server-localhost-tls-session-cookie.md)).
+([ADR-0039](docs/adr/0039-remote-server-localhost-tls-session-cookie.md)).
 From another machine, forward the port through SSH (`ssh -L 8000:localhost:8000 host`, the server
 started with `--port 8000`) and open the URL there. Or name an address with `--listen
 <address>[:<port>]`: the server then listens there alone and only over TLS, with the certificate
@@ -152,12 +152,12 @@ keeps does not name the address or the host name any more, or where only half of
 other accounts may read, is kept, and says what to remove. The browser opens
 the repository the server root is, or one chosen with Open Repo from the folders below the root,
 and nothing outside the root
-([ADR-0042](docs/adr/0042-server-root-confinement.md));
+([ADR-0040](docs/adr/0040-server-root-confinement.md));
 every restart prints a new URL. The server only reads unless it is started with
 `--allow-writes`: then the browser writes, fetches, pulls, and pushes as the desktop application
 does, as the user the server runs as, with the identity and credentials git's configuration
 names for that user, and whoever holds a session can write
-([ADR-0035](docs/adr/0035-remote-server-websocket-per-tab.md)).
+([ADR-0038](docs/adr/0038-remote-server-websocket-per-tab.md)).
 
 ### In the terminal
 
@@ -187,7 +187,7 @@ It offers what the desktop window offers, laid out the same way:
 The theme, the minimised sidebar and the diff layout are remembered across sessions, as on the
 desktop, in `cli-state.json` under `$XDG_STATE_HOME/ocelli` (default `~/.local/state/ocelli`),
 `~/Library/Application Support/ocelli` on macOS, or `%LOCALAPPDATA%\ocelli` on Windows
-([ADR-0030](docs/adr/0030-cli-state-file.md)). Deleting the file restores the defaults.
+([ADR-0032](docs/adr/0032-cli-state-file.md)). Deleting the file restores the defaults.
 
 | Key                     | Action                                                   |
 | ----------------------- | -------------------------------------------------------- |
@@ -228,17 +228,17 @@ rust-toolchain.toml   # the pinned Rust toolchain and its components (ADR-0007)
 .cargo/               # Cargo's build configuration: linkers and the development profile
 package.json          # the web interface's dependencies and scripts, run by Bun (ADR-0007)
 bun.lock              # the locked JavaScript dependencies
-crates/commands/      # the commands both hosts of the web interface answer (ADR-0035)
+crates/commands/      # the commands both hosts of the web interface answer (ADR-0038)
 crates/core/          # the core: commit graph, layout, and the repository port (ADR-0008)
-crates/git/           # the repository port implemented with git2 (ADR-0017)
-crates/tui/           # the terminal application, ocelli-cli (ADR-0029)
-crates/server/        # the remote server, ocelli-server: the web interface in a browser (ADR-0035)
+crates/git/           # the repository port implemented with git2 (ADR-0022)
+crates/tui/           # the terminal application, ocelli-cli (ADR-0031)
+crates/server/        # the remote server, ocelli-server: the web interface in a browser (ADR-0038)
 crates/measure/       # ocelli-measure: edge crossings on real repositories (Q-1); with
                       # scripts/measure-memory.sh (Q-3) and scripts/measure-mutants.sh (the git
                       # adapter's guards) run weekly by .github/workflows/measure.yml
-src-tauri/            # the desktop host (ADR-0021)
-src-web/              # the web interface the desktop host and the remote server show (ADR-0023)
-flatpak/              # the Flatpak manifest of the release pipeline (ADR-0038)
+src-tauri/            # the desktop host (ADR-0028)
+src-web/              # the web interface the desktop host and the remote server show (ADR-0030)
+flatpak/              # the Flatpak manifest of the release pipeline (ADR-0012)
 scripts/check-all.sh  # runs the checks, sensors, and self-tests, as the hooks and CI do
 scripts/check-*.sh    # checks: each fails on what breaks a rule
 scripts/sensor-*.sh   # sensors: report for the reviewer; sensor-repo-settings.sh runs by hand

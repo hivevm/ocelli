@@ -1,4 +1,4 @@
-# ADR-0039: On macOS, Ocelli builds OpenSSL into its binaries and links no library outside the system
+# ADR-0013: On macOS, Ocelli builds OpenSSL into its binaries and links no library outside the system
 
 - **Status:** 🟢 accepted
 - **Date:** 2026-10-10
@@ -7,14 +7,14 @@
 
 ## Context
 
-[ADR-0034](0034-remotes-through-libgit2-transports.md) reaches remotes through libgit2's own
+[ADR-0027](0027-remotes-through-libgit2-transports.md) reaches remotes through libgit2's own
 HTTPS and SSH transports, `git2` with its `https` and `ssh` features. On macOS libgit2 speaks
 HTTPS through the system's SecureTransport and hashes through CommonCrypto, but SSH goes through
 libssh2, and `libssh2-sys` uses OpenSSL as its cryptography on every platform but Windows.
 `openssl-sys` finds that OpenSSL on the build machine and links it dynamically.
 
 macOS ships no OpenSSL to link against. On the `macos-latest` runner that
-[ADR-0038](0038-tag-triggered-release.md) builds both macOS installers on, the OpenSSL found is
+[ADR-0012](0012-tag-triggered-release.md) builds both macOS installers on, the OpenSSL found is
 Homebrew's, for arm64 only:
 
 - The `aarch64-apple-darwin` application names `/opt/homebrew/opt/openssl@3/lib/libssl.3.dylib`
@@ -35,14 +35,14 @@ of `openssl-sys` declared for `target_os = "macos"` only, so that nothing Ocelli
 links a library outside the system.
 
 **Out of scope:** OpenSSL on Linux and Windows, which stays as it is; replacing libssh2 or OpenSSL
-altogether, which would mean transports of Ocelli's own and is ADR-0034's to decide; how Ocelli
+altogether, which would mean transports of Ocelli's own and is ADR-0027's to decide; how Ocelli
 learns of a vulnerability in the OpenSSL it ships (see Follow-ups).
 
 ## Alternatives considered
 
 - **An Intel runner for the `x86_64-apple-darwin` leg** — builds the x86_64 installer natively,
   but links Homebrew's OpenSSL there too, so neither application starts on a Mac without it; and
-  it departs from ADR-0038, which builds both architectures on `macos-latest`.
+  it departs from ADR-0012, which builds both architectures on `macos-latest`.
 - **Copying Homebrew's OpenSSL into the application bundle** and rewriting the load paths with
   `install_name_tool` — keeps a dynamic library, but needs both architectures of OpenSSL on the
   runner, a post-build step Tauri does not offer, and covers the application bundle only, not
@@ -51,14 +51,14 @@ learns of a vulnerability in the OpenSSL it ships (see Follow-ups).
   stop receiving the distribution's OpenSSL fixes, and nothing on Linux is broken.
 - **rustls in place of OpenSSL** — rustls is TLS, while libssh2 needs a cryptography library;
   neither `libssh2-sys` nor `libgit2-sys` offers it. Using it would mean HTTPS and SSH transports
-  of Ocelli's own under `git2::transport::register`, which ADR-0034 rejects.
+  of Ocelli's own under `git2::transport::register`, which ADR-0027 rejects.
 - **gitoxide (`gix`)** — speaks HTTPS through rustls, but SSH by starting the `ssh` program, which
   Q-4 forbids.
 - **AWS-LC through `openssl-sys`'s `aws-lc` feature** — also built from source, but libssh2 is
   written against OpenSSL's interface, and whether it builds and passes against AWS-LC was not
   established.
 - **Dropping SSH on macOS** — removes OpenSSL, but breaks the developer's SSH remotes the
-  constraints and ADR-0034 require.
+  constraints and ADR-0027 require.
 
 ## Sources / Prior art
 
@@ -75,8 +75,8 @@ learns of a vulnerability in the OpenSSL it ships (see Follow-ups).
 ## Consequences
 
 - Positive: the macOS application, `ocelli-cli`, and `ocelli-server` start on any supported Mac,
-  and the `x86_64-apple-darwin` leg builds on `macos-latest` as ADR-0038 has it. SSH remotes keep
-  working as ADR-0034 decides (Q-4, Q-6 unchanged).
+  and the `x86_64-apple-darwin` leg builds on `macos-latest` as ADR-0012 has it. SSH remotes keep
+  working as ADR-0027 decides (Q-4, Q-6 unchanged).
 - Negative / trade-offs: Ocelli ships its own OpenSSL on macOS, and a fix to OpenSSL reaches
   macOS users only with an Ocelli release that updates `openssl-src`. A macOS build compiles
   OpenSSL, which takes longer and needs `perl` and `make` on the build machine. OpenSSL 3 is under

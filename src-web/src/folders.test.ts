@@ -1,4 +1,4 @@
-// Verifies: ADR-0042
+// Verifies: ADR-0040
 import { describe, expect, test } from 'bun:test';
 import { parentFolder } from './folders.ts';
 

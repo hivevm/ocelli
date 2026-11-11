@@ -1,4 +1,4 @@
-# ADR-0030: The terminal application remembers its view state in one JSON file in the user's state directory
+# ADR-0032: The terminal application remembers its view state in one JSON file in the user's state directory
 
 - **Status:** 🟢 accepted
 - **Date:** 2026-10-04
@@ -8,12 +8,13 @@
 ## Context
 
 The web interface remembers a few view choices across sessions, each in `localStorage`: the theme
-(`theme`, [ADR-0024](0024-themes-tokens-and-palettes.md)), whether the repository sidebar is
-minimised (`sidebar`, [ADR-0027](0027-repository-sidebar.md)), the diff layout (`diffView`, unified
-or side by side), and the avatar opt-in (`avatars`, [ADR-0025](0025-no-egress-hardened-webview.md)).
-The terminal application ([ADR-0029](0029-terminal-application-ratatui.md)) offers the same
-choices but the avatars, and a developer who prefers the light theme or a minimised sidebar should
-not set it again on every start.
+(`theme`, [ADR-0033](0033-themes-tokens-and-palettes.md)), whether the repository sidebar is
+minimised (`sidebar`, [ADR-0036](0036-sidebar-worktrees-filter.md)), the diff layout
+(`diffView`, unified or side by side), and the avatar opt-in (`avatars`,
+[ADR-0034](0034-no-egress-hardened-webview.md)). The terminal application
+([ADR-0031](0031-terminal-application-ratatui.md)) offers the same choices but the avatars, and a
+developer who prefers the light theme or a minimised sidebar should not set it again on every
+start.
 
 A terminal program has no `localStorage`; remembering anything means writing a file. Where that
 file lives, what format it has, and how the program behaves when it is missing or broken constrain
@@ -24,7 +25,7 @@ Two forces shape it:
 - **The file is Ocelli's own data**, not the repository's: it lives outside every repository, and
   nothing of it lands in a working tree or in `.git`, so every repository stays as the standard
   `git` leaves it (Non-Goals).
-- **It never leaves the machine** ([ADR-0025](0025-no-egress-hardened-webview.md)).
+- **It never leaves the machine** ([ADR-0034](0034-no-egress-hardened-webview.md)).
 
 ## Decision
 
@@ -65,7 +66,7 @@ interface's storage.
   `dirs::state_dir` returns nothing on macOS and Windows, so the fallbacks are written by hand
   either way, and three environment variables do not justify a dependency.
 - **Sharing the web interface's storage** — impossible without moving the web interface off
-  `localStorage`, a change to [ADR-0024](0024-themes-tokens-and-palettes.md)'s theming and the
+  `localStorage`, a change to [ADR-0033](0033-themes-tokens-and-palettes.md)'s theming and the
   WebView setup for a convenience nobody asked for.
 - **One file per setting** — three files to keep consistent instead of one atomic write.
 

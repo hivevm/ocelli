@@ -1,4 +1,4 @@
-//! `ocelli-cli` — the terminal frontend of Ocelli (ADR-0029).
+//! `ocelli-cli` — the terminal frontend of Ocelli (ADR-0031).
 //!
 //! History and refs come from `ocelli-git` and the layout from `ocelli-core`,
 //! exactly as for the desktop application; this crate rasterises and
@@ -162,7 +162,7 @@ fn run(
         if let Some(text) = app.clipboard.take() {
             copy_to_clipboard(&text)?;
         }
-        // Remember a changed theme, sidebar or diff layout (ADR-0030). A failed
+        // Remember a changed theme, sidebar or diff layout (ADR-0032). A failed
         // write costs only the memory of it, so it is reported, not fatal.
         let now = app.view_state();
         if now != saved {

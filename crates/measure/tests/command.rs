@@ -69,7 +69,7 @@ fn assert_measured(out: &Output) {
 const LIMIT: usize = ocelli_core::model::CHUNK_COMMITS;
 
 #[test]
-// Verifies: ADR-0018
+// Verifies: ADR-0019
 fn a_stash_and_uncommitted_changes_are_left_out_of_the_comparison() {
     let scratch = Scratch::new("stash");
     let dir = scratch.0.join("repo");
@@ -90,7 +90,7 @@ fn a_stash_and_uncommitted_changes_are_left_out_of_the_comparison() {
 }
 
 #[test]
-// Verifies: ADR-0016
+// Verifies: ADR-0018
 fn beyond_the_commit_limit_both_sides_see_the_same_newest_commits() {
     let scratch = Scratch::new("limit");
     let dir = scratch.0.join("repo.git");
@@ -130,7 +130,7 @@ fn beyond_the_commit_limit_both_sides_see_the_same_newest_commits() {
 }
 
 #[test]
-// Verifies: ADR-0016
+// Verifies: ADR-0018
 fn a_merge_whose_second_parent_lies_beyond_the_cut_is_compared_over_the_same_commits() {
     let scratch = Scratch::new("old-branch");
     let dir = scratch.0.join("repo.git");
@@ -243,7 +243,7 @@ fn measuring_a_repository_starts_none_of_the_programs_its_configuration_names() 
 }
 
 #[test]
-// Verifies: Q-2, ADR-0016
+// Verifies: Q-2, ADR-0018
 fn the_windows_measurement_loads_every_chunk_and_reports_each_wait() {
     let scratch = Scratch::new("windows");
     let repo = scratch.0.join("repo.git");
@@ -306,7 +306,7 @@ fn main_line(out: &Output) -> String {
 }
 
 #[test]
-// Verifies: ADR-0014, Q-1
+// Verifies: ADR-0016, Q-1
 fn crossings_are_measured_on_the_layout_with_the_main_line() {
     let scratch = Scratch::new("main-line");
     let repo = scratch.0.join("repo.git");

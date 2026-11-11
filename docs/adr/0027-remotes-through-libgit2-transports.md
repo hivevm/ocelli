@@ -1,4 +1,4 @@
-# ADR-0034: Ocelli reaches remotes through libgit2's own transports with no proxy, credentials only from the developer's setup for a host both parsers read alike, no revoked SSH host key, and what a push took read without the remote's words
+# ADR-0027: Ocelli reaches remotes through libgit2's own transports with no proxy, credentials only from the developer's setup for a host both parsers read alike, no revoked SSH host key, and what a push took read without the remote's words
 
 - **Status:** 🟢 accepted
 - **Date:** 2026-10-10
@@ -15,7 +15,7 @@ of its own and uses the SSH agent and Git's credential helpers. Q-4 asks that no
 repository brings runs, and a repository's configuration can name a credential helper, a proxy
 command, or an SSH command. Q-5 holds the remote server to answering every request a browser may
 make, which an abort does not, and to reading nothing outside the server root.
-[ADR-0025](0025-no-egress-hardened-webview.md) keeps the WebView local and leaves Git's own network
+[ADR-0034](0034-no-egress-hardened-webview.md) keeps the WebView local and leaves Git's own network
 operations out of its scope.
 
 The `git` binary would bring every transport, proxy, and helper the developer has set up, and run
@@ -144,7 +144,7 @@ remote's branch read again at the address pushed to, never from the reason the r
   The message of an error libgit2 passes on from a remote, `remote error: …` and
   `report-status: Error reported: …` among them, is cleaned the same way before it is shown.
 - **What reaches a browser.** The remote server answers a browser every failed write as
-  `WRITE_FAILED`, as [ADR-0037](0037-git-adapter-confined-to-the-server-root.md) decides: the
+  `WRITE_FAILED`, as [ADR-0040](0040-server-root-confinement.md) decides: the
   remote's side band reaches the desktop application and the terminal application only.
 - **Stopping and after.** Off the thread that draws, with progress reported. A fetch, and a pull
   while it fetches, can be stopped; a push cannot, and no front end offers it a stop. A transfer

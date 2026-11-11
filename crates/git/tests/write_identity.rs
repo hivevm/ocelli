@@ -1,4 +1,4 @@
-//! Verifies: ADR-0031
+//! Verifies: ADR-0023
 //!
 //! A write that records a person refuses where no identity is configured. libgit2 looks for the
 //! identity in the global and system configuration too, which `git_command` puts out of reach of

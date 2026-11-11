@@ -202,7 +202,7 @@ jobs:
         with:
           persist-credentials: false
       # The desktop host links against WebKitGTK on Linux; the workspace does not compile
-      # without these libraries (ADR-0021).
+      # without these libraries (ADR-0028).
       - name: Install the desktop host's Linux libraries
         if: runner.os == 'Linux'
         run: |
@@ -223,7 +223,7 @@ jobs:
         run: bash scripts/check-devcontainer-toolchain.sh
       - name: Build, test, and lint
         run: bash scripts/check-build.sh
-      # Verifies: ADR-0039 — no macOS binary loads a library outside the system, such as the
+      # Verifies: ADR-0013 — no macOS binary loads a library outside the system, such as the
       # build machine's Homebrew OpenSSL, which a Mac without Homebrew does not have.
       - name: Check that the macOS binaries load only the system's libraries
         if: runner.os == 'macOS'

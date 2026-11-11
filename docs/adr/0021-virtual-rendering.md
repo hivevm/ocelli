@@ -1,4 +1,4 @@
-# ADR-0020: The commit graph is drawn for the rows in view only
+# ADR-0021: The commit graph is drawn for the rows in view only
 
 - **Status:** 🟢 accepted
 - **Date:** 2026-10-04
@@ -7,7 +7,7 @@
 
 ## Context
 
-At a chunk of 3 000 rows ([ADR-0016](0016-history-loads-in-chunks.md)) and a row height of
+At a chunk of 3 000 rows ([ADR-0018](0018-history-loads-in-chunks.md)) and a row height of
 26 px, the commit graph is about 78 000 px tall, while the window shows a few dozen rows; at a
 million commits (Q-2) it is millions of pixels. Drawing every commit and every edge on each
 frame costs `O(n)` per frame and cannot hold 60 frames per second on a dense graph, although

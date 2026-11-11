@@ -1,4 +1,4 @@
-# ADR-0035: The remote server carries the desktop host's commands and events over one WebSocket per tab, and writes only when started with `--allow-writes`, as the user it runs as, one write per repository at a time
+# ADR-0038: The remote server carries the desktop host's commands and events over one WebSocket per tab, and writes only when started with `--allow-writes`, as the user it runs as, one write per repository at a time
 
 - **Status:** 🟢 accepted
 - **Date:** 2026-10-10
@@ -12,11 +12,11 @@ interface served by the remote server among them, the writes of G-12 to G-16 inc
 that a fetch, pull, or push reports its progress and that a fetch, and a pull while it fetches,
 can be stopped. The Constraints describe the remote server as VS Code's remote development does:
 it runs next to the repository, and the developer's browser talks to it. The desktop host answers
-the web interface through Tauri commands and events ([ADR-0021](0021-tauri-desktop-host.md)): the
+the web interface through Tauri commands and events ([ADR-0028](0028-tauri-desktop-host.md)): the
 core keeps the history in the host and the web interface reads windows of rows, searches, and
-selects ([ADR-0019](0019-front-ends-read-row-windows.md)), the host sends the answers the core
-decides from the refs ([ADR-0022](0022-desktop-host-answers-what-the-core-decides.md)), and writes
-go through the core's port ([ADR-0031](0031-writes-what-git-writes.md)).
+selects ([ADR-0020](0020-row-window-margin.md)), the host sends the answers the core
+decides from the refs ([ADR-0029](0029-desktop-host-answers-what-the-core-decides.md)), and writes
+go through the core's port ([ADR-0023](0023-writes-what-git-writes.md)).
 [ADR-0007](0007-toolchain-rust-and-typescript.md) writes the servers in Rust, and
 [ADR-0008](0008-ports-and-adapters.md) makes every front end an adapter of `core`.
 
@@ -34,17 +34,17 @@ event lies beside the server's tests, not among the core's.
 The writes, their checks, and their confirmations exist once: the shared `Host` in
 `crates/commands` performs a write through the core's port, asks `write_discards` for the words
 of the question the web interface puts before a write that discards work, and accepts such a
-write only with `confirmed` ([ADR-0033](0033-discarding-work-only-after-confirmation.md)). A
+write only with `confirmed` ([ADR-0026](0026-discarding-work-only-after-confirmation.md)). A
 transfer reaches remotes with the running SSH agent and the credential helpers of the global and
-system configuration only ([ADR-0034](0034-remotes-through-libgit2-transports.md)), reports
+system configuration only ([ADR-0027](0027-remotes-through-libgit2-transports.md)), reports
 `write-progress`, and stops on `cancel_write`. After a write the web interface loads again and
-selects the commit made or the one selected before (ADR-0031). Each `Host` refuses a second write
+selects the commit made or the one selected before (ADR-0023). Each `Host` refuses a second write
 while its own first runs.
 
 A write waiting for another tab's holds a thread of the blocking pool, and a tab can close while
 its write waits or its fetch runs. Q-5 says the server hands control of a machine to whoever
-reaches it: authentication ([ADR-0036](0036-remote-server-localhost-tls-session-cookie.md))
-and the server root ([ADR-0037](0037-git-adapter-confined-to-the-server-root.md)) narrow
+reaches it: authentication ([ADR-0039](0039-remote-server-localhost-tls-session-cookie.md))
+and the server root ([ADR-0040](0040-server-root-confinement.md)) narrow
 what a stolen session reaches, and a server that writes widens what it can do there: a commit,
 a reset, a push to a remote with the developer's credentials. Q-4 forbids running a
 program a repository names, Q-7 discarding work without confirmation, Q-6 a repository obtaining
@@ -74,13 +74,13 @@ commands and confirmations, one write per repository at a time.
   command returns or the error it rejects with. An event is its name and the payload the host
   emits. All of it is JSON, the payloads held to the web interface's types by fixtures: the
   core's in `crates/core/tests/fixtures/`
-  ([ADR-0022](0022-desktop-host-answers-what-the-core-decides.md)), and the server's own event's
+  ([ADR-0029](0029-desktop-host-answers-what-the-core-decides.md)), and the server's own event's
   in `crates/server/tests/fixtures/`.
 - **A transport in the web interface.** `src-web` reaches its host only through a transport of
   its own with two implementations, Tauri's `invoke` and `listen`, and the WebSocket; the build
   served by `ocelli-server` and the build the desktop host shows differ in that choice alone.
 - **What it serves.** The files of the web interface's build, embedded in the binary, with the
-  headers [ADR-0025](0025-no-egress-hardened-webview.md) sets for the WebView as HTTP headers:
+  headers [ADR-0034](0034-no-egress-hardened-webview.md) sets for the WebView as HTTP headers:
   a Content-Security-Policy that permits the bundle's own scripts and styles, a connection to the
   server itself, and only `img-src https://www.gravatar.com` beyond it; avatars stay off until the
   developer turns them on in the web interface, as in the desktop application.
@@ -98,9 +98,9 @@ commands and confirmations, one write per repository at a time.
   With it, the server answers every write the desktop host answers. The switch holds for the
   whole run; there is no way to turn writes on or off while the server runs.
 - **As the user it runs as.** A write records the identity of the repository's configuration as
-  the server's account reads it (ADR-0031). A fetch, pull, or push authenticates with the SSH
+  the server's account reads it (ADR-0023). A fetch, pull, or push authenticates with the SSH
   agent of the server's environment and the credential helpers of that account's global and
-  system configuration, never the repository's (ADR-0034, Q-6). The browser hands over no
+  system configuration, never the repository's (ADR-0027, Q-6). The browser hands over no
   identity, key, password, or helper, and the server asks it for none.
 - **The desktop host's commands.** `write_discards`, then `perform_write` with `confirmed`, cross
   the WebSocket with the names and payloads the desktop host's Tauri commands carry; the shared
@@ -113,7 +113,7 @@ commands and confirmations, one write per repository at a time.
 - **One write per repository.** The process holds a turn for each repository, keyed by its
   canonical common directory, so that a worktree and the working directory it belongs to count as
   one. A tab's write waits for a write of another tab to the same repository to end, and then
-  checks again what it expects (ADR-0031), refused with nothing changed where the first changed
+  checks again what it expects (ADR-0023), refused with nothing changed where the first changed
   it. At most 8 writes wait for one repository's turn; one past them is refused at once with a
   reason the web interface shows, since each waiting write holds a thread. A tab still runs one
   write of its own at a time, a second refused while its first runs.
@@ -127,7 +127,7 @@ commands and confirmations, one write per repository at a time.
   with `repo-written`, before the turn is given back; that tab loads again as the writing tab
   does. The desktop host, with one window per repository it shows, never sends it.
 - **The root.** Every write passes the check before every command that reaches the repository
-  (`Host::guarded`, ADR-0037), and the confined git adapter opens it with `NO_SEARCH`, writes and
+  (`Host::guarded`, ADR-0040), and the confined git adapter opens it with `NO_SEARCH`, writes and
   transfers included. A fetch or a push reaches a remote on this machine, one libgit2's local
   transport opens in-process, named by a path or a `file://` address, only where its address,
   `insteadOf` and `pushInsteadOf` applied, is an absolute path that resolves below the server
@@ -135,12 +135,12 @@ commands and confirmations, one write per repository at a time.
   its objects into a repository the browser reads and a push would write it. A remote over the
   network, by an ssh or an https address, is the server account's to reach, as it is `git`'s.
 
-**Out of scope:** who may reach the server and how it authenticates (ADR-0036); which
-repositories a browser may open (ADR-0037); the HTTP and WebSocket library, axum and hyper over
+**Out of scope:** who may reach the server and how it authenticates (ADR-0039); which
+repositories a browser may open (ADR-0040); the HTTP and WebSocket library, axum and hyper over
 Tokio within ADR-0007; credentials entered in the browser; accounts, roles, or several developers
 on one server; writes the desktop application does not offer; which tabs may write, all of them
 may; a cap on how long a write waits for another; the memory each tab's load session holds; the
-working-directory node's author, which stays absent in the browser (ADR-0037).
+working-directory node's author, which stays absent in the browser (ADR-0040).
 
 ## Alternatives considered
 
@@ -157,7 +157,7 @@ working-directory node's author, which stays absent in the browser (ADR-0037).
   trip, but then two hosts answer the same web interface differently, and every answer is written
   and tested twice; the desktop host's commands already read windows, not the whole history.
 - **The server's own copy of the command bodies** — no shared crate to keep free of Tauri, but
-  each command then lives twice, the duplication ADR-0022 keeps out of the web interface.
+  each command then lives twice, the duplication ADR-0029 keeps out of the web interface.
 - **Serving the web interface from disk beside the binary** — a smaller binary, but a second
   artifact to install and a directory whose content decides what the browser runs.
 - **Writes always on** — no switch to remember, but every server started to look at a history
@@ -165,7 +165,7 @@ working-directory node's author, which stays absent in the browser (ADR-0037).
   over; a server that only reads loses nothing to a stolen session but what it shows.
 - **Identity and credentials entered in the browser** — the server's account would need no agent
   and no helper, but a password or key then crosses the network, lives in the browser and in the
-  server's memory, and Ocelli stores credentials, which ADR-0034 rules out.
+  server's memory, and Ocelli stores credentials, which ADR-0027 rules out.
 - **A confirmation token of the server's own for each write** — a second proof beside the session
   cookie, but whoever holds the session receives the token through the same socket; it guards
   nothing the cookie and the Origin check do not, and the desktop's confirmation already keeps
@@ -260,7 +260,7 @@ a repository made by `git` below its root where it writes:
   root is checked, and the root is checked again once the turn comes; the shared list names each
   command once and each counterpart both ways;
 - in `crates/server/src/lib.rs`: writes are allowed only by the switch given at the start;
-- in `crates/server/src/web.rs`: the policy of ADR-0025's headers grants one origin beyond the
+- in `crates/server/src/web.rs`: the policy of ADR-0034's headers grants one origin beyond the
   server and no framing, and each inline script is hashed where a bundled one is not;
 - in `crates/server/src/socket/scrub.rs`: a transfer's progress names no credential and no path on
   the server;
@@ -283,7 +283,7 @@ a repository made by `git` below its root where it writes:
 - in `crates/git/tests/hostile_writes.rs`: every kind of write with each of its string fields set
   to each hostile value panics nowhere;
 - in `crates/server/tests/server.rs`: the printed URL opens the repository at the root and the web
-  interface's build is served with ADR-0025's headers, its rows arriving as the desktop host reads
+  interface's build is served with ADR-0034's headers, its rows arriving as the desktop host reads
   them; the server links no part of Tauri or WebKit, read from the lockfile's dependency tree;
   each read the browser asks is answered as the desktop host answers it; two tabs on two
   repositories each read their own, a selection staying in its tab; a tab closed or dropped

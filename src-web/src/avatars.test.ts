@@ -1,4 +1,4 @@
-// Verifies: ADR-0025, ADR-0035, G-18
+// Verifies: ADR-0034, ADR-0038, G-18
 import { describe, expect, test } from 'bun:test';
 import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';

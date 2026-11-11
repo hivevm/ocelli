@@ -1,4 +1,4 @@
-# ADR-0032: A conflict's sides are labelled as `git` labels them, but for what would let a label spell a path
+# ADR-0024: A conflict's sides are labelled as `git` labels them, but for what would let a label spell a path
 
 - **Status:** 🟢 accepted
 - **Date:** 2026-10-31
@@ -7,7 +7,7 @@
 
 ## Context
 
-[ADR-0031](0031-writes-what-git-writes.md) has Ocelli write what `git` writes for the same
+[ADR-0023](0023-writes-what-git-writes.md) has Ocelli write what `git` writes for the same
 command, refusing first where `git` would or an ADR departs. A merge, a rebase, a cherry-pick, and
 a revert can stop on a conflict, and what they then write includes the labels of the conflict's
 two sides.
@@ -70,7 +70,7 @@ path, and refuse a write whose label is not path-safe before anything changes.
   creates the lock file exclusively to write a merged side and stops half done where one is there.
 
 **Out of scope:** everything else a stopped operation writes and how it is resolved, which
-[ADR-0031](0031-writes-what-git-writes.md) decides.
+[ADR-0023](0023-writes-what-git-writes.md) decides.
 
 ## Alternatives considered
 

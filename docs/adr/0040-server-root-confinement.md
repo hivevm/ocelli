@@ -1,22 +1,21 @@
-# ADR-0042: The git adapter, confined to the server root, opens nothing whose files lie outside it, and the merge editor's reasons alone of its refusals reach the browser
+# ADR-0040: The git adapter, confined to the server root, opens nothing whose files lie outside it, and the merge editor's reasons alone of its refusals reach the browser
 
 - **Status:** 🟢 accepted
 - **Date:** 2026-11-03
 - **Deciders:** Markus Brigl
 - **Applies to:** every path a browser names to `ocelli-server`, the confinement of the git adapter in `crates/git/src/confine.rs` and the reads it changes in `refs.rs` and `git.rs`, the server root and its folder listing in `crates/server/src/root.rs`, the check `Host::guarded` in `crates/commands` makes before every command, the merge editor's `NotOpened` reason in `crates/core/src/merge.rs` and the `HostError` `crates/commands` makes of it, what `crates/server/src/socket.rs` lets leave the server, and the sidebar's submodule, worktree, and parent rows it serves
-- **Supersedes:** [ADR-0037](0037-git-adapter-confined-to-the-server-root.md)
 
 ## Context
 
 The desktop host opens any path the developer picks in a native folder dialog or names on the
 command line, and the git adapter finds the repository by searching upwards from it. The sidebar
 switches to a submodule, a worktree, or the superproject a repository sits in
-([ADR-0028](0028-submodules-and-repository-switching.md)). In the desktop that is the developer's
+([ADR-0037](0037-submodules-and-repository-switching.md)). In the desktop that is the developer's
 own hand on their own machine.
 
 The remote server takes paths from a browser
-([ADR-0035](0035-remote-server-websocket-per-tab.md)), behind its authentication
-([ADR-0036](0036-remote-server-localhost-tls-session-cookie.md)). Q-5 guards who gets in;
+([ADR-0038](0038-remote-server-websocket-per-tab.md)), behind its authentication
+([ADR-0039](0039-remote-server-localhost-tls-session-cookie.md)). Q-5 guards who gets in;
 what an authenticated browser can then reach is a second line. The machine the server runs on is
 an asset (Threats), and the server shows file content: changed files, diffs, and the working
 directory's content. A stolen session, or a mistake in the web interface, should reach only what
@@ -30,12 +29,12 @@ every read of the adapter opens the repository again, so a check made once at th
 holds only where every open of the adapter keeps to it. What git says when a read fails names
 paths on the server. And the files on disk change after a repository was checked.
 
-The merge editor ([ADR-0031](0031-writes-what-git-writes.md)) opens a conflicted file only where
+The merge editor ([ADR-0025](0025-merge-editor.md)) opens a conflicted file only where
 both sides hold text; where it does not, the git adapter says why: a side deleted, a link, a
 submodule, a file that holds no text, no longer a file, or no longer conflicted. Such a reason
 names the file by the path the browser sent, below the repository, and nothing else. Scrubbed
-like what git says, the browser read "Reading the repository failed" where the desktop says what
-to do instead.
+like what git says, it would leave the browser reading "Reading the repository failed" where the
+desktop says what to do instead.
 
 ## Decision
 
@@ -104,8 +103,8 @@ with no link inside its git directory, checked again before every command that r
 
 **Out of scope:** the configuration libgit2 reads for an open repository, the developer's global
 and system configuration and the files a repository's own configuration includes through
-`include.path` and `includeIf`, which [ADR-0034](0034-remotes-through-libgit2-transports.md)
-and [ADR-0031](0031-writes-what-git-writes.md) govern; a link made inside a git directory after
+`include.path` and `includeIf`, which [ADR-0027](0027-remotes-through-libgit2-transports.md)
+and [ADR-0023](0023-writes-what-git-writes.md) govern; a link made inside a git directory after
 the repository was opened, which the check before each command does not walk for; hard links,
 which no check of a path sees; the desktop application and the terminal application, which open
 what the developer picks; a list of several server roots.

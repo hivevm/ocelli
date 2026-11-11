@@ -9,7 +9,7 @@
 
 The template ships a Dev Container so that the first run is reproducible without committing to a
 language toolchain. Ocelli's toolchain ([ADR-0007](0007-toolchain-rust-and-typescript.md)) needs
-Rust and Bun, and the desktop host ([ADR-0021](0021-tauri-desktop-host.md)) builds on Linux
+Rust and Bun, and the desktop host ([ADR-0028](0028-tauri-desktop-host.md)) builds on Linux
 against system libraries no Feature provides: WebKitGTK and GTK, among others.
 
 Agents often want Docker access, and the obvious way, the `docker-outside-of-docker` Feature,
@@ -43,7 +43,7 @@ of its own.
   [ADR-0002](0002-decisions-verified-by-tests.md).
 
 **Out of scope:** which libraries the desktop host needs, which follows
-[ADR-0021](0021-tauri-desktop-host.md); which extensions a project picks, and whether it pins
+[ADR-0028](0028-tauri-desktop-host.md); which extensions a project picks, and whether it pins
 them; whether work may happen outside the container; hardening the container, which is not a
 security boundary; how the lock is refreshed; running the desktop application's window from
 inside the container, which needs display forwarding from the host; and macOS and Windows,
@@ -81,7 +81,7 @@ which the build job covers.
   invisible; a Dockerfile's packages are not locked like Features, so a rebuild may pick up newer
   Debian packages.
 - Follow-ups: whether an automated update path for Features should be wired up; the exact
-  library list, with [ADR-0021](0021-tauri-desktop-host.md).
+  library list, with [ADR-0028](0028-tauri-desktop-host.md).
 
 ## Enforcement
 

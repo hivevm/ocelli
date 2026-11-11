@@ -1,4 +1,4 @@
-# ADR-0036: The remote server listens on localhost by default and on a network only over TLS, and admits a browser by a token per start exchanged for a session cookie, from its own origin only
+# ADR-0039: The remote server listens on localhost by default and on a network only over TLS, and admits a browser by a token per start exchanged for a session cookie, from its own origin only
 
 - **Status:** 🟢 accepted
 - **Date:** 2026-10-08
@@ -16,7 +16,7 @@ not a team (Non-Goals), and the Constraints and Assumptions model it on VS Code'
 development: a long-running process the developer starts under their own account.
 
 The server carries the desktop host's commands over one WebSocket per browser tab
-([ADR-0035](0035-remote-server-websocket-per-tab.md)). Browsers send cookies with a WebSocket
+([ADR-0038](0038-remote-server-websocket-per-tab.md)). Browsers send cookies with a WebSocket
 handshake whatever page opens it, and a WebSocket is not bound by the same-origin policy: a page
 of another origin that can open a socket to the server, carrying the developer's cookie, controls
 it. A server on `localhost` is reachable from every page in the developer's browser and from
@@ -69,7 +69,7 @@ request and WebSocket handshake without that cookie or from another origin.
   a cap, counted for the whole server rather than per address, and it logs that attempts fail
   without logging what they carried.
 
-**Out of scope:** which repositories an authenticated browser may open, which is ADR-0037;
+**Out of scope:** which repositories an authenticated browser may open, which is ADR-0040;
 accounts, users, or roles, which a server for one developer does not have; logging out, which a
 restart does; a certificate from a public authority, which the developer gives with `--cert` and
 `--key` like any other.

@@ -1,4 +1,4 @@
-# ADR-0023: The web interface is built with Svelte 5, and the commit graph stays imperative canvas drawing
+# ADR-0030: The web interface is built with Svelte 5, and the commit graph stays imperative canvas drawing
 
 - **Status:** 🟢 accepted
 - **Date:** 2026-10-04
@@ -10,13 +10,13 @@
 [ADR-0007](0007-toolchain-rust-and-typescript.md) writes the one web interface, shared by the
 desktop application and the remote server, in TypeScript on Bun, and leaves its framework open.
 Other decisions already need what only a component model provides:
-[ADR-0026](0026-diff-overlay-and-file-list.md) draws the file tree recursively and holds the view
-mode in state, and [ADR-0024](0024-themes-tokens-and-palettes.md) selects the canvas palette from a
+[ADR-0035](0035-diff-overlay-and-file-list.md) draws the file tree recursively and holds the view
+mode in state, and [ADR-0033](0033-themes-tokens-and-palettes.md) selects the canvas palette from a
 `theme` prop that is part of the drawing effect's dependencies.
 
 The requirement is narrow, and it rules most candidates in or out. The main content, the commit
 graph, is drawn imperatively on a `<canvas>` and must not be re-rendered by a framework at all;
-the frame budget belongs to the canvas ([ADR-0020](0020-virtual-rendering.md)). What needs a
+the frame budget belongs to the canvas ([ADR-0021](0021-virtual-rendering.md)). What needs a
 component model is the chrome around it: toolbar, commit detail, the changed files in two views,
 the diff, the repository sidebar, the status bar, and the theme toggle. That is ordinary stateful
 DOM, with one recursive view (the directory tree) and one place where a change of state must
@@ -32,7 +32,7 @@ commit graph, which stays imperative canvas drawing that Svelte passes props to 
 effect for when they change.
 
 **Out of scope:** how the web interface reaches the desktop host or the remote server, which
-[ADR-0035](0035-remote-server-websocket-per-tab.md) decides for both; the drawing of the commit
+[ADR-0038](0038-remote-server-websocket-per-tab.md) decides for both; the drawing of the commit
 graph itself.
 
 ## Alternatives considered
@@ -47,7 +47,7 @@ graph itself.
 - **Solid** — the closest on the merits: fine-grained reactivity, no virtual DOM, a model very
   like runes. Not chosen for its smaller ecosystem and because JSX adds a markup layer that
   Svelte's single-file components cover directly, with scoped styles that suit
-  [ADR-0024](0024-themes-tokens-and-palettes.md)'s tokens.
+  [ADR-0033](0033-themes-tokens-and-palettes.md)'s tokens.
 - **Vue** — a mature single-file-component model, but a larger runtime than Svelte's compiled
   output and no advantage for an interface centred on a canvas.
 - **Lit or native web components** — standards-based with a small runtime, but no compile-time
@@ -65,8 +65,8 @@ graph itself.
 
 ## Consequences
 
-- Positive: [ADR-0026](0026-diff-overlay-and-file-list.md)'s recursive tree and
-  [ADR-0024](0024-themes-tokens-and-palettes.md)'s redraw on a theme switch are a few lines each;
+- Positive: [ADR-0035](0035-diff-overlay-and-file-list.md)'s recursive tree and
+  [ADR-0033](0033-themes-tokens-and-palettes.md)'s redraw on a theme switch are a few lines each;
   the compiled output ships no virtual-DOM runtime, so the frame budget stays with the canvas and
   the bundle the remote server sends stays small; single-file components keep each panel's markup,
   styles, and logic together, and scoped styles compose with its custom properties;

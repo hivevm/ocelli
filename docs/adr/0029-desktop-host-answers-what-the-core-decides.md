@@ -1,4 +1,4 @@
-# ADR-0022: The desktop host answers what the core decides from the refs, and the web interface restates none of it
+# ADR-0029: The desktop host answers what the core decides from the refs, and the web interface restates none of it
 
 - **Status:** 🟢 accepted
 - **Date:** 2026-10-08
@@ -10,9 +10,9 @@
 The core decides which fetch, pull, and push the refs make possible, or why there is none, and
 which of them can be stopped while it runs (`RepoRefs::fetch`, `pull`, `push`, and
 `Write::can_stop` in `crates/core/src/transfer.rs`,
-[ADR-0034](0034-remotes-through-libgit2-transports.md)), and which history operations of G-13 a
+[ADR-0027](0027-remotes-through-libgit2-transports.md)), and which history operations of G-13 a
 commit offers on the checked-out branch (`RepoRefs::history_operations` in
-`crates/core/src/operations.rs`, [ADR-0031](0031-writes-what-git-writes.md)). The terminal
+`crates/core/src/operations.rs`, [ADR-0023](0023-writes-what-git-writes.md)). The terminal
 application calls these directly. Before this decision the web interface restated both in
 TypeScript, `src-web/src/transfers.ts` and `src-web/src/operations.ts`, held to the core by the
 fixtures `transfers.json` and `operations.json` that the core's `tests/write_fixture.rs` wrote for
@@ -23,11 +23,11 @@ the core added and the fixture did not sample drifted silently, against the conv
 behaviour both front ends offer lives once in the core. The desktop host holds the refs of each
 load, which it sends as the `load-refs` event, and answers a core question for the web interface
 by a command: `write_discards` says what a write discards
-([ADR-0033](0033-discarding-work-only-after-confirmation.md)). Selecting a commit is a command
+([ADR-0026](0026-discarding-work-only-after-confirmation.md)). Selecting a commit is a command
 whose answer, `Selected`, the host computes from the history it keeps
-([ADR-0019](0019-front-ends-read-row-windows.md)). The command bodies live in `crates/commands`,
+([ADR-0020](0020-row-window-margin.md)). The command bodies live in `crates/commands`,
 which the remote server shares, so its answers are the desktop host's
-([ADR-0035](0035-remote-server-websocket-per-tab.md)).
+([ADR-0038](0038-remote-server-websocket-per-tab.md)).
 
 The fixtures of the wire format are another matter: `writes.json` and `files.json` hold the web
 interface's types to the JSON the core takes and sends, which the web interface must spell

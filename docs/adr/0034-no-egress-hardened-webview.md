@@ -1,4 +1,4 @@
-# ADR-0025: The front ends make no network request by default, and the WebView is granted only what it uses
+# ADR-0034: The front ends make no network request by default, and the WebView is granted only what it uses
 
 - **Status:** 🟢 accepted
 - **Date:** 2026-10-04
@@ -7,7 +7,7 @@
 
 ## Context
 
-Ocelli reads a repository from disk through `git2` ([ADR-0017](0017-git2-repository-reader.md)),
+Ocelli reads a repository from disk through `git2` ([ADR-0022](0022-git2-repository-reader.md)),
 and reaches the network only where the developer asks it to: fetching, pulling, and pushing to a
 remote repository through the developer's own Git setup (G-12, Constraints). Nothing else Ocelli
 shows needs the network, with one exception worth keeping: avatars of a commit's author and
@@ -20,7 +20,7 @@ can confirm it. The disclosure is the problem, not the feature: avatars are a pi
 worth keeping once the developer has agreed to it.
 
 The desktop application shows the web interface in a WebView
-([ADR-0021](0021-tauri-desktop-host.md)), and a Tauri configuration can grant it room the
+([ADR-0028](0028-tauri-desktop-host.md)), and a Tauri configuration can grant it room the
 interface never uses: `"csp": null` lets the WebView load and connect anywhere, an enabled asset
 protocol with the scope `["**"]` lets it read any path through `asset://`, and
 `withGlobalTauri: true` injects the whole Tauri API into `window`. The interface reaches Tauri
@@ -50,9 +50,9 @@ all; avatars do not exist in a terminal.
 
 **Out of scope:** Git's own network operations to remote repositories, which the developer starts
 and which run through their Git setup, which is
-[ADR-0034](0034-remotes-through-libgit2-transports.md); the headers and origins of the remote
+[ADR-0027](0027-remotes-through-libgit2-transports.md); the headers and origins of the remote
 server, which serves the same web interface to a browser and whose policy is
-[ADR-0035](0035-remote-server-websocket-per-tab.md).
+[ADR-0038](0038-remote-server-websocket-per-tab.md).
 
 ## Alternatives considered
 

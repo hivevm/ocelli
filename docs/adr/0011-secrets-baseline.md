@@ -20,8 +20,8 @@ the project's secrets as GitHub Actions secrets, and add no scanner of our own u
 shape GitHub does not recognise, such as an installer signing certificate, joins them.
 
 **Out of scope:** how Ocelli treats the developer's credentials at runtime, which the
-specification's threats, [ADR-0034](0034-remotes-through-libgit2-transports.md) for the
-remotes, and [ADR-0035](0035-remote-server-websocket-per-tab.md) for the remote server decide.
+specification's threats, [ADR-0027](0027-remotes-through-libgit2-transports.md) for the
+remotes, and [ADR-0038](0038-remote-server-websocket-per-tab.md) for the remote server decide.
 
 ## Alternatives considered
 

@@ -1,5 +1,5 @@
 //! Dark and light palettes, taken from the desktop's tokens
-//! (`src-web/src/theme/palette.ts`, ADR-0024) so both frontends share colours.
+//! (`src-web/src/theme/palette.ts`, ADR-0033) so both frontends share colours.
 //! The frame background is painted too, so a theme looks the same whatever
 //! the terminal's own background is.
 
@@ -54,7 +54,7 @@ pub struct Palette {
     pub purple: Color,
     pub add_bg: Color,
     pub del_bg: Color,
-    /// The merge editor's theirs, ours being `add_bg`, and the base of a block (ADR-0031): the
+    /// The merge editor's theirs, ours being `add_bg`, and the base of a block (ADR-0025): the
     /// web interface's `--blue-bg` and `--amber-bg`.
     pub theirs_bg: Color,
     pub base_bg: Color,
@@ -192,7 +192,7 @@ pub fn lane(col: usize) -> Color {
 
 #[cfg(test)]
 mod tests {
-    // Verifies: ADR-0024
+    // Verifies: ADR-0033
     use super::*;
 
     fn channels(c: Color) -> (u8, u8, u8) {

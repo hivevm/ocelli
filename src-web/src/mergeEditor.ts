@@ -1,4 +1,4 @@
-// The merge editor's decisions that need no editor (ADR-0031, G-15): which lines of the file
+// The merge editor's decisions that need no editor (ADR-0025, G-15): which lines of the file
 // the blocks the core found mark, what taking a side puts in a block's place, whether the result
 // is still unsaved, and the write that saves it.
 import type { Conflict, MergeBlock, MergeFile } from './types.ts';

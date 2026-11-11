@@ -1,4 +1,4 @@
-# ADR-0024: Dark and light themes come from CSS variables, a canvas palette, and a terminal palette
+# ADR-0033: Dark and light themes come from CSS variables, a canvas palette, and a terminal palette
 
 - **Status:** 🟢 accepted
 - **Date:** 2026-10-04
@@ -35,7 +35,7 @@ object for the canvas, and a palette value for the terminal, all sharing one lis
    configured with. The lane colours are the web interface's `SERIES_COLORS`, in the same order and
    read from the file that declares them, so a commit keeps its colour across a theme switch and
    across front ends. The choice is kept in the state file of
-   [ADR-0030](0030-cli-state-file.md).
+   [ADR-0032](0032-cli-state-file.md).
 
 **Out of scope:** following the operating system's setting by default; a third theme.
 

@@ -1,4 +1,4 @@
-// Why a sidebar row that switches to another repository cannot (ADR-0028, ADR-0042): the working
+// Why a sidebar row that switches to another repository cannot (ADR-0037, ADR-0040): the working
 // tree on screen, a submodule never checked out, or a repository outside the server root, whose
 // path the remote server sends empty so that the row shows without its switch.
 

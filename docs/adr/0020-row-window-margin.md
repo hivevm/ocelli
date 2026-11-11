@@ -1,26 +1,24 @@
-# ADR-0040: The core keeps the commit graph, the front ends read windows of rows from it reaching one screen beyond the view, and the core searches it and computes lineage
+# ADR-0020: The core keeps the commit graph, the front ends read windows of rows from it reaching one screen beyond the view, and the core searches it and computes lineage
 
 - **Status:** 🟢 accepted
 - **Date:** 2026-10-31
 - **Deciders:** Markus Brigl
 - **Applies to:** the commit graph's store in `crates/core`, the desktop host's commands in `src-tauri`, the web interface's graph, search, and lineage in `src-web`, and the terminal application's reads in `crates/tui`
-- **Supersedes:** [ADR-0019](0019-front-ends-read-row-windows.md)
 
 ## Context
 
 A desktop host that sent the whole laid-out graph to the web interface as one JSON event would
 have the web interface keep every node in memory, search it, and compute lineage over it, while
 the terminal application holds the same graph in its process. With the whole history loading
-([ADR-0016](0016-history-loads-in-chunks.md)), that graph grows to a million nodes. Q-3 limits
+([ADR-0018](0018-history-loads-in-chunks.md)), that graph grows to a million nodes. Q-3 limits
 what the commit graph may add to the desktop application to 150 MB at 100 000 commits, and Q-2
 allows no wait above 100 ms while scrolling. A million JavaScript objects in the
 WebView meet neither; the drawing already touches only the rows in view
-([ADR-0020](0020-virtual-rendering.md)).
+([ADR-0021](0021-virtual-rendering.md)).
 
 A window of exactly the rows in view goes stale with the first row scrolled: every step of a
-scroll would wait for a round trip to the host, which Q-2 bounds at 100 ms. The web interface has
-therefore asked, since it reads windows, for one screen of rows beyond the view on either side
-(`src-web/src/rowWindow.ts`), which ADR-0019 did not allow.
+scroll would wait for a round trip to the host, which Q-2 bounds at 100 ms. The web interface
+therefore asks for one screen of rows beyond the view on either side (`src-web/src/rowWindow.ts`).
 
 ## Decision
 
@@ -38,15 +36,17 @@ the **core searches** the graph (G-11) and **computes lineage** (G-10) for every
   rows, the search results, and the lineage highlight are the same.
 
 **Out of scope:** the remote server's protocol, which reads the same core and which
-[ADR-0035](0035-remote-server-websocket-per-tab.md) decides (G-18); the caching of windows in the
+[ADR-0038](0038-remote-server-websocket-per-tab.md) decides (G-18); the caching of windows in the
 web interface; the commit detail and the diff, which are read per commit.
 
 ## Alternatives considered
 
 - **Send every chunk to the web interface** — fewer changes, but the WebView holds the whole graph,
   and Q-3 and Q-2 are out of reach on a large history.
-- **No more than the rows in view, as ADR-0019 decided** — the least memory, but every scrolled
-  row is a round trip to the host before it is drawn, which Q-2 does not allow on a slow host.
+- **No more than the rows in view** — the least memory, and the decision first taken when the
+  front ends began to read windows, but every scrolled row is a round trip to the host before it
+  is drawn, which Q-2 does not allow on a slow host. It did not stand for that reason, and the
+  margin of one screen replaced it.
 - **A wider margin, or a cache of windows already read** — fewer round trips, but the memory no
   longer follows the view alone, and a cache is a second copy of the graph to keep in step.
 - **Keep search and lineage in each front end over its window** — no move of code, but a window
@@ -54,7 +54,7 @@ web interface; the commit detail and the diff, which are read per commit.
 
 ## Sources / Prior art
 
-- [ADR-0020](0020-virtual-rendering.md), which already ties the cost of drawing to the rows in
+- [ADR-0021](0021-virtual-rendering.md), which already ties the cost of drawing to the rows in
   view; this ties the data to them.
 - The conventions' entry that a behaviour both front ends offer lives once in the core, and only
   drawing is ported ([`docs/CONVENTIONS.md`](../CONVENTIONS.md)): search and lineage get one
