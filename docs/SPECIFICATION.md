@@ -133,7 +133,8 @@ from the threats below.
 - **Q-7** — Safety: an operation that discards work cannot happen by accident. Measured for each
   such operation (a hard reset, dropping a stash, applying a stash and dropping it, deleting a
   tag, deleting a branch that is not merged, aborting an operation in progress, taking one side
-  of a conflicted file): it runs only after the developer confirms it.
+  of a conflicted file, leaving the merge editor with a result not saved): it runs only after the
+  developer confirms it.
 
 ## Non-Goals
 
