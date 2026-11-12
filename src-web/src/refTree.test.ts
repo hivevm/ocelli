@@ -1,4 +1,4 @@
-// Verifies: ADR-0036, ADR-0037
+// Verifies: ADR-0037, ADR-0038
 import { describe, expect, test } from 'bun:test';
 import { anyLeaf, countLeaves, filterByName, groupByFolder, refShas } from './refTree.ts';
 

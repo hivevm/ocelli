@@ -1,4 +1,4 @@
-//! The merge editor through the remote server (ADR-0038, ADR-0025): a tab reads a conflicted
+//! The merge editor through the remote server (ADR-0039, ADR-0026): a tab reads a conflicted
 //! file's text and blocks and saves its result over its connection, as the shared commands answer
 //! them; a server without `--allow-writes` reads but refuses the save, one confined to its root
 //! opens nothing outside it, and a save waits for the repository's turn and checks the file again
@@ -136,7 +136,7 @@ fn conflicted(refs: &Value) -> Vec<String> {
 }
 
 #[tokio::test]
-// Verifies: ADR-0038, ADR-0025, G-15, G-18
+// Verifies: ADR-0039, ADR-0026, G-15, G-18
 async fn with_allow_writes_a_result_saved_in_a_tab_resolves_the_file_as_the_desktop_does() {
     let mut pair = Pair::new("merge-editor", |root| stopped_in(root, "d")).await;
     let file = read(&mut pair.tab, "d/f").await.unwrap();
@@ -162,7 +162,7 @@ async fn with_allow_writes_a_result_saved_in_a_tab_resolves_the_file_as_the_desk
 }
 
 #[tokio::test]
-// Verifies: ADR-0038, ADR-0025, Q-5
+// Verifies: ADR-0039, ADR-0026, Q-5
 async fn without_allow_writes_a_tab_reads_the_file_but_its_save_is_refused_and_nothing_changes() {
     let scratch = Scratch::new("merge-editor-reads");
     let root = scratch.0.join("root");
@@ -184,7 +184,7 @@ async fn without_allow_writes_a_tab_reads_the_file_but_its_save_is_refused_and_n
 }
 
 #[tokio::test]
-// Verifies: ADR-0040, ADR-0025, G-15, G-18
+// Verifies: ADR-0041, ADR-0026, G-15, G-18
 async fn a_tab_is_told_why_the_editor_opens_no_file_as_the_desktop_host_is() {
     let mut pair = Pair::new("merge-editor-reasons", stopped_on_kinds).await;
     // Since the load, t1 no longer holds text, t2 is no longer a file, and t3 no longer conflicts.
@@ -221,7 +221,7 @@ async fn a_tab_is_told_why_the_editor_opens_no_file_as_the_desktop_host_is() {
 }
 
 #[tokio::test]
-// Verifies: ADR-0040, ADR-0025
+// Verifies: ADR-0041, ADR-0026
 async fn a_conflicted_file_below_a_link_that_leads_outside_the_root_is_neither_read_nor_saved() {
     let scratch = Scratch::new("merge-editor-outside");
     let root = scratch.0.join("root");
@@ -260,7 +260,7 @@ async fn a_conflicted_file_below_a_link_that_leads_outside_the_root_is_neither_r
 }
 
 #[tokio::test]
-// Verifies: ADR-0038, ADR-0025
+// Verifies: ADR-0039, ADR-0026
 async fn a_save_waits_for_the_repository_s_turn_and_checks_the_file_again_after_the_wait() {
     let scratch = Scratch::new("merge-editor-turn");
     let root = scratch.0.join("root");

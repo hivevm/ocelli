@@ -47,7 +47,7 @@ skimmed. The design revision drops what prevented nothing
   to the branches and tags they switch to or delete (`refChips.ts`). What the core decides, such
   as which transfer the toolbar offers and which operations a commit does, the host sends and the
   component draws
-  ([ADR-0029](adr/0029-desktop-host-answers-what-the-core-decides.md)). A
+  ([ADR-0030](adr/0030-desktop-host-answers-what-the-core-decides.md)). A
   component needs a browser to test and a pane a terminal; a function needs neither.
 - **A behaviour both front ends offer lives once in the core; only drawing is ported.** Search,
   lineage, and a load's bookkeeping, its chunks, status, and growing search and selection, belong
@@ -55,7 +55,7 @@ skimmed. The design revision drops what prevented nothing
   draw, follow the web interface's helpers module for module,
   and the desktop host takes the path on its command line as `ocelli-cli` takes its own, so that
   a change to what a behaviour is touches both and the two cannot drift into two products,
-  for the reason the shared core exists ([ADR-0008](adr/0008-ports-and-adapters.md)).
+  for the reason the shared core exists ([ADR-0009](adr/0009-ports-and-adapters.md)).
 - **A test is named as the property it asserts, in a sentence.**
   `parents_are_always_below_their_children`, not `test_sort`: the name is what a reader sees when
   it fails, and the suite is the contract the decisions are held to
@@ -68,7 +68,7 @@ skimmed. The design revision drops what prevented nothing
 - **A test's input is one its producer can make, and each outcome gets a case.** Code that reads
   the core's layout or git's output is tested on layouts `build_graph` lays out, on graphs git
   drew, or on hand-made ones only in shapes the governing ADR allows, the synthetic nodes of
-  [ADR-0019](adr/0019-synthetic-nodes-in-the-first-chunk.md) included where they reach the code;
+  [ADR-0020](adr/0020-synthetic-nodes-in-the-first-chunk.md) included where they reach the code;
   a fixture nothing produces tests a case that cannot occur. A generator yields every shape its
   producer can make, the rare ones its ADR names included, such as a date running backwards or a
   parent in a later chunk. A script that reports a verdict is
@@ -103,7 +103,7 @@ skimmed. The design revision drops what prevented nothing
 - **A write's tests read what `git` does off `git` run on the same input, never recalled.** A
   write does what `git` does for the same command, refusing first where `git` would or a listed
   departure decides
-  ([ADR-0023](adr/0023-writes-what-git-writes.md)); libgit2 reads
+  ([ADR-0024](adr/0024-writes-what-git-writes.md)); libgit2 reads
   none of the index, the operation in progress, or the configuration keys `git` weighs for the
   caller, so each is a state its tests set up. A departure is tested against `git` doing
   otherwise. A refusal's test compares everything the write can change before and after:

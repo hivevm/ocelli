@@ -1,4 +1,4 @@
-//! The terminal application's merge editor (ADR-0025, G-15, G-18): a conflicted file's text in
+//! The terminal application's merge editor (ADR-0026, G-15, G-18): a conflicted file's text in
 //! `tui-textarea-2`, editable everywhere with undo. Its blocks are those the core found in the file
 //! opened, each followed through every edit as the web interface follows its own: a block an edit
 //! took a marker line from, or moved one out of order, is no block, and a run of marker lines typed
@@ -7,7 +7,7 @@
 //! saves, and Esc leaves, asking first where the result is not saved (Q-7). Free of terminal I/O,
 //! as [`App`](crate::app::App) is, so that tests drive it.
 //!
-//! An 80-column terminal holds one column, not three parts a block (ADR-0025): a base the file
+//! An 80-column terminal holds one column, not three parts a block (ADR-0026): a base the file
 //! holds between `|||||||` and `=======` is left out of the text the editor opens, which no
 //! resolution keeps, and shown with a base found in memory beneath the text while it is open.
 
@@ -512,7 +512,7 @@ mod tests {
     }
 
     #[test]
-    // Verifies: ADR-0025, G-15
+    // Verifies: ADR-0026, G-15
     fn the_editor_opens_on_the_text_its_bases_aside_and_the_cursor_on_the_first_block() {
         let e = editor();
         assert_eq!(
@@ -535,7 +535,7 @@ mod tests {
     }
 
     #[test]
-    // Verifies: ADR-0025, G-15
+    // Verifies: ADR-0026, G-15
     fn alt_o_t_and_b_take_ours_theirs_or_both_and_undo_puts_the_block_back() {
         for (key, result) in [
             ('o', "a\nours\nm\n"),
@@ -560,7 +560,7 @@ mod tests {
     }
 
     #[test]
-    // Verifies: ADR-0025, G-15
+    // Verifies: ADR-0026, G-15
     fn a_take_s_blocks_come_back_only_with_the_text_it_left_or_started_from() {
         let mut e = editor();
         e.key(alt('o'));
@@ -579,7 +579,7 @@ mod tests {
     }
 
     #[test]
-    // Verifies: ADR-0025, G-15
+    // Verifies: ADR-0026, G-15
     fn a_side_edited_is_taken_as_edited_and_the_last_block_of_a_file_without_a_final_line_ending() {
         let mut e = editor();
         e.key(plain(KeyCode::Down));
@@ -609,7 +609,7 @@ mod tests {
     }
 
     #[test]
-    // Verifies: ADR-0025, G-15
+    // Verifies: ADR-0026, G-15
     fn a_take_of_an_empty_side_is_undone_alone_and_an_earlier_one_stays() {
         let text =
             "a\n<<<<<<< H\nx\n=======\ny\n>>>>>>> s\nm\n<<<<<<< H\n=======\nq\n>>>>>>> s\nz\n";
@@ -636,7 +636,7 @@ mod tests {
     }
 
     #[test]
-    // Verifies: ADR-0025, G-15
+    // Verifies: ADR-0026, G-15
     fn a_block_past_row_65535_is_taken_where_it_is() {
         let mut text: String = (0..70_000).map(|i| format!("l{i}\n")).collect();
         text.push_str("<<<<<<< H\nx\n=======\ny\n>>>>>>> s\nz\n");
@@ -653,7 +653,7 @@ mod tests {
     }
 
     #[test]
-    // Verifies: ADR-0031, G-18
+    // Verifies: ADR-0032, G-18
     fn a_character_altgr_types_as_ctrl_alt_is_typed_and_a_tab_stays_a_tab() {
         let mut e = editor();
         e.key(plain(KeyCode::Home));
@@ -668,7 +668,7 @@ mod tests {
     }
 
     #[test]
-    // Verifies: ADR-0025, G-15
+    // Verifies: ADR-0026, G-15
     fn a_file_s_own_base_is_found_again_once_its_sides_are_edited() {
         let mut e = editor();
         e.key(alt('n'));
@@ -680,7 +680,7 @@ mod tests {
     }
 
     #[test]
-    // Verifies: ADR-0025, G-15
+    // Verifies: ADR-0026, G-15
     fn alt_n_and_p_move_between_blocks_and_alt_a_opens_and_closes_the_base() {
         let mut e = editor();
         assert_eq!(e.base_here(), Some("b1\n"));
@@ -706,7 +706,7 @@ mod tests {
     }
 
     #[test]
-    // Verifies: ADR-0025, G-15
+    // Verifies: ADR-0026, G-15
     fn ctrl_s_saves_the_result_expecting_the_conflict_and_the_file_opened() {
         let mut e = editor();
         e.key(alt('o'));
@@ -737,7 +737,7 @@ mod tests {
     }
 
     #[test]
-    // Verifies: ADR-0025, ADR-0026, Q-7
+    // Verifies: ADR-0026, ADR-0027, Q-7
     fn esc_with_a_result_not_saved_asks_and_only_y_leaves() {
         let mut e = editor();
         assert_eq!(
@@ -786,7 +786,7 @@ mod tests {
     }
 
     #[test]
-    // Verifies: ADR-0025, G-15
+    // Verifies: ADR-0026, G-15
     fn a_side_taken_leaves_the_text_the_core_says() {
         for case in fixture()["takes"].as_array().expect("takes") {
             let mut e = MergeEditor::open(conflict(), file_of(&case["file"]));
@@ -804,7 +804,7 @@ mod tests {
     }
 
     #[test]
-    // Verifies: ADR-0025, G-15
+    // Verifies: ADR-0026, G-15
     fn a_run_of_marker_lines_typed_is_no_block_and_the_blocks_opened_stay_whole() {
         for case in fixture()["pasted"].as_array().expect("pasted") {
             let mut e = MergeEditor::open(conflict(), file_of(&case["file"]));

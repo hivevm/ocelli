@@ -6,7 +6,7 @@ themes. Nothing here imports from the rest of the application, so the directory
 can be copied into another project as it stands.
 
 The design behind it — why tokens *and* a JS palette — is
-[ADR-0033](../../../docs/adr/0033-themes-tokens-and-palettes.md).
+[ADR-0034](../../../docs/adr/0034-themes-tokens-and-palettes.md).
 
 | File         | Contents                                                              |
 | ------------ | --------------------------------------------------------------------- |

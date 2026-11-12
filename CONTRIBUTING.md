@@ -47,23 +47,23 @@ docs/CONVENTIONS.md   # how this project writes what no check decides, kept curr
 docs/ARCHITECTURE.md  # the system as it currently stands
 docs/adr/             # Architecture Decision Records (+ template)
 docs/plan/            # open work: feature specs and their tickets, deleted as they land
-Cargo.toml            # the Cargo workspace of the crates and the desktop host (ADR-0007)
+Cargo.toml            # the Cargo workspace of the crates and the desktop host (ADR-0008)
 Cargo.lock            # the locked Rust dependencies
-rust-toolchain.toml   # the pinned Rust toolchain and its components (ADR-0007)
+rust-toolchain.toml   # the pinned Rust toolchain and its components (ADR-0008)
 .cargo/               # Cargo's build configuration: linkers and the development profile
-package.json          # the web interface's dependencies and scripts, run by Bun (ADR-0007)
+package.json          # the web interface's dependencies and scripts, run by Bun (ADR-0008)
 bun.lock              # the locked JavaScript dependencies
-crates/commands/      # the commands both hosts of the web interface answer (ADR-0038)
-crates/core/          # the core: commit graph, layout, and the repository port (ADR-0008)
-crates/git/           # the repository port implemented with git2 (ADR-0022)
-crates/tui/           # the terminal application, ocelli-cli (ADR-0031)
-crates/server/        # the remote server, ocelli-server: the web interface in a browser (ADR-0038)
+crates/commands/      # the commands both hosts of the web interface answer (ADR-0039)
+crates/core/          # the core: commit graph, layout, and the repository port (ADR-0009)
+crates/git/           # the repository port implemented with git2 (ADR-0023)
+crates/tui/           # the terminal application, ocelli-cli (ADR-0032)
+crates/server/        # the remote server, ocelli-server: the web interface in a browser (ADR-0039)
 crates/measure/       # ocelli-measure: edge crossings on real repositories (Q-1); with
                       # scripts/measure-memory.sh (Q-3) and scripts/measure-mutants.sh (the git
                       # adapter's guards) run weekly by .github/workflows/measure.yml
-src-tauri/            # the desktop host (ADR-0028)
-src-web/              # the web interface the desktop host and the remote server show (ADR-0030)
-flatpak/              # the Flatpak manifest of the release pipeline (ADR-0012)
+src-tauri/            # the desktop host (ADR-0029)
+src-web/              # the web interface the desktop host and the remote server show (ADR-0031)
+flatpak/              # the Flatpak manifest of the release pipeline (ADR-0013)
 scripts/check-all.sh  # runs the checks, sensors, and self-tests, as the hooks and CI do
 scripts/check-*.sh    # checks: each fails on what breaks a rule
 scripts/sensor-*.sh   # sensors: report for the reviewer; sensor-repo-settings.sh runs by hand
@@ -94,7 +94,8 @@ The environment is defined in
 [`.devcontainer/devcontainer.json`](.devcontainer/devcontainer.json) and the
 [`Dockerfile`](.devcontainer/Dockerfile) it builds from, which adds the desktop host's system
 libraries to the base image, with Dev Container Features and VS Code extensions layered on top
-([ADR-0009](docs/adr/0009-dev-container.md)). Customise the environment by adding
+([ADR-0004](docs/adr/0004-dev-container-runtime.md),
+[ADR-0010](docs/adr/0010-dev-container-toolchain.md)). Customise the environment by adding
 Features or extensions. Features are pinned by major tag and resolved in the committed
 `devcontainer-lock.json`. Extensions are listed by identifier only, because a published extension
 version cannot be repointed and a version suffix is VS Code-specific.
@@ -113,7 +114,7 @@ configuration under `%AppData%`, so nothing is shared there.
 ### Host container management
 
 The Dev Container deliberately has **no access to the host Docker daemon**: the socket is not
-mounted ([ADR-0009](docs/adr/0009-dev-container.md)). To manage the host's containers from
+mounted ([ADR-0004](docs/adr/0004-dev-container-runtime.md)). To manage the host's containers from
 VS Code, run the **Container Tools** extension (`ms-azuretools.vscode-containers`) on the **host**
 side: install it in your host VS Code. [`.vscode/settings.json`](.vscode/settings.json) already pins
 it to run locally via `remote.extensionKind`, so it keeps talking to the host engine even when this

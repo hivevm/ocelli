@@ -1,4 +1,4 @@
-//! The commands and events of a host of the web interface, once for both hosts (ADR-0038): the
+//! The commands and events of a host of the web interface, once for both hosts (ADR-0039): the
 //! desktop host adapts them to Tauri's commands and events, the remote server to its WebSocket,
 //! and neither adds anything to what a command answers. A `Host` holds what one window, or one
 //! browser tab, has open: its repository, its load session, and its write in flight. Events go to
@@ -19,18 +19,18 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
 /// Where a host tells the web interface what happens: the window, the socket, or a recorder in
-/// tests. The event names and payloads are the desktop host's (ADR-0038).
+/// tests. The event names and payloads are the desktop host's (ADR-0039).
 pub trait Report {
     fn report<S: Serialize + Clone>(&self, event: &str, payload: S);
 }
 
-/// How the two hosts answer a command of the web interface (ADR-0038).
+/// How the two hosts answer a command of the web interface (ADR-0039).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Answered {
     /// Both hosts, from the shared `Host`, with the same answer.
     ByBoth,
     /// Both hosts carry it, the remote server refusing it as a write unless it was started with
-    /// `--allow-writes` (ADR-0038).
+    /// `--allow-writes` (ADR-0039).
     ByBothAsWrite,
     /// The desktop host alone; the remote server answers `counterpart` in its place, never this
     /// name otherwise.
@@ -53,7 +53,7 @@ impl Answered {
 
 /// Every command of the hosts of the web interface, once: the desktop host's handlers, the
 /// remote server's dispatch, and what the web interface sends are each tested to be this list
-/// (ADR-0038).
+/// (ADR-0039).
 pub const COMMANDS: &[(&str, Answered)] = &[
     ("startup_repo", Answered::ByBoth),
     ("open_repo", Answered::ByBoth),
@@ -85,22 +85,22 @@ pub const COMMANDS: &[(&str, Answered)] = &[
 ];
 
 /// The events only the remote server sends, beside those of the shared commands: a tab with a
-/// repository open is told that another tab wrote to it, and loads it again (ADR-0038). The
+/// repository open is told that another tab wrote to it, and loads it again (ADR-0039). The
 /// desktop host, with one window per repository it shows, never sends them.
 pub const SERVER_EVENTS: &[&str] = &["repo-written"];
 
 /// What a host checks a repository's path against before every command that reaches it: the
-/// remote server's server root (ADR-0040). It answers why it refuses.
+/// remote server's server root (ADR-0041). It answers why it refuses.
 pub type Guard = Arc<dyn Fn(&Path) -> Result<(), String> + Send + Sync>;
 
 /// What a host waits for before a write reaches the repository at the path: the remote server's
-/// turn among its tabs' writes to one repository, held until the write ends (ADR-0038). It reads
+/// turn among its tabs' writes to one repository, held until the write ends (ADR-0039). It reads
 /// the file system and waits for another tab's write: it runs on the blocking pool.
 pub type TakeTurn = Arc<dyn Fn(&Path) -> Result<Box<dyn Turn>, HostError> + Send + Sync>;
 
 /// A repository's turn, held while a write runs and told how the write ended before it is given
 /// back, so that the remote server tells its other tabs on the repository to load again before
-/// another write can start (ADR-0038).
+/// another write can start (ADR-0039).
 pub trait Turn: Send {
     /// The write ended, written where `done`, refused or failed otherwise. It runs on the
     /// blocking pool, where it may read the repository.
@@ -109,7 +109,7 @@ pub trait Turn: Send {
 
 /// Why a command of the `Host` failed. The kind, not the words, tells a host what it may pass
 /// on: the remote server lets a refusal's reason through to the browser and replaces what git
-/// said, which may name a path on the server (ADR-0040). The desktop host shows each as it reads.
+/// said, which may name a path on the server (ADR-0041). The desktop host shows each as it reads.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum HostError {
     /// No repository is open for the command to reach.
@@ -153,7 +153,7 @@ pub struct Host {
     guard: Option<Guard>,
     /// Taken before every write; none in the desktop host, which shows a repository in one window.
     take_turn: Option<TakeTurn>,
-    /// The history of the newest load (ADR-0020).
+    /// The history of the newest load (ADR-0021).
     session: Arc<Session>,
     /// The flag that stops the write that runs, replaced for each write.
     cancel: Mutex<Arc<AtomicBool>>,
@@ -164,7 +164,7 @@ pub struct Host {
 impl Host {
     /// A host that checks the repository's path with `guard` before the load and before every
     /// command that reads or writes it, so that what changed on disk since it was opened is
-    /// checked again (ADR-0040).
+    /// checked again (ADR-0041).
     pub fn guarded(guard: Guard) -> Host {
         Host {
             guard: Some(guard),
@@ -174,7 +174,7 @@ impl Host {
 
     /// The host, writing only once `take_turn` gives it the repository's turn, so that the writes
     /// of several hosts to one repository run one after the other, each checking what it expects
-    /// once its turn comes (ADR-0038).
+    /// once its turn comes (ADR-0039).
     pub fn taking_turns(self, take_turn: TakeTurn) -> Host {
         Host {
             take_turn: Some(take_turn),
@@ -189,9 +189,9 @@ impl Host {
     /// Loads the repository at `path`, labelled `label` for the web interface. Returns as soon as
     /// the load is spawned; the history arrives chunk by chunk, each announced by a
     /// `history-grew` event, and the refs as a `load-refs` event right after the first chunk,
-    /// read with it so the two describe the same state (ADR-0018, ADR-0036). `select` names the
+    /// read with it so the two describe the same state (ADR-0019, ADR-0037). `select` names the
     /// commit a write left selected, which a `history-grew` event names the row of once it is
-    /// laid out (ADR-0023).
+    /// laid out (ADR-0024).
     ///
     /// A guarded host checks `path` here, reading the file system: a caller on an async runtime
     /// calls this on its blocking pool.
@@ -227,7 +227,7 @@ impl Host {
     }
 
     /// Stops the load that runs, for a window or a tab that closes: a newer generation refuses
-    /// its next chunk, which stops its walk (ADR-0038).
+    /// its next chunk, which stops its walk (ADR-0039).
     pub fn stop(&self) {
         self.session.begin(None);
     }
@@ -304,8 +304,8 @@ impl Host {
     }
 
     /// The conflicted file `path` read for the merge editor, as JSON, or why the editor does not
-    /// open it (ADR-0025): a refusal of Ocelli's own, which names the file below the repository
-    /// alone and so reaches the browser as it stands (ADR-0040).
+    /// open it (ADR-0026): a refusal of Ocelli's own, which names the file below the repository
+    /// alone and so reaches the browser as it stands (ADR-0041).
     pub async fn get_merge_file(&self, path: String) -> Result<String, HostError> {
         let (repo_path, guard) = self.repo()?;
         let file = tokio::task::spawn_blocking(move || {
@@ -323,15 +323,15 @@ impl Host {
     }
 
     /// What `write` discards, in the core's words for the question the web interface puts
-    /// before it, or null for a write that discards nothing (ADR-0026).
+    /// before it, or null for a write that discards nothing (ADR-0027).
     pub fn write_discards(write: &Write) -> Option<String> {
         write.discards()
     }
 
     /// Performs `write` (G-16): a write that discards work only where the developer `confirmed`
-    /// it in the web interface's dialog, which the core decides (ADR-0026). A write refused
+    /// it in the web interface's dialog, which the core decides (ADR-0027). A write refused
     /// changes nothing and says why; the web interface reloads after a write done, the commit
-    /// selected again, or the commit the write made, which this returns (ADR-0023).
+    /// selected again, or the commit the write made, which this returns (ADR-0024).
     pub async fn perform_write<R: Report + Send + 'static>(
         &self,
         write: Write,
@@ -350,14 +350,14 @@ impl Host {
         }
         // A transfer reports how far it has come as `write-progress` events, at most every
         // tenth of a second, and stops once `cancel_write` sets the flag this write was handed
-        // (ADR-0027).
+        // (ADR-0028).
         let cancel = Arc::new(AtomicBool::new(false));
         *self.cancel.lock().unwrap() = Arc::clone(&cancel);
         let take_turn = self.take_turn.clone();
         let written = tokio::task::spawn_blocking(move || {
             checked(&guard, &repo_path)?;
             // Another host's write to the repository ends first; the root is checked again after
-            // the wait, and the write checks what it expects as it runs (ADR-0040, ADR-0038).
+            // the wait, and the write checks what it expects as it runs (ADR-0041, ADR-0039).
             let mut turn = match &take_turn {
                 Some(take) => {
                     let turn = take(&repo_path)?;
@@ -408,7 +408,7 @@ const PROGRESS_EVERY: std::time::Duration = std::time::Duration::from_millis(100
 
 /// The `load-refs` payload: the refs the sidebar lists, and the transfers the toolbar offers as
 /// the core decides them from the same refs, which the web interface draws without restating
-/// (ADR-0029).
+/// (ADR-0030).
 #[derive(Debug, Clone, Serialize)]
 pub struct LoadedRefs<'a> {
     pub refs: &'a RepoRefs,
@@ -424,7 +424,7 @@ impl<'a> LoadedRefs<'a> {
     }
 }
 
-/// Loads the history of `path` into `session` (ADR-0018), laying each chunk out on this thread,
+/// Loads the history of `path` into `session` (ADR-0019), laying each chunk out on this thread,
 /// and tells the web interface how far it has come. A newer load refuses this one's chunks,
 /// which stops its walk, and keeps it from writing the status line.
 fn load(
@@ -626,7 +626,7 @@ mod tests {
     }
 
     #[test]
-    // Verifies: ADR-0018, ADR-0020, ADR-0038, G-17
+    // Verifies: ADR-0019, ADR-0021, ADR-0039, G-17
     fn a_load_reports_each_chunk_the_refs_after_the_first_and_the_end() {
         let fake = Fake {
             chunks: vec![three(9), three(6)],
@@ -648,7 +648,7 @@ mod tests {
     }
 
     #[test]
-    // Verifies: ADR-0018, G-17
+    // Verifies: ADR-0019, G-17
     fn a_walk_failing_after_the_first_chunk_keeps_it_and_says_so() {
         let fake = Fake {
             chunks: vec![three(9)],
@@ -663,7 +663,7 @@ mod tests {
     }
 
     #[test]
-    // Verifies: ADR-0018, G-17
+    // Verifies: ADR-0019, G-17
     fn a_walk_failing_before_the_first_chunk_is_an_error() {
         let fake = Fake {
             walk_fails: true,
@@ -676,7 +676,7 @@ mod tests {
     }
 
     #[test]
-    // Verifies: ADR-0018
+    // Verifies: ADR-0019
     fn refs_failing_stop_the_load_and_say_so_last() {
         let fake = Fake {
             chunks: vec![three(9), three(6)],
@@ -695,7 +695,7 @@ mod tests {
     }
 
     #[test]
-    // Verifies: ADR-0018
+    // Verifies: ADR-0019
     fn a_load_superseded_before_its_first_chunk_reports_nothing() {
         let session = Session::default();
         let older = session.begin(None);
@@ -711,7 +711,7 @@ mod tests {
     }
 
     #[test]
-    // Verifies: ADR-0018
+    // Verifies: ADR-0019
     fn a_newer_load_stops_the_walk_of_the_older() {
         let session = Arc::new(Session::default());
         let fake = Fake {
@@ -728,7 +728,7 @@ mod tests {
     }
 
     #[test]
-    // Verifies: ADR-0029, ADR-0027, ADR-0023
+    // Verifies: ADR-0030, ADR-0028, ADR-0024
     fn the_refs_arrive_with_the_core_s_transfers_and_the_selection_with_its_operations() {
         let fake = Fake {
             chunks: vec![three(9)],
@@ -769,7 +769,7 @@ mod tests {
     }
 
     #[test]
-    // Verifies: ADR-0040
+    // Verifies: ADR-0041
     fn a_guarded_host_checks_the_repository_again_before_every_command_that_reaches_it() {
         let refusing = Arc::new(AtomicBool::new(false));
         let refuses = Arc::clone(&refusing);
@@ -812,7 +812,7 @@ mod tests {
     }
 
     #[test]
-    // Verifies: ADR-0040, ADR-0038
+    // Verifies: ADR-0041, ADR-0039
     fn a_write_waits_for_its_turn_after_the_root_and_the_root_is_checked_again_once_it_comes() {
         let refusing = Arc::new(AtomicBool::new(false));
         let refuses = Arc::clone(&refusing);
@@ -894,7 +894,7 @@ mod tests {
     }
 
     #[test]
-    // Verifies: ADR-0040
+    // Verifies: ADR-0041
     fn each_failure_of_a_command_carries_its_kind() {
         let runtime = tokio::runtime::Builder::new_current_thread()
             .build()
@@ -940,7 +940,7 @@ mod tests {
     }
 
     #[test]
-    // Verifies: ADR-0038
+    // Verifies: ADR-0039
     fn the_list_names_each_command_once_and_each_counterpart_both_ways() {
         let names: std::collections::BTreeSet<_> = COMMANDS.iter().map(|(n, _)| *n).collect();
         assert_eq!(names.len(), COMMANDS.len(), "a command listed twice");

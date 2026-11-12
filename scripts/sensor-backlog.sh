@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# Sensor: the backlog (ADR-0004).
+# Sensor: the backlog (ADR-0006).
 #
 # Lists the backlog entries, one file each under docs/backlog/: those on main, and those a local
 # branch adds that main does not have yet, with the branch, so that a session in a parallel
@@ -9,7 +9,7 @@
 # the entry back. Each line carries the entry's title, its first '# ' heading. Main is origin/main
 # when it exists, else main, else HEAD. A project whose backlog is the issue tracker of its host
 # has no docs/backlog/, and the sensor says there is nothing to report. An entry not yet committed
-# is not listed: ADR-0004 has each created in a commit of its own. It reports and never fails.
+# is not listed: ADR-0006 has each created in a commit of its own. It reports and never fails.
 #
 # Pure bash + git. Usage:
 #     scripts/sensor-backlog.sh [repository root]

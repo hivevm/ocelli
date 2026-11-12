@@ -7,7 +7,7 @@ description: Revisit the design of what recent work touched — its modules, the
 
 The rule is [`AGENTS.md` §5](../../../AGENTS.md#5-quality-bar--definition-of-done); that a spec
 closes only after this has run, and that it is due after a number of changes without a spec, is
-decided in [ADR-0004](../../../docs/adr/0004-feature-layer.md). This skill runs in a fresh
+decided in [ADR-0006](../../../docs/adr/0006-feature-layer.md). This skill runs in a fresh
 session and states no rule of its own
 ([ADR-0003](../../../docs/adr/0003-procedures-as-skills.md)).
 
@@ -105,7 +105,7 @@ specification change as a ticket whose *Mode* is "with the human". The tickets g
 without a spec; a second revision on one day numbers on in the same directory. List the backlog
 entries that touch the modules in scope, from
 [`scripts/sensor-backlog.sh`](../../../scripts/sensor-backlog.sh) or the host's issues, as
-candidates for the human ([ADR-0004](../../../docs/adr/0004-feature-layer.md)); a ticket made
+candidates for the human ([ADR-0006](../../../docs/adr/0006-feature-layer.md)); a ticket made
 from one deletes the entry in the same commit. Where the
 revision took the count, move the `Last design revision` line of
 [`docs/ARCHITECTURE.md`](../../../docs/ARCHITECTURE.md) to today's date; where it reads today's

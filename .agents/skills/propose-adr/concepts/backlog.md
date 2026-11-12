@@ -3,7 +3,7 @@
 Where a finding goes that no ticket covers: a defect, a doubt, or an idea a session meets
 outside its scope. The plan holds the work that is decided; the backlog holds what is noticed and
 not yet decided. Without one, a finding stays in the conversation or an agent's memory and is lost
-with them, or it widens the ticket that found it. The template ships the file form; ADR-0004 makes
+with them, or it widens the ticket that found it. The template ships the file form; ADR-0006 makes
 it the default while no ADR of the project chooses.
 
 ## Signals
@@ -48,7 +48,7 @@ own list is the sensor.
 ## Alternatives
 
 The two forms above are each other's alternative. A planning tool's own format, such as git-bug
-or Backlog.md, is a third: one more tool in the environment, as ADR-0004 says for the plan.
+or Backlog.md, is a third: one more tool in the environment, as ADR-0006 says for the plan.
 
 ## Sources
 

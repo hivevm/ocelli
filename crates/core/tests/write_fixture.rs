@@ -1,4 +1,4 @@
-//! Verifies: ADR-0023
+//! Verifies: ADR-0024
 //!
 //! The web interface hands the core a `Write` as JSON from a union it keeps by hand in
 //! `src-web/src/writes.ts`, and nothing but this pair of tests compares the two. This test writes
@@ -246,12 +246,12 @@ fn the_file_fixture_is_what_the_core_writes() {
     }
 }
 
-/// The core's answers as the desktop host sends them (ADR-0029): the transfers of refs that offer
+/// The core's answers as the desktop host sends them (ADR-0030): the transfers of refs that offer
 /// a fetch and a push and refuse a pull, and the operations a commit offers beside a refusal, the
 /// fixture `offers.json` the web interface's `writes.test.ts` reads against its types. It holds
 /// the shape of the answers only; which answer the refs give is the core's own tests'.
 #[test]
-// Verifies: ADR-0029
+// Verifies: ADR-0030
 fn the_offers_fixture_is_what_the_core_writes() {
     use ocelli_core::model::{LocalBranch, RepoRefs};
     let refs = RepoRefs {
@@ -286,12 +286,12 @@ fn the_offers_fixture_is_what_the_core_writes() {
 
 /// What each front end's merge editor does with the blocks the core finds, the fixture
 /// `merge.json` the terminal application's `merge.rs` and the web interface's `mergeBlocks.test.ts`
-/// both read (ADR-0025): for each file, as the core hands it over, the text a side taken for a
+/// both read (ADR-0026): for each file, as the core hands it over, the text a side taken for a
 /// block leaves, and, once a run of marker lines is pasted at the start of a line, the first lines
 /// of the blocks still drawn. Which text a take leaves is this test's to say; that both front ends
 /// leave it is theirs.
 #[test]
-// Verifies: ADR-0025, G-15
+// Verifies: ADR-0026, G-15
 fn the_merge_fixture_is_what_the_core_writes() {
     use ocelli_core::merge::{MergeFile, blocks};
     let file = |text: &str| MergeFile {
