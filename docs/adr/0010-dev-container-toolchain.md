@@ -21,8 +21,8 @@ process; no test needs a database, a service, or a container.
 ## Decision
 
 We will build the Dev Container from a Dockerfile that installs the desktop host's Linux build
-libraries, add Rust and Bun as Features under the lock of
-[ADR-0004](0004-dev-container-runtime.md), and run no container engine inside it.
+libraries. Rust and Bun come as Features, pinned as
+[ADR-0004](0004-dev-container-runtime.md) pins every Feature. No container engine runs inside it.
 
 - **The image.** `.devcontainer/Dockerfile` starts from
   `mcr.microsoft.com/devcontainers/base:debian` and installs the desktop host's Linux build
@@ -32,9 +32,9 @@ libraries, add Rust and Bun as Features under the lock of
 - **No engine inside.** The container runs no container engine and holds no socket of one.
 
 **Out of scope:** which libraries the desktop host needs, which follows
-[ADR-0029](0029-tauri-desktop-host.md); which extensions the project picks, and whether it pins
-them; running the desktop application's window from inside the container, which needs display
-forwarding from the host; and macOS and Windows, which the build job covers.
+[ADR-0029](0029-tauri-desktop-host.md). Which extensions the project picks, and whether it pins
+them. Running the desktop application's window from inside the container, which needs display
+forwarding from the host. macOS and Windows, which the build job covers.
 
 ## Alternatives considered
 
@@ -59,13 +59,13 @@ forwarding from the host; and macOS and Windows, which the build job covers.
 ## Enforcement
 
 [`scripts/check-devcontainer-toolchain.sh`](../../scripts/check-devcontainer-toolchain.sh) (job
-`build` of [`checks.yml`](../../.github/workflows/checks.yml)) fails when
+`build` of [`checks.yml`](../../.github/workflows/checks.yml)) fails in four cases. One:
 [`devcontainer.json`](../../.devcontainer/devcontainer.json) names an image instead of building
-the Dockerfile, when the Dockerfile starts from another base or does not install WebKitGTK, when
-the Rust or the Bun Feature is missing, or when `rust-toolchain.toml` pins no channel. Its
+the Dockerfile. Two: the Dockerfile starts from another base or does not install WebKitGTK.
+Three: the Rust or the Bun Feature is missing. Four: `rust-toolchain.toml` pins no channel. Its
 self-test cites this ADR with a `Verifies:` marker
 ([ADR-0002](0002-decisions-verified-by-tests.md)). Not checked: the container itself — no CI job
 builds it.
 
-**Not mechanically decidable:** that no engine runs inside, because a Feature or a package could
+**Not mechanically decidable:** that no engine runs inside, because a Feature or a package can
 add one under any name; review reads every change to `.devcontainer/`.
