@@ -8,11 +8,12 @@
 # base, asserting the exit code and the line a reader would meet. A sentence changed, added, or
 # removed in an accepted ADR, a line that begins like a diff's own, a header field rewritten or
 # written into the body, an accepted ADR deleted or renamed, a superseded one changed, one
-# accepted on the branch and then edited, an edit made while resolving a merge, a path with a
-# space, and a commit that names a normalization only in its text fail. The Status line flipped to
+# accepted on the branch and then edited, an edit made while resolving a merge, a merge whose
+# resolution deletes an accepted ADR, an octopus merge that deletes one, a path with a space, and
+# a commit that names a normalization only in its text fail. The Status line flipped to
 # superseded, the Date line, a decider added, a proposed ADR, a merge from main, a commit carrying
-# the normalization's trailer, the template repository, and a base of zeros, with main and without,
-# pass.
+# the normalization's trailer, a branch's normalization merged into main, the template
+# repository, and a base of zeros, with main and without, pass.
 #
 # Verifies: ADR-0001
 # Inputs: scripts/check-adr-text.sh scripts/lib/
@@ -227,6 +228,48 @@ g "$d" merge -q --no-edit main > /dev/null
 g "$d" tag base-of-merge HEAD~1
 expect 0 "a merge that brings main's normalization along" "$d" "no accepted ADR's text changed" \
   base-of-merge
+
+d="$(repo normalization-merged)"
+g "$d" rm -q "$A"
+g "$d" commit -q -m "docs: normalize the record" -m "Normalization: 2026-11-11"
+g "$d" switch -q main
+g "$d" merge -q --no-ff --no-edit work > /dev/null
+expect 0 "a branch's normalization merged into main" "$d" "as a normalization, by their trailer"
+
+d="$(repo resolution-deletes)"
+edit "$d" docs/adr/0003-decision-0003.md 's/0003 takes/0003 takes now/' "Revise"
+g "$d" switch -q main
+g "$d" merge -q --no-ff --no-commit work > /dev/null 2>&1
+g "$d" rm -q "$A"
+g "$d" commit -q --no-edit
+expect 1 "a merge whose resolution deletes an accepted ADR" "$d" \
+  "$(g "$d" rev-parse --short HEAD) deletes $(adr_id 1)"
+
+d="$(repo octopus)"
+echo "notes" > "$d/notes.txt"
+g "$d" add notes.txt
+g "$d" commit -q -m "Notes"
+g "$d" switch -q -c side main
+edit "$d" docs/adr/0003-decision-0003.md 's/0003 takes/0003 takes on the side/' "Side"
+g "$d" switch -q main
+g "$d" merge -q --no-ff --no-commit work side > /dev/null 2>&1
+g "$d" rm -q "$A"
+g "$d" commit -q -m "Octopus"
+check "the octopus fixture merges three parents" test "$(g "$d" log -1 --format=%p | wc -w)" -eq 3
+expect 1 "an octopus merge that deletes an accepted ADR" "$d" \
+  "$(g "$d" rev-parse --short HEAD) deletes $(adr_id 1)"
+
+d="$(repo octopus-rewrites)"
+echo "notes" > "$d/notes.txt"
+g "$d" add notes.txt
+g "$d" commit -q -m "Notes"
+g "$d" switch -q -c side main
+edit "$d" docs/adr/0003-decision-0003.md 's/0003 takes/0003 takes on the side/' "Side"
+g "$d" switch -q main
+g "$d" merge -q --no-ff --no-commit work side > /dev/null 2>&1
+edit "$d" "$A" 's/0001 takes/0001 takes now/' "Octopus"
+expect 1 "an octopus merge that rewrites an accepted ADR" "$d" \
+  "$(g "$d" rev-parse --short HEAD) changes 2 lines of $(adr_id 1)"
 
 d="$(repo zeros-main)"
 edit "$d" "$A" 's/0001 takes/0001 takes now/' "Reword"

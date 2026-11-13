@@ -1,4 +1,4 @@
-// Verifies: ADR-0040
+// Verifies: ADR-0021
 import { describe, expect, test } from 'bun:test';
 import { Newest } from './hostAnswers.ts';
 

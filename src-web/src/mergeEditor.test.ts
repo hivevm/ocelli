@@ -1,4 +1,4 @@
-// Verifies: ADR-0031, ADR-0033, G-15, Q-7
+// Verifies: ADR-0026, ADR-0027, G-15, Q-7
 import { describe, expect, test } from 'bun:test';
 import { lineKinds, markerLines, saveRequest, sideText, unsaved, unsavedLoss } from './mergeEditor.ts';
 import type { Conflict, MergeFile } from './types.ts';

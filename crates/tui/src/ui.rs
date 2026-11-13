@@ -1,7 +1,7 @@
 //! Drawing. The layout follows the desktop window: a title bar with the open,
 //! refresh and search controls; the repository sidebar, the graph and the
 //! commit detail with its changed files side by side; a status bar below. Only
-//! the visible window of the graph is rasterised each frame (ADR-0020);
+//! the visible window of the graph is rasterised each frame (ADR-0022);
 //! everything else is read from the [`App`] state.
 
 use crate::app::{App, Focus, Modal, StashPrompt, TagPrompt};
@@ -864,7 +864,7 @@ fn draw_tag_prompt(frame: &mut Frame, tag: &TagPrompt, p: &Palette, main: Rect) 
 }
 
 /// The question before a write that discards work, naming what is lost
-/// (ADR-0033).
+/// (ADR-0027).
 fn draw_confirm(frame: &mut Frame, write: &Write, p: &Palette, main: Rect) {
     let Some(lost) = write.discards() else {
         return;
@@ -973,7 +973,7 @@ fn hints(app: &App) -> &'static str {
 }
 
 /// What the status bar says first while an operation is stopped: which, how many files still
-/// conflict, and the key to resolve them (ADR-0031).
+/// conflict, and the key to resolve them (ADR-0024).
 fn stopped_note(app: &App) -> String {
     match app.data.as_ref().and_then(|d| d.in_progress.as_ref()) {
         Some(stopped) => format!(
@@ -985,7 +985,7 @@ fn stopped_note(app: &App) -> String {
     }
 }
 
-/// The merge editor full screen, in one column at any width (ADR-0031): the path and what the
+/// The merge editor full screen, in one column at any width (ADR-0026): the path and what the
 /// editor says, the text with each block's lines set apart, ours above theirs, and the base of
 /// the block under the cursor beneath it while open.
 fn draw_merge(frame: &mut Frame, editor: &mut MergeEditor, p: &Palette, area: Rect) {
@@ -1066,7 +1066,7 @@ fn draw_merge(frame: &mut Frame, editor: &mut MergeEditor, p: &Palette, area: Re
     }
 }
 
-/// The conflicted files of the operation in progress, the cursor on `selected` (ADR-0031).
+/// The conflicted files of the operation in progress, the cursor on `selected` (ADR-0024).
 fn draw_conflicts(frame: &mut Frame, app: &App, selected: usize, p: &Palette, main: Rect) {
     let Some(stopped) = app.data.as_ref().and_then(|d| d.in_progress.as_ref()) else {
         return;
@@ -1211,7 +1211,7 @@ mod tests {
     }
 
     #[test]
-    // Verifies: ADR-0031, ADR-0024, G-15, G-18
+    // Verifies: ADR-0026, ADR-0034, G-15, G-18
     fn the_merge_editor_fills_an_80_column_terminal_in_one_column_its_sides_in_the_theme() {
         use ratatui::crossterm::event::{KeyEvent, KeyModifiers};
         for theme in [crate::theme::Theme::Dark, crate::theme::Theme::Light] {
@@ -1260,7 +1260,7 @@ mod tests {
     }
 
     #[test]
-    // Verifies: ADR-0031, G-18
+    // Verifies: ADR-0026, G-18
     fn the_merge_editor_s_keys_fit_an_80_column_terminal_beside_the_status_text() {
         let mut app = loaded_app();
         app.merge = Some(merge_editor());
@@ -1276,7 +1276,7 @@ mod tests {
     }
 
     #[test]
-    // Verifies: ADR-0031, G-15, G-18
+    // Verifies: ADR-0026, G-15, G-18
     fn why_m_opens_nothing_shows_in_the_conflicts_on_an_80_column_terminal() {
         let mut app = loaded_app();
         let conflict = ocelli_core::model::Conflict {
@@ -1316,7 +1316,7 @@ mod tests {
     }
 
     #[test]
-    // Verifies: ADR-0031, G-18
+    // Verifies: ADR-0026, G-18
     fn a_reason_beneath_a_long_list_of_conflicts_keeps_the_keys_and_the_border_on_screen() {
         let mut app = loaded_app();
         let conflicts = (0..40)
@@ -1388,7 +1388,7 @@ mod tests {
     }
 
     #[test]
-    // Verifies: ADR-0029
+    // Verifies: ADR-0032
     fn the_graph_pane_shows_ref_chips_lanes_shas_and_messages() {
         let mut app = loaded_app();
         let rows = screen(&mut app, 160, 14);
@@ -1482,7 +1482,7 @@ mod tests {
         assert!(text.contains("Matches"), "{text}");
     }
 
-    // Verifies: ADR-0026
+    // Verifies: ADR-0036
     #[test]
     fn the_diff_overlay_covers_the_graph_and_leaves_the_file_list() {
         let mut app = loaded_app();
@@ -1583,7 +1583,7 @@ mod tests {
     }
 
     #[test]
-    // Verifies: ADR-0024
+    // Verifies: ADR-0034
     fn the_light_theme_paints_a_light_background() {
         let mut app = loaded_app();
         press(&mut app, KeyCode::Char('T'));
@@ -1623,7 +1623,7 @@ mod tests {
     }
 
     #[test]
-    // Verifies: ADR-0033
+    // Verifies: ADR-0027
     fn the_question_before_deleting_names_what_is_lost() {
         let mut app = loaded_app();
         app.modal = Some(Modal::Confirm(Write::DeleteTag {
@@ -1689,7 +1689,7 @@ mod tests {
     }
 
     #[test]
-    // Verifies: ADR-0029
+    // Verifies: ADR-0032
     fn a_tiny_terminal_does_not_panic() {
         let mut app = loaded_app();
         for (w, h) in [(1, 1), (10, 3), (30, 2), (60, 6)] {
@@ -1710,7 +1710,7 @@ mod tests {
     }
 
     #[test]
-    // Verifies: ADR-0040
+    // Verifies: ADR-0021
     fn older_history_with_more_lanes_moves_nothing_until_scrolled_to() {
         use crate::app::tests::commit;
         use crate::loader::Msg;

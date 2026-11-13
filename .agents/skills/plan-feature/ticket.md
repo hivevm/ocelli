@@ -5,7 +5,7 @@
      or verifiable on its own, sized to one fresh agent session. Claim it by creating the branch
      ticket/<spec>/<NN>-<slug> BEFORE any work, so parallel sessions sharing the repository skip
      it. The branch that lands it deletes this file. Decided in
-     docs/adr/0004-feature-layer.md. -->
+     docs/adr/0006-feature-layer.md. -->
 
 ## What to build
 
@@ -22,11 +22,14 @@
 
 ## Read first
 
-<!-- What the session that works this ticket loads before anything else: the ADRs in force whose
-     "Applies to" it touches, the glossary terms and conventions in play, the golden path it
-     copies from, the seam its tests go on. Everything else it explores as needed (AGENTS.md
-     [§4](../../../AGENTS.md#4-working-style)). -->
+<!-- What the session that works this ticket loads before anything else. First the paths it will
+     touch, which the session hands to scripts/sensor-binding-adrs.sh --sections --path for the
+     ADRs that bind them, as the work-tickets skill says; then the glossary terms and conventions in
+     play, the golden path it copies from, and the seam its tests go on, each by its section where
+     a section is enough.
+     Everything else it explores as needed (AGENTS.md [§4](../../../AGENTS.md#4-working-style)). -->
 
+- Touches: `<path>`, `<path>`
 -
 
 ## Blocked by

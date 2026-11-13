@@ -1,4 +1,4 @@
-// The merge editor's blocks in CodeMirror's state (ADR-0031, G-15): where each block's markers
+// The merge editor's blocks in CodeMirror's state (ADR-0026, G-15): where each block's markers
 // are now, moved along with the edits around them, whether a side was taken for it, and whether
 // its base is open. Taking a side is one change with an effect undo inverts, so undo puts the
 // block back as it was.

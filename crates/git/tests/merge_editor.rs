@@ -1,4 +1,4 @@
-//! Verifies: ADR-0031, G-15
+//! Verifies: ADR-0026, G-15
 //!
 //! The merge editor's file read from a conflict `git` left, and its result saved as the file's
 //! resolution, on repositories made with git: the read in each conflict style, the conflicts it

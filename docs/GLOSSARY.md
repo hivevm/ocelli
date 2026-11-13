@@ -66,7 +66,7 @@ to invent.
   _Avoid:_ column, rail.
 - **Lane colour** — the colour a lane is drawn in, taken from one theme-independent list so a
   commit keeps its colour across a theme switch; deliberately not a theme token
-  ([ADR-0024](adr/0024-themes-tokens-and-palettes.md)).
+  ([ADR-0034](adr/0034-themes-tokens-and-palettes.md)).
   _Avoid:_ branch colour, since a branch is a ref and a lane outlives it.
 - **Late child** — a commit the walk yields after its parent, because its committer date runs
   backwards against it; it is laid out in its chunk, below its parent.

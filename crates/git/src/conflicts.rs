@@ -1,5 +1,5 @@
 //! Resolving a stopped operation's conflicts file by file, and continuing or aborting the
-//! operation, whoever started it, running no program the repository names (ADR-0031).
+//! operation, whoever started it, running no program the repository names (ADR-0024).
 
 use crate::checkout::{entry_as_in, named};
 use crate::git::WORKTREE;
@@ -24,7 +24,7 @@ use std::path::{Path, PathBuf};
 
 /// Resolves the conflicted file `path`, still in the conflict `expected`, by writing the side
 /// `take` names, or the working directory's file as the developer edited it, to the index, as
-/// `git checkout --ours/--theirs` and `git add` do (ADR-0031).
+/// `git checkout --ours/--theirs` and `git add` do (ADR-0024).
 pub(crate) fn resolve(
     repo: &Repository,
     path: &str,
@@ -139,7 +139,7 @@ fn restore(repo: &Repository, path: &str, stages: [&Option<IndexEntry>; 3]) -> R
 }
 
 /// Whether both sides of `conflict`, ours and theirs, are files holding text, the conflicts the
-/// merge editor opens (ADR-0031): neither deleted, a link, or a submodule, and neither holding a
+/// merge editor opens (ADR-0026): neither deleted, a link, or a submodule, and neither holding a
 /// NUL byte or anything but UTF-8.
 pub(crate) fn editable(repo: &Repository, conflict: &IndexConflict) -> bool {
     [&conflict.our, &conflict.their].into_iter().all(|side| {
@@ -183,7 +183,7 @@ fn opened_file(repo: &Repository, path: &str) -> Result<(PathBuf, Vec<u8>)> {
 
 /// Reads the conflicted file `path` for the merge editor: its text as the working directory
 /// holds it, edits made since included, its blob id, and its blocks, each with a base where the
-/// file or a merge of the index's stages in memory holds one (ADR-0031).
+/// file or a merge of the index's stages in memory holds one (ADR-0026).
 pub(crate) fn load_merge_file(repo_path: &Path, path: &str) -> Result<MergeFile> {
     crate::guard::repository_path(path)?;
     let repo = crate::confine::open(repo_path)?;
@@ -223,7 +223,7 @@ fn merged_in_memory(repo: &Repository, path: &str) -> Result<String> {
 /// Saves the merge editor's `result` as the resolution of `path`, still in the conflict
 /// `expected` and its file still the blob `opened`: the working directory gets the result, its
 /// line endings as the file had them, through libgit2's checkout, and the index what `git add`
-/// stages for the file holding it (ADR-0031).
+/// stages for the file holding it (ADR-0026).
 pub(crate) fn save_merge(
     repo: &Repository,
     path: &str,
@@ -359,7 +359,7 @@ fn stopped_as_shown(repo: &Repository, operation: Operation, head: &str) -> Resu
 }
 
 /// Continues the stopped `operation` once nothing conflicts, as `git <operation> --continue`
-/// does: commits it, a rebase going on to its next step (ADR-0031).
+/// does: commits it, a rebase going on to its next step (ADR-0024).
 pub(crate) fn continue_stopped(
     repo: &Repository,
     operation: Operation,
@@ -410,7 +410,7 @@ pub(crate) fn continue_stopped(
 
 /// Aborts the stopped `operation`, back to where the developer was, as `git <operation> --abort`
 /// does: the files it touched as the checked-out commit has them, its state gone; a change of the
-/// developer's own to another file stays (ADR-0031).
+/// developer's own to another file stays (ADR-0024).
 pub(crate) fn abort(repo: &Repository, operation: Operation, head: &str) -> Result<()> {
     stopped_as_shown(repo, operation, head)?;
     left_to_git(repo, "abort")?;

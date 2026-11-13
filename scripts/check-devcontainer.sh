@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 #
-# Dev Container check for this repository (ADR-0009).
+# Dev Container check for this repository (ADR-0004).
 #
-# ADR-0009 keeps the host container engine out of the Dev Container's reach and pins its Features.
+# ADR-0004 keeps the host container engine out of the Dev Container's reach and pins its Features.
 # This check reads the files the decision names and fails on what would break it, and on a
 # container that would not enable the repository's git hooks:
 #
@@ -10,7 +10,7 @@
 #      and no '/var/run/docker' on any line that is not a full-line comment — and adds no
 #      Feature whose id names 'docker-outside-of-docker', the one that mounts it. An engine
 #      inside the container, such as the Docker-in-Docker Feature, talks to no host engine and
-#      is the project's choice (ADR-0009, out of scope).
+#      is the project's choice (ADR-0004, out of scope).
 #   2. Pinning: every Feature is referenced by its major version tag alone ('<ref>:N'), never
 #      untagged, ':latest', a full version, or a digest in the hand-edited file.
 #   3. Lock: .devcontainer/devcontainer-lock.json exists and its 'features' block names exactly
@@ -21,10 +21,14 @@
 #      which is how host containers are managed without the socket.
 #   5. Git settings: the postStartCommand of devcontainer.json runs 'git config core.hooksPath
 #      .githooks', 'git config merge.ff false', 'git config pull.ff only', and 'git config
-#      merge.adr-index.driver' with the driver's command as the README writes it. The git hooks of
-#      the README and SECURITY.md hold in the container because it enables them on every start,
-#      the container's share of the local gate (ADR-0002, ADR-0009). The value is read from its
-#      key to the next top-level key, whatever its form: a string, an array, or an object.
+#      merge.adr-index.driver' with the driver's command as CONTRIBUTING.md writes it. The git hooks
+#      of CONTRIBUTING.md and SECURITY.md hold in the container because it enables them on every
+#      start, the container's share of the local gate (ADR-0002, ADR-0004). The value is read from
+#      its key to the next top-level key, whatever its form: a string, an array, or an object.
+#   6. Mount path: 'workspaceFolder' and the target of 'workspaceMount', where the file sets them,
+#      are '/workspaces/${localWorkspaceFolderBasename}', the default of Dev Containers, so that
+#      every project sits under a path of its own and an agent's memory, keyed by that path,
+#      stays with it (ADR-0004).
 #
 # Only the default definition is read; a variant under a subdirectory of .devcontainer/ is not.
 # devcontainer.json allows comments, so full-line '//' comments are dropped before reading; a
@@ -106,35 +110,35 @@ top_level_value() {
 
 features=()
 if [[ ! -f "$ROOT/$CONFIG" ]]; then
-  add_error "$CONFIG: not found — the Dev Container ADR-0009 governs has nothing to check"
+  add_error "$CONFIG: not found — the Dev Container ADR-0004 governs has nothing to check"
 else
   # 1. Socket.
-  if uncommented "$ROOT/$CONFIG" | grep -qE 'docker\.sock|/var/run/docker'; then
-    add_error "$CONFIG: mounts the host Docker socket — the Dev Container never reaches the host engine (ADR-0009); manage host containers from the host-side extension instead"
+  if grep -qE 'docker\.sock|/var/run/docker' <<< "$(uncommented "$ROOT/$CONFIG")"; then
+    add_error "$CONFIG: mounts the host Docker socket — the Dev Container never reaches the host engine (ADR-0004); manage host containers from the host-side extension instead"
   fi
 
   mapfile -t features < <(feature_ids "$ROOT/$CONFIG")
   for id in "${features[@]}"; do
     if [[ "$id" == *docker-outside-of-docker* ]]; then
-      add_error "$CONFIG: Feature '$id' would mount the host Docker socket — it is not added (ADR-0009)"
+      add_error "$CONFIG: Feature '$id' would mount the host Docker socket — it is not added (ADR-0004)"
     fi
     # 2. Pinning.
     [[ "$id" =~ :[0-9]+$ ]] \
-      || add_error "$CONFIG: Feature '$id' is not pinned by its major version tag alone ('<ref>:N') — an untagged, mutable, or fully versioned reference is not what the lock resolves (ADR-0009)"
+      || add_error "$CONFIG: Feature '$id' is not pinned by its major version tag alone ('<ref>:N') — an untagged, mutable, or fully versioned reference is not what the lock resolves (ADR-0004)"
   done
 
   # 3. Lock.
   if [[ ! -f "$ROOT/$LOCK" ]]; then
-    add_error "$LOCK: not found — the lock is committed so that the same commit yields the same Features (ADR-0009)"
+    add_error "$LOCK: not found — the lock is committed so that the same commit yields the same Features (ADR-0004)"
   else
     mapfile -t locked < <(feature_ids "$ROOT/$LOCK")
     for id in "${features[@]}"; do
       _contains "$id" "${locked[@]}" \
-        || add_error "$LOCK: has no entry for Feature '$id' — regenerate the lock (rebuild the container) so the Feature builds from a resolved digest (ADR-0009)"
+        || add_error "$LOCK: has no entry for Feature '$id' — regenerate the lock (rebuild the container) so the Feature builds from a resolved digest (ADR-0004)"
     done
     for id in "${locked[@]}"; do
       _contains "$id" "${features[@]}" \
-        || add_error "$LOCK: lists Feature '$id', which $CONFIG no longer adds — the lock was not regenerated (ADR-0009)"
+        || add_error "$LOCK: lists Feature '$id', which $CONFIG no longer adds — the lock was not regenerated (ADR-0004)"
     done
   fi
 
@@ -144,17 +148,34 @@ else
   for setting in "core.hooksPath .githooks" "merge.ff false" "pull.ff only" \
     "merge.adr-index.driver '.githooks/merge-adr-index %O %A %B %S %X %Y'"; do
     [[ "$post" == *"git config $setting"* ]] \
-      || add_error "$CONFIG: postStartCommand does not run 'git config $setting' — the git hooks and the merge settings they rely on are enabled on every start (README, Git hooks)"
+      || add_error "$CONFIG: postStartCommand does not run 'git config $setting' — the git hooks and the merge settings they rely on are enabled on every start (CONTRIBUTING.md, Git hooks)"
   done
+
+  # 6. Mount path: a key the file leaves out takes the default, which is the path itself.
+  # shellcheck disable=SC2016  # the variable is devcontainer.json's, not the shell's
+  own='/workspaces/${localWorkspaceFolderBasename}'
+  folder="$(top_level_value "$ROOT/$CONFIG" workspaceFolder)"
+  [[ -z "$folder" || "$folder" == *"\"$own\""* ]] \
+    || add_error "$CONFIG: workspaceFolder is not '$own' — a path every project shares gives every project one agent memory (ADR-0004)"
+  # The target is one of the mount's comma-separated options, under any of its names.
+  mount="$(top_level_value "$ROOT/$CONFIG" workspaceMount | tr -d '" \t\n')"
+  mount_own=0
+  [[ -z "$mount" ]] && mount_own=1
+  IFS=',' read -ra options <<< "$mount"
+  for option in "${options[@]}"; do
+    case "${option#:}" in target="$own" | dst="$own" | destination="$own") mount_own=1 ;; esac
+  done
+  ((mount_own)) \
+    || add_error "$CONFIG: workspaceMount does not target '$own' — a path every project shares gives every project one agent memory (ADR-0004)"
 fi
 
 # 4. Host side: the pair has to sit inside the 'remote.extensionKind' object, so the text is
 # flattened and matched from that key up to the first closing brace.
 if [[ ! -f "$ROOT/$SETTINGS" ]]; then
-  add_error "$SETTINGS: not found — it pins the container-management extension to the host side (ADR-0009)"
-elif ! uncommented "$ROOT/$SETTINGS" | tr -d ' \t\n' \
-       | grep -qE '"remote\.extensionKind":\{[^}]*"ms-azuretools\.vscode-containers":\["ui"\]'; then
-  add_error "$SETTINGS: does not pin 'ms-azuretools.vscode-containers' to [\"ui\"] under 'remote.extensionKind' — without it the extension runs in the container and asks for the socket (ADR-0009)"
+  add_error "$SETTINGS: not found — it pins the container-management extension to the host side (ADR-0004)"
+elif ! grep -qE '"remote\.extensionKind":\{[^}]*"ms-azuretools\.vscode-containers":\["ui"\]' \
+       <<< "$(uncommented "$ROOT/$SETTINGS" | tr -d ' \t\n')"; then
+  add_error "$SETTINGS: does not pin 'ms-azuretools.vscode-containers' to [\"ui\"] under 'remote.extensionKind' — without it the extension runs in the container and asks for the socket (ADR-0004)"
 fi
 
 if ((${#errors[@]})); then
@@ -163,5 +184,5 @@ if ((${#errors[@]})); then
   exit 1
 fi
 
-echo "Dev Container check passed (${#features[@]} Features pinned and locked, no host socket, git hooks enabled)."
+echo "Dev Container check passed (${#features[@]} Features pinned and locked, no host socket, git hooks enabled, a path of its own)."
 exit 0

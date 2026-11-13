@@ -1,4 +1,4 @@
-// Verifies: ADR-0031, G-15
+// Verifies: ADR-0026, G-15
 import { describe, expect, test } from 'bun:test';
 import { EditorState, type TransactionSpec } from '@codemirror/state';
 import { history, redo, undo } from '@codemirror/commands';
