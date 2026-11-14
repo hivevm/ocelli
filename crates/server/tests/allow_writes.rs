@@ -1,4 +1,4 @@
-//! What `--allow-writes` lets through to a repository and what it holds back (ADR-0036): without
+//! What `--allow-writes` lets through to a repository and what it holds back (API-websocket-per-tab): without
 //! the switch every write is refused; with it the server answers every write the desktop host
 //! answers, a write git refuses changes nothing and names no path, a path that names no file of
 //! the working directory is refused without a panic in git2, the writes to one repository take
@@ -41,7 +41,7 @@ use {
 };
 
 #[tokio::test]
-// Verifies: ADR-0036, Q-5
+// Verifies: API-websocket-per-tab, Q-5
 async fn without_allow_writes_every_write_is_refused_and_nothing_changes() {
     let tree = Tree::new("write");
     let root = tree.root();
@@ -89,7 +89,7 @@ async fn without_allow_writes_every_write_is_refused_and_nothing_changes() {
 }
 
 #[tokio::test]
-// Verifies: ADR-0036, ADR-0038
+// Verifies: API-websocket-per-tab, SEC-server-root-confinement
 async fn with_allow_writes_a_write_refused_by_git_changes_nothing_and_names_no_path() {
     let tree = Tree::new("write-refused");
     let root = tree.root();
@@ -127,7 +127,7 @@ async fn with_allow_writes_a_write_refused_by_git_changes_nothing_and_names_no_p
 }
 
 #[tokio::test]
-// Verifies: ADR-0036, ADR-0038
+// Verifies: API-websocket-per-tab, SEC-server-root-confinement
 async fn a_path_that_names_no_file_of_the_working_directory_is_refused_and_the_server_answers_on() {
     let panics = git2_panics();
     let tree = Tree::new("write-paths");
@@ -198,7 +198,7 @@ async fn a_path_that_names_no_file_of_the_working_directory_is_refused_and_the_s
 }
 
 #[tokio::test]
-// Verifies: ADR-0036
+// Verifies: API-websocket-per-tab
 async fn a_write_past_those_waiting_is_refused_and_a_closed_tab_s_waiting_write_never_runs() {
     let tree = Tree::new("write-waits");
     let root = tree.root();
@@ -260,7 +260,7 @@ async fn told_of_a_write(tab: &mut Tab) -> bool {
 }
 
 #[tokio::test]
-// Verifies: ADR-0036, ADR-0022, G-18
+// Verifies: API-websocket-per-tab, GIT-writes-what-git-writes, G-18
 async fn two_tabs_writing_to_one_repository_write_in_turn_and_the_other_tabs_on_it_load_again() {
     let tree = Tree::new("two-tabs-writing");
     let root = tree.root();
@@ -331,7 +331,7 @@ type Answers = [(String, Result<Value, String>)];
 
 /// The writes the server does not answer as the desktop host answers them: each kind whose
 /// answer from the server, `server`, is not the one from the desktop host, `desktop`, as the
-/// browser would read it (ADR-0036).
+/// browser would read it (API-websocket-per-tab).
 fn unperformed(server: &Answers, desktop: &Answers) -> Vec<String> {
     desktop
         .iter()
@@ -345,7 +345,7 @@ fn unperformed(server: &Answers, desktop: &Answers) -> Vec<String> {
 }
 
 #[test]
-// Verifies: ADR-0036
+// Verifies: API-websocket-per-tab
 fn a_write_the_desktop_answers_and_the_server_answers_otherwise_or_not_at_all_is_named() {
     let answer = |kind: &str, answer: Result<Value, String>| (kind.to_string(), answer);
     let failed = || Err(ocelli_server::socket::scrub::WRITE_FAILED.to_string());
@@ -383,7 +383,7 @@ fn a_write_the_desktop_answers_and_the_server_answers_otherwise_or_not_at_all_is
 }
 
 #[tokio::test]
-// Verifies: ADR-0036, G-18, Q-5
+// Verifies: API-websocket-per-tab, G-18, Q-5
 async fn with_allow_writes_the_server_answers_every_write_the_desktop_answers_and_without_it_none()
 {
     // One example of every write the core takes, as the web interface sends it: the core's
@@ -500,7 +500,7 @@ fn with_programs(base: &Path, port: u16, tools: &Path) -> programs::Markers {
     let far = format!("ssh://127.0.0.1:{port}/x");
     git(&root, &["remote", "add", "far", &far]);
     let markers = programs::set_everywhere(&root, tools);
-    // Ocelli refuses what these would have git sign (ADR-0022); the writes here go through.
+    // Ocelli refuses what these would have git sign (GIT-writes-what-git-writes); the writes here go through.
     let mut config = git2::Repository::open(&root).unwrap().config().unwrap();
     for (key, _) in programs::SWITCHES {
         config.remove(key).unwrap();
@@ -537,7 +537,7 @@ const WOULD_RUN: &[&str] = &[
 
 #[cfg(unix)]
 #[tokio::test]
-// Verifies: ADR-0036, Q-4
+// Verifies: API-websocket-per-tab, Q-4
 async fn the_server_s_writes_run_none_of_the_programs_the_repository_names() {
     let port = closing_port();
     // The control: `git`, on a repository made alike, performing what the server performs below,

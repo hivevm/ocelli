@@ -1,4 +1,4 @@
-//! Verifies: ADR-0022, ADR-0038, ADR-0036
+//! Verifies: GIT-writes-what-git-writes, SEC-server-root-confinement, API-websocket-per-tab
 //!
 //! A write's strings come from the caller, a browser of the remote server among them: names,
 //! ids, messages, paths, and a remote's name. git2 turns some into C strings by unwrapping, and a

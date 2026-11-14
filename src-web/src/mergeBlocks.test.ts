@@ -1,4 +1,4 @@
-// Verifies: ADR-0024, G-15
+// Verifies: VIEW-own-merge-editor, G-15
 import { describe, expect, test } from 'bun:test';
 import { EditorState, type TransactionSpec } from '@codemirror/state';
 import { history, redo, undo } from '@codemirror/commands';

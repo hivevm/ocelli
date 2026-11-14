@@ -2,12 +2,15 @@
 
 > The **vocabulary** of this project: the terms everyone, humans and agents alike, uses in code,
 > comments, documentation, and ADRs. It defines words and decides nothing. Whoever resolves a term
-> adds it here in the same change ([ADR-0001](adr/0001-agent-governance-model.md)).
+> adds it here in the same change ([NUC-documents-are-fixed §5](adr/NUC-documents-are-fixed.md)).
 
 One term per concept, only terms specific to this domain. Say what a term *is* in one or two
 sentences, and list under _Avoid:_ the synonyms it displaces, where there are any. A term the
 specification, an ADR, or the code uses without an entry here is a gap to close, not a convention
 to invent.
+
+List each synonym under _Avoid:_ as one to three words, without prose around them. A synonym
+inside a longer term of this glossary, such as "shape" in **Node shape**, is no synonym there.
 
 - **Block** — a run of a conflicted file from a `<<<<<<<` line to its `>>>>>>>` line: ours,
   theirs, and the base where the file or a merge of the index's stages holds one, which the merge
@@ -66,7 +69,7 @@ to invent.
   _Avoid:_ column, rail.
 - **Lane colour** — the colour a lane is drawn in, taken from one theme-independent list so a
   commit keeps its colour across a theme switch; deliberately not a theme token
-  ([ADR-0032](adr/0032-themes-tokens-and-palettes.md)).
+  ([VIEW-themes-tokens-and-palettes](adr/VIEW-themes-tokens-and-palettes.md)).
   _Avoid:_ branch colour, since a branch is a ref and a lane outlives it.
 - **Late child** — a commit the walk yields after its parent, because its committer date runs
   backwards against it; it is laid out in its chunk, below its parent.

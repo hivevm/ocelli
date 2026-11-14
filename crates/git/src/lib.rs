@@ -1,4 +1,4 @@
-//! The repository ports of `ocelli-core` implemented with git2 (ADR-0009, ADR-0021, ADR-0022).
+//! The repository ports of `ocelli-core` implemented with git2 (ARCH-ports-and-adapters, GIT-git2-reads-repositories, GIT-writes-what-git-writes).
 //! git2 runs no hooks, no `core.fsmonitor`, and no external diff or filter driver, so reading or
 //! writing a repository starts no program the repository names (Q-4).
 
@@ -27,7 +27,7 @@ use std::path::Path;
 pub struct GitReader;
 
 impl GitReader {
-    /// The first chunk of the history alone (ADR-0018), for what measures or tests the newest
+    /// The first chunk of the history alone (GRAPH-history-loads-in-chunks), for what measures or tests the newest
     /// commits; the front ends load through [`RepositoryReader::load_chunks`].
     pub fn load_first_chunk(
         &self,
@@ -69,7 +69,7 @@ impl RepositoryReader for GitReader {
     }
 }
 
-/// The git2 implementation of [`RepositoryWriter`] (ADR-0022).
+/// The git2 implementation of [`RepositoryWriter`] (GIT-writes-what-git-writes).
 #[derive(Debug, Default, Clone, Copy)]
 pub struct GitWriter;
 

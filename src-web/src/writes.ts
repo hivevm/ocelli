@@ -1,5 +1,5 @@
-// The web interface's side of a write (ADR-0022): the writes it hands the host, asking before one
-// that discards work in the words the core names it with (ADR-0025), and running one at a time.
+// The web interface's side of a write (GIT-writes-what-git-writes): the writes it hands the host, asking before one
+// that discards work in the words the core names it with (GIT-discard-only-after-confirmation), and running one at a time.
 //
 // All of it is bookkeeping over strings and numbers, so it lives here and is tested directly.
 

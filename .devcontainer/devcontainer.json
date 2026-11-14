@@ -1,12 +1,13 @@
 {
   "name": "Ocelli DevContainer",
 
-  // The base image plus the desktop host's Linux build libraries (ADR-0010).
+  // The base image plus the desktop host's Linux build libraries (DEV-container-from-dockerfile).
   "build": {
     "dockerfile": "Dockerfile"
   },
   // No workspaceFolder or workspaceMount: the default, /workspaces/<directory name>, keeps each
-  // project under a path of its own, and an agent keys its memory by the path (ADR-0004).
+  // project under a path of its own, and an agent keys its memory by the path
+  // (NUC-container-hides-host-daemon §5).
 
   "remoteUser": "vscode",
   "containerEnv": {
@@ -48,16 +49,17 @@
   "postCreateCommand": "rustup target add x86_64-pc-windows-msvc && cargo install cargo-xwin --locked --version 0.23.1",
 
   // DevContainer Features layered on top of the base image. The container intentionally has NO
-  // access to the host Docker daemon (no socket mount) — see ADR-0004. Manage the host's containers
-  // from a host-side VS Code extension instead (CONTRIBUTING.md → "Host container management").
+  // access to the host Docker daemon (no socket mount) — see NUC-container-hides-host-daemon §2.
+  // Manage the host's containers from a host-side VS Code extension instead (CONTRIBUTING.md →
+  // "Host container management").
   "features": {
     // GitHub CLI (`gh`) — used by the coding agent for GitHub operations and as the git
     // credential helper. A push and every gh action wait for a human instruction
-    // (AGENTS.md, section 6).
+    // (NUC-main-only-via-pr §2).
     "ghcr.io/devcontainers/features/github-cli:1": {},
-    // Rust through rustup; rust-toolchain.toml pins the version and the components (ADR-0008).
+    // Rust through rustup; rust-toolchain.toml pins the version and the components (ARCH-rust-core-typescript-web).
     "ghcr.io/devcontainers/features/rust:1": {},
-    // Bun, the web interface's package manager and task runner (ADR-0008).
+    // Bun, the web interface's package manager and task runner (ARCH-rust-core-typescript-web).
     "ghcr.io/devcontainers-extra/features/bun:1": {
       "version": "1.4.1"
     }

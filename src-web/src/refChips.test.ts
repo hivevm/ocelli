@@ -1,4 +1,4 @@
-// Verifies: ADR-0022, ADR-0025, G-12, G-16
+// Verifies: GIT-writes-what-git-writes, GIT-discard-only-after-confirmation, G-12, G-16
 import { describe, expect, test } from 'bun:test';
 import { commitChips } from './refChips.ts';
 import type { LocalBranch, RepoRefs } from './types.ts';

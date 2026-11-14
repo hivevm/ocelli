@@ -1,7 +1,7 @@
-// Verifies: ADR-0033, ADR-0008
+// Verifies: SEC-no-egress-hardened-webview, ARCH-rust-core-typescript-web
 //
 // Two decisions that live in configuration rather than in code, where a regression is silent:
-// the WebView's granted surface (ADR-0033) and the single package manager (ADR-0008). A wrong
+// the WebView's granted surface (SEC-no-egress-hardened-webview) and the single package manager (ARCH-rust-core-typescript-web). A wrong
 // value here opens egress or lets a second lockfile decide what gets installed, and nothing in
 // the running application says so. These tests read the files that ship.
 
@@ -13,7 +13,7 @@ const ROOT = join(import.meta.dir, '..', '..');
 const conf = await Bun.file(join(ROOT, 'src-tauri', 'tauri.conf.json')).json();
 const security = conf.app?.security ?? {};
 
-describe('WebView surface (ADR-0033)', () => {
+describe('WebView surface (SEC-no-egress-hardened-webview)', () => {
   it('sets a content security policy instead of leaving it open', () => {
     expect(typeof security.csp).toBe('string');
     expect(security.csp).toContain("default-src 'self'");
@@ -45,7 +45,7 @@ describe('WebView surface (ADR-0033)', () => {
   });
 });
 
-describe('one package manager (ADR-0008)', () => {
+describe('one package manager (ARCH-rust-core-typescript-web)', () => {
   it('ships bun.lock', () => {
     expect(existsSync(join(ROOT, 'bun.lock'))).toBe(true);
   });

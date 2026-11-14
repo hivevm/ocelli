@@ -2,9 +2,9 @@
 //! driven by tests. The functions are those of the desktop application —
 //! sidebar, graph with lineage highlight, search, commit detail with
 //! parent/child links, flat or tree file list, unified or side-by-side diff,
-//! theme switch, open and refresh — with guitar-style keys (ADR-0030). Every
-//! key reads but the writes (ADR-0022, ADR-0026), the G-12 to G-14 and G-16 operations; one that
-//! discards work runs only once the developer has answered `y` (ADR-0025). The keys are here; the
+//! theme switch, open and refresh — with guitar-style keys (ARCH-ratatui-terminal-application). Every
+//! key reads but the writes (GIT-writes-what-git-writes, GIT-remotes-through-libgit2-transports), the G-12 to G-14 and G-16 operations; one that
+//! discards work runs only once the developer has answered `y` (GIT-discard-only-after-confirmation). The keys are here; the
 //! requests they build and the one write that runs are in [`crate::writes`].
 
 use crate::chips::RefContext;
@@ -38,7 +38,7 @@ pub enum Focus {
 
 const PANES: [Focus; 4] = [Focus::Sidebar, Focus::Graph, Focus::Detail, Focus::Files];
 
-/// A loaded repository: the load session the core keeps (ADR-0020), growing
+/// A loaded repository: the load session the core keeps (GRAPH-core-serves-row-windows), growing
 /// chunk by chunk while the load runs, plus the refs the terminal shows with it.
 pub struct Loaded {
     pub session: LoadSession,
@@ -52,12 +52,12 @@ pub struct Loaded {
     pub locals: Vec<LocalBranch>,
     /// The default remote.
     pub default_remote: Option<String>,
-    /// The operation stopped in the repository, with its conflicted files (ADR-0022).
+    /// The operation stopped in the repository, with its conflicted files (GIT-writes-what-git-writes).
     pub in_progress: Option<InProgress>,
 }
 
 impl Loaded {
-    /// The first chunk, shown before the refs arrive (ADR-0018).
+    /// The first chunk, shown before the refs arrive (GRAPH-history-loads-in-chunks).
     pub fn new(first_chunk: LaidChunk, select_again: Option<String>) -> Self {
         let mut session = LoadSession::new();
         if let Some(sha) = select_again {
@@ -137,7 +137,7 @@ pub struct Files {
     pub selected: usize,
 }
 
-/// The diff overlay, covering the graph pane (ADR-0034).
+/// The diff overlay, covering the graph pane (VIEW-diff-overlay-and-file-list).
 pub struct DiffView {
     pub path: String,
     pub lines: Option<Result<Vec<DiffLine>, String>>,
@@ -183,7 +183,7 @@ pub enum Modal {
     Tag(TagPrompt),
     /// The stash described after `s`.
     Stash(StashPrompt),
-    /// A write that discards work, waiting for the developer's answer (ADR-0025).
+    /// A write that discards work, waiting for the developer's answer (GIT-discard-only-after-confirmation).
     Confirm(Write),
     /// The message typed after `c` for a commit on `head`.
     Commit { head: String, message: String },
@@ -241,11 +241,11 @@ pub struct App {
     /// was refused, which the reload after it would otherwise hide.
     pub notice: Option<String>,
     /// The commit a write left selected, handed to the core's load session of the reload with
-    /// its first chunk; the session names its row once laid out (ADR-0022).
+    /// its first chunk; the session names its row once laid out (GIT-writes-what-git-writes).
     pub select_again: Option<String>,
     /// Text for the terminal clipboard, taken by the event loop.
     pub clipboard: Option<String>,
-    /// The merge editor, full screen while open; it takes every key (ADR-0024).
+    /// The merge editor, full screen while open; it takes every key (VIEW-own-merge-editor).
     pub merge: Option<MergeEditor>,
     /// Whether the conflicts open again once the reload after a save has read the refs, showing
     /// what still conflicts.
@@ -304,7 +304,7 @@ impl App {
         }
     }
 
-    /// The choices remembered across sessions (ADR-0031).
+    /// The choices remembered across sessions (VIEW-cli-state-file).
     pub fn view_state(&self) -> ViewState {
         ViewState {
             theme: match self.theme {
@@ -360,7 +360,7 @@ impl App {
                 }
             }
             Msg::MergeFile { path, file } => self.open_merge(path, file),
-            // A save refused keeps the editor open, saying why (ADR-0024).
+            // A save refused keeps the editor open, saying why (VIEW-own-merge-editor).
             Msg::Written(Err(e)) if self.merge.as_ref().is_some_and(|m| m.saving) => {
                 self.writes.answered();
                 if let Some(editor) = self.merge.as_mut() {
@@ -372,7 +372,7 @@ impl App {
             Msg::WriteProgress(_) => {}
             Msg::Written(Err(e)) => {
                 // A transfer refused may have moved remote branches by its fetch: the
-                // repository is read again, the refusal kept in view (ADR-0026).
+                // repository is read again, the refusal kept in view (GIT-remotes-through-libgit2-transports).
                 if self.writes.answered() {
                     let select_again = self.selected_sha();
                     self.open_repo(self.repo.clone(), "Reloading…");
@@ -384,7 +384,7 @@ impl App {
             }
             // The repository is read again, the commit the write made, or else
             // the one that was selected, selected again once its row arrives
-            // (ADR-0022).
+            // (GIT-writes-what-git-writes).
             Msg::Written(Ok(made)) => {
                 self.writes.answered();
                 let saved = self.merge.as_ref().is_some_and(|m| m.saving);
@@ -402,7 +402,7 @@ impl App {
         }
     }
 
-    /// Takes in how the load goes (ADR-0018).
+    /// Takes in how the load goes (GRAPH-history-loads-in-chunks).
     fn on_load(&mut self, event: Event) {
         self.take_in(event);
         if let Some(row) = self.data.as_mut().and_then(|d| d.session.row_to_select()) {
@@ -463,7 +463,7 @@ impl App {
     }
 
     /// Selects a graph row the developer chose, which wins over a commit a write left to select
-    /// again (ADR-0022).
+    /// again (GIT-writes-what-git-writes).
     fn select(&mut self, row: usize) {
         if let Some(data) = self.data.as_mut() {
             data.session.keep_selection();
@@ -780,7 +780,7 @@ impl App {
     }
 
     /// The answer to a write that discards work: only `y` writes, every other
-    /// key keeps the work (ADR-0025).
+    /// key keeps the work (GIT-discard-only-after-confirmation).
     fn answer(&mut self, write: Write, key: KeyEvent) {
         if key.code == KeyCode::Char('y') {
             self.status = "Writing…".to_string();
@@ -842,7 +842,7 @@ impl App {
     }
 
     /// `d` on a tag or a local branch in the sidebar: deletes it, asking first
-    /// where that discards work (ADR-0025).
+    /// where that discards work (GIT-discard-only-after-confirmation).
     fn start_delete(&mut self) {
         let Some(data) = &self.data else { return };
         let Some(item) = self.sidebar_item() else {
@@ -914,7 +914,7 @@ impl App {
     }
 
     /// `f`: fetches `remote`, or the one a fetch reaches without one named
-    /// (ADR-0026); `Esc` cancels it while it runs.
+    /// (GIT-remotes-through-libgit2-transports); `Esc` cancels it while it runs.
     fn start_fetch(&mut self, remote: Option<String>) {
         let write = match remote {
             Some(remote) => Ok(Write::Fetch { remote }),
@@ -924,14 +924,14 @@ impl App {
     }
 
     /// `U`: pulls the checked-out branch from its upstream, fast-forward only
-    /// (ADR-0026); `Esc` cancels it while it fetches.
+    /// (GIT-remotes-through-libgit2-transports); `Esc` cancels it while it fetches.
     fn start_pull(&mut self) {
         let write = self.refs_answer(RepoRefs::pull);
         self.start_transfer(write);
     }
 
     /// `P`: pushes the checked-out branch to its upstream, or to the remote a
-    /// fetch reaches, under its own name; never by force (ADR-0026).
+    /// fetch reaches, under its own name; never by force (GIT-remotes-through-libgit2-transports).
     fn start_push(&mut self) {
         let write = self.refs_answer(RepoRefs::push);
         self.start_transfer(write);
@@ -998,7 +998,7 @@ impl App {
     }
 
     /// `m`, `R`, `C`, `V`, `X` on a commit: merges it in, rebases onto it, cherry-picks it,
-    /// reverts it, or asks how to reset to it, where the core offers it (ADR-0022).
+    /// reverts it, or asks how to reset to it, where the core offers it (GIT-writes-what-git-writes).
     fn start_history(&mut self, key: char) {
         let Some(node) = self.selected_node() else {
             return;
@@ -1059,7 +1059,7 @@ impl App {
         self.modal = Some(Modal::Reset { commit, mode });
     }
 
-    /// `!`: the conflicted files of the operation in progress (ADR-0022).
+    /// `!`: the conflicted files of the operation in progress (GIT-writes-what-git-writes).
     fn open_conflicts(&mut self) {
         if self
             .data
@@ -1131,7 +1131,7 @@ impl App {
 
     /// `m` in the conflicts: reads `path` for the merge editor, where the core says the editor
     /// opens it; on any other file it says why not, in the conflicts, where the status bar of an
-    /// 80-column terminal has no room for it (ADR-0024).
+    /// 80-column terminal has no room for it (VIEW-own-merge-editor).
     fn read_merge(&mut self, stopped: &InProgress, path: &str) {
         // A write's answer would reload the repository under the editor, its result with it.
         if self.writes.running() {
@@ -1376,7 +1376,7 @@ impl App {
                     self.select(row);
                     self.focus = Focus::Graph;
                 }
-                // A ref can point at history not loaded (ADR-0018).
+                // A ref can point at history not loaded (GRAPH-history-loads-in-chunks).
                 None => self.status = format!("{} — outside the loaded history", item.name),
             },
             Action::Open(path) => self.open_repo(path, "Opening…"),
@@ -1947,7 +1947,7 @@ pub(crate) mod tests {
     }
 
     #[test]
-    // Verifies: ADR-0022, G-16
+    // Verifies: GIT-writes-what-git-writes, G-16
     fn t_asks_for_a_name_then_a_message_and_hands_the_tag_to_the_event_loop() {
         let mut app = loaded_app();
         press(&mut app, KeyCode::Char('j'));
@@ -2010,7 +2010,7 @@ pub(crate) mod tests {
     }
 
     #[test]
-    // Verifies: ADR-0022
+    // Verifies: GIT-writes-what-git-writes
     fn a_write_done_reloads_and_selects_the_commit_again_once_its_row_arrives() {
         let mut app = loaded_app();
         press(&mut app, KeyCode::Char('j'));
@@ -2035,7 +2035,7 @@ pub(crate) mod tests {
     }
 
     #[test]
-    // Verifies: ADR-0022
+    // Verifies: GIT-writes-what-git-writes
     fn the_commit_a_write_left_selected_arrives_late_and_yields_to_the_developer() {
         let reload = |pick: bool| {
             let mut app = loaded_app();
@@ -2085,7 +2085,7 @@ pub(crate) mod tests {
     }
 
     #[test]
-    // Verifies: ADR-0025, Q-7
+    // Verifies: GIT-discard-only-after-confirmation, Q-7
     fn d_on_a_tag_asks_and_deletes_it_only_on_an_explicit_yes() {
         let mut app = loaded_app();
         on_the_tag(&mut app);
@@ -2102,7 +2102,7 @@ pub(crate) mod tests {
     }
 
     #[test]
-    // Verifies: ADR-0025, Q-7
+    // Verifies: GIT-discard-only-after-confirmation, Q-7
     fn any_other_answer_keeps_the_tag_and_writes_nothing() {
         for answer in [
             KeyCode::Char('n'),
@@ -2130,7 +2130,7 @@ pub(crate) mod tests {
     }
 
     #[test]
-    // Verifies: ADR-0022, G-16
+    // Verifies: GIT-writes-what-git-writes, G-16
     fn s_asks_for_a_message_and_the_untracked_switch_and_stashes() {
         let mut app = loaded_app();
         press(&mut app, KeyCode::Char('s'));
@@ -2171,7 +2171,7 @@ pub(crate) mod tests {
     }
 
     #[test]
-    // Verifies: ADR-0025, G-16
+    // Verifies: GIT-discard-only-after-confirmation, G-16
     fn a_applies_the_selected_stash_and_p_and_d_ask_first() {
         let mut app = on_a_stash();
         press(&mut app, KeyCode::Char('a'));
@@ -2211,7 +2211,7 @@ pub(crate) mod tests {
     }
 
     #[test]
-    // Verifies: ADR-0025, G-16
+    // Verifies: GIT-discard-only-after-confirmation, G-16
     fn no_key_held_with_ctrl_or_alt_writes_or_asks() {
         let on_the_commit = || {
             let mut app = loaded_app();
@@ -2310,7 +2310,7 @@ pub(crate) mod tests {
     }
 
     #[test]
-    // Verifies: ADR-0022, G-12
+    // Verifies: GIT-writes-what-git-writes, G-12
     fn a_and_u_stage_and_unstage_the_file_under_the_cursor() {
         let mut app = on_the_working_node();
         app.focus = Focus::Files;
@@ -2348,7 +2348,7 @@ pub(crate) mod tests {
     }
 
     #[test]
-    // Verifies: ADR-0022, G-12
+    // Verifies: GIT-writes-what-git-writes, G-12
     fn c_on_the_working_node_commits_the_index_on_its_parent() {
         let mut app = on_the_working_node();
         press(&mut app, KeyCode::Char('c'));
@@ -2368,7 +2368,7 @@ pub(crate) mod tests {
     }
 
     #[test]
-    // Verifies: ADR-0022
+    // Verifies: GIT-writes-what-git-writes
     fn the_commit_a_write_made_is_selected_after_the_reload() {
         let mut app = on_the_working_node();
         app.on_msg(Msg::Written(Ok(Some("new".into()))));
@@ -2393,7 +2393,7 @@ pub(crate) mod tests {
     }
 
     #[test]
-    // Verifies: ADR-0022, G-12
+    // Verifies: GIT-writes-what-git-writes, G-12
     fn b_asks_for_a_branch_at_the_commit_switched_to_unless_turned_off() {
         let mut app = loaded_app();
         press(&mut app, KeyCode::Char('j'));
@@ -2414,7 +2414,7 @@ pub(crate) mod tests {
     }
 
     #[test]
-    // Verifies: ADR-0022, G-12
+    // Verifies: GIT-writes-what-git-writes, G-12
     fn w_switches_to_a_branch_a_remote_branch_or_a_commit() {
         let mut app = loaded_app();
         press(&mut app, KeyCode::Char('w'));
@@ -2446,7 +2446,7 @@ pub(crate) mod tests {
     }
 
     #[test]
-    // Verifies: ADR-0025, Q-7
+    // Verifies: GIT-discard-only-after-confirmation, Q-7
     fn d_deletes_a_merged_branch_and_asks_first_for_one_that_is_not() {
         let delete = |merged| Write::DeleteBranch {
             name: "feat/x".into(),
@@ -2474,7 +2474,7 @@ pub(crate) mod tests {
     }
 
     #[test]
-    // Verifies: ADR-0026, G-12
+    // Verifies: GIT-remotes-through-libgit2-transports, G-12
     fn f_fetches_the_default_remote_shows_its_progress_and_esc_cancels_it() {
         let mut app = loaded_app();
         press(&mut app, KeyCode::Char('f'));
@@ -2502,7 +2502,7 @@ pub(crate) mod tests {
     }
 
     #[test]
-    // Verifies: ADR-0026, G-12
+    // Verifies: GIT-remotes-through-libgit2-transports, G-12
     fn capital_u_pulls_the_checked_out_branch_where_it_has_an_upstream() {
         let mut app = loaded_app();
         app.data.as_mut().unwrap().locals[0].upstream = Some("origin/main".into());
@@ -2522,7 +2522,7 @@ pub(crate) mod tests {
     }
 
     #[test]
-    // Verifies: ADR-0026, G-12
+    // Verifies: GIT-remotes-through-libgit2-transports, G-12
     fn capital_p_pushes_the_checked_out_branch_where_a_remote_takes_it() {
         let mut app = loaded_app();
         press(&mut app, KeyCode::Char('P'));
@@ -2541,7 +2541,7 @@ pub(crate) mod tests {
     }
 
     #[test]
-    // Verifies: ADR-0026
+    // Verifies: GIT-remotes-through-libgit2-transports
     fn a_transfer_refused_reloads_and_keeps_its_reason_in_view_until_the_next_key() {
         let mut app = loaded_app();
         app.data.as_mut().unwrap().locals[0].upstream = Some("origin/main".into());
@@ -2571,7 +2571,7 @@ pub(crate) mod tests {
     }
 
     #[test]
-    // Verifies: ADR-0022, G-13
+    // Verifies: GIT-writes-what-git-writes, G-13
     fn the_checked_out_commit_offers_only_a_revert_and_a_reset() {
         let mut app = loaded_app();
         let row = app.data.as_ref().unwrap().row_of("d").unwrap();
@@ -2667,7 +2667,7 @@ pub(crate) mod tests {
     }
 
     #[test]
-    // Verifies: ADR-0022, G-14
+    // Verifies: GIT-writes-what-git-writes, G-14
     fn the_conflicts_resolve_continue_and_abort_after_a_confirmation() {
         let conflict = ocelli_core::model::Conflict {
             path: "f".into(),
@@ -2773,7 +2773,7 @@ pub(crate) mod tests {
     }
 
     #[test]
-    // Verifies: ADR-0024, G-15, G-18
+    // Verifies: VIEW-own-merge-editor, G-15, G-18
     fn m_opens_the_merge_editor_on_a_file_it_opens_and_says_why_not_on_another() {
         let (app, _) = editing();
         assert!(app.merge.as_ref().unwrap().text().contains("<<<<<<< HEAD"));
@@ -2808,7 +2808,7 @@ pub(crate) mod tests {
     }
 
     #[test]
-    // Verifies: ADR-0024, ADR-0025, Q-7
+    // Verifies: VIEW-own-merge-editor, GIT-discard-only-after-confirmation, Q-7
     fn another_write_s_answer_never_reaches_the_editor_and_m_waits_for_it() {
         let (mut app, _) = stopped_in_a_merge();
         press(&mut app, KeyCode::Char('f'));
@@ -2843,7 +2843,7 @@ pub(crate) mod tests {
     }
 
     #[test]
-    // Verifies: ADR-0024, G-15
+    // Verifies: VIEW-own-merge-editor, G-15
     fn alt_keys_in_the_editor_take_a_side_and_no_key_reaches_the_panes() {
         let (mut app, _) = editing();
         chord(&mut app, 't', KeyModifiers::ALT);
@@ -2856,7 +2856,7 @@ pub(crate) mod tests {
     }
 
     #[test]
-    // Verifies: ADR-0024, G-15
+    // Verifies: VIEW-own-merge-editor, G-15
     fn ctrl_s_saves_and_the_conflicts_show_what_is_left_or_a_refusal_keeps_the_editor() {
         let (mut app, stopped) = editing();
         chord(&mut app, 'b', KeyModifiers::ALT);
@@ -2909,7 +2909,7 @@ pub(crate) mod tests {
     }
 
     #[test]
-    // Verifies: ADR-0024, ADR-0025, Q-7
+    // Verifies: VIEW-own-merge-editor, GIT-discard-only-after-confirmation, Q-7
     fn esc_with_a_result_not_saved_asks_first_and_leaves_only_on_y() {
         let (mut app, _) = editing();
         press(&mut app, KeyCode::Esc);
@@ -2970,7 +2970,7 @@ pub(crate) mod tests {
     }
 
     #[test]
-    // Verifies: ADR-0018, ADR-0020, G-17
+    // Verifies: GRAPH-history-loads-in-chunks, GRAPH-core-serves-row-windows, G-17
     fn a_history_arriving_in_chunks_grows_below_what_is_shown() {
         let (mut app, mut layout) = chunked_app();
         assert_eq!(app.status, "3 commits in 1 chunk — loading older history…");
@@ -2998,7 +2998,7 @@ pub(crate) mod tests {
     }
 
     #[test]
-    // Verifies: ADR-0018, ADR-0035
+    // Verifies: GRAPH-history-loads-in-chunks, VIEW-repository-sidebar
     fn the_first_chunk_shows_before_its_refs_and_the_refs_fill_the_sidebar_after() {
         let mut layout = Layout::new();
         let mut app = App::new("/repo".into(), Glyphs::Unicode);
@@ -3015,7 +3015,7 @@ pub(crate) mod tests {
     }
 
     #[test]
-    // Verifies: ADR-0018, G-17
+    // Verifies: GRAPH-history-loads-in-chunks, G-17
     fn a_load_failing_before_its_first_chunk_says_so() {
         let mut app = App::new("/repo".into(), Glyphs::Unicode);
         app.on_msg(load_ended(Err("not a repository".into())));
@@ -3024,7 +3024,7 @@ pub(crate) mod tests {
     }
 
     #[test]
-    // Verifies: ADR-0018, G-17
+    // Verifies: GRAPH-history-loads-in-chunks, G-17
     fn a_load_stopped_by_an_error_keeps_what_has_arrived_and_says_so() {
         let (mut app, _) = chunked_app();
         app.on_msg(load_ended(Err("disk gone".into())));
@@ -3033,7 +3033,7 @@ pub(crate) mod tests {
     }
 
     #[test]
-    // Verifies: ADR-0020, G-11
+    // Verifies: GRAPH-core-serves-row-windows, G-11
     fn search_reaches_the_chunks_arriving_after_it() {
         let (mut app, mut layout) = chunked_app();
         press(&mut app, KeyCode::Char('/'));
@@ -3048,7 +3048,7 @@ pub(crate) mod tests {
     }
 
     #[test]
-    // Verifies: ADR-0020, G-11
+    // Verifies: GRAPH-core-serves-row-windows, G-11
     fn a_search_typed_while_loading_finds_the_first_chunk() {
         let mut layout = Layout::new();
         let mut app = App::new("/repo".into(), Glyphs::Unicode);
@@ -3061,7 +3061,7 @@ pub(crate) mod tests {
     }
 
     #[test]
-    // Verifies: ADR-0020, G-10
+    // Verifies: GRAPH-core-serves-row-windows, G-10
     fn the_lineage_reaches_the_chunks_arriving_after_the_selection() {
         let (mut app, mut layout) = chunked_app();
         assert_eq!(app.lineage.as_ref().unwrap().rows().len(), 3);
@@ -3073,10 +3073,10 @@ pub(crate) mod tests {
     }
 
     #[test]
-    // Verifies: ADR-0015
+    // Verifies: GRAPH-layout-pure-functions-by-chunk
     fn the_first_parent_key_follows_gits_first_parent_once_it_has_arrived() {
         // `m`'s first parent `x` arrives in the later chunk, so the layout
-        // continues `m` on `b` (ADR-0015); `]` still follows git's first
+        // continues `m` on `b` (GRAPH-layout-pure-functions-by-chunk); `]` still follows git's first
         // parent, as the detail pane lists it, once `x` is laid out.
         let mut layout = Layout::new();
         let mut app = App::new("/repo".into(), Glyphs::Unicode);

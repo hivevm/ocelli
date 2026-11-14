@@ -1,4 +1,4 @@
-// Verifies: ADR-0035
+// Verifies: VIEW-repository-sidebar
 import { describe, expect, test } from 'bun:test';
 import { anyLeaf, countLeaves, filterByName, groupByFolder, refShas } from './refTree.ts';
 

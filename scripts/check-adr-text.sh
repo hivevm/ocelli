@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 #
-# Check: the text of an accepted ADR stays as it was accepted (AGENTS.md, section 3, rule 5;
-# ADR-0001).
+# Check: the text of an accepted ADR stays as it was accepted
+# (NUC-decisions-are-proposed-then-accepted §6).
 #
 # Outside a normalization, an accepted ADR is changed only by superseding it, and a human makes
 # the two edits the rule permits: the flip of its Status line, to superseded, and the project's
@@ -14,14 +14,16 @@
 # is still developed with the human and changes freely, until a commit accepts it. Since every
 # commit is read, an edit a later commit undoes still fails until the history is rewritten.
 #
-# The two exceptions the rule names pass. A normalization rewrites and renumbers the whole record;
-# each of its commits that changes such an ADR carries the trailer 'Normalization: <date>', as
+# The two exceptions the rule names pass. A normalization rewrites the whole record, and the
+# migration to category identifiers renames every ADR; both are normalizations, and
+# each of their commits that changes such an ADR carries the trailer 'Normalization: <date>', as
 # docs/adr/README.md (Normalization, References) says; a merge whose resolution itself deletes or
 # rewrites such an ADR, as one resolving a normalization against a main that changed the record
 # does, carries it too. Any commit can carry it, so each commit
 # that passes by it is listed, for the human who reads the run. The template repository, which
-# still carries TEMPLATE-SETUP.md, corrects its own ADRs in place (ADR-0005), so there the check
-# passes whole.
+# still carries TEMPLATE-SETUP.md, corrects its own ADRs in place
+# (NUC-decisions-are-proposed-then-accepted §6), so there the check passes whole. The 'NUC-' base is
+# not read: a take-up replaces it, and the rule docs/base-blobs of check-docs.sh holds it.
 #
 # Pure bash + git (2.36 or later, for --remerge-diff). Usage:
 #     scripts/check-adr-text.sh [--root <dir>] [base [head]]
@@ -47,7 +49,7 @@ base="${1:-}"
 head="${2:-HEAD}"
 
 if [[ -f TEMPLATE-SETUP.md ]]; then
-  echo "Accepted ADR text: the template repository corrects its own ADRs in place (ADR-0005)."
+  echo "Accepted ADR text: the template repository corrects its own ADRs in place (NUC-decisions-are-proposed-then-accepted §6)."
   exit 0
 fi
 
@@ -146,9 +148,11 @@ while IFS= read -r c; do
   [[ -n "$before" ]] || continue
   hits=()
   while IFS= read -r -d '' status && IFS= read -r -d '' path; do
-    [[ "$path" =~ ^docs/adr/[0-9]{4}-[^/]*\.md$ ]] || continue
+    [[ "$path" =~ ^docs/adr/[^/]*$ ]] || continue
+    adr_is_file "$path" || continue
+    [[ "${path##*/}" == NUC-* ]] && continue
     bound "$before" "$path" || continue
-    adr="ADR-$(adr_key "$path")"
+    adr="$(adr_id "$path")"
     if [[ "$status" == D ]]; then
       hits+=("$short deletes $adr ($path), which is accepted")
       continue
@@ -172,7 +176,7 @@ if ((${#trailed[@]})); then
 fi
 if ((${#findings[@]})); then
   echo "Accepted ADR text: an accepted ADR is changed only by superseding it, outside a" \
-    "normalization (AGENTS.md, section 3, rule 5):" >&2
+    "normalization (NUC-decisions-are-proposed-then-accepted §6):" >&2
   printf '  - %s\n' "${findings[@]}" >&2
   exit 1
 fi

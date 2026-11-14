@@ -40,8 +40,8 @@ The layout follows the algorithms described in Pierre Vigier's article
 [*Commit Graph Drawing Algorithms*](https://pvigier.github.io/2019/05/06/commit-graph-drawing-algorithms.html).
 The problem, the goals, and the success criteria live in
 [`docs/SPECIFICATION.md`](docs/SPECIFICATION.md), the algorithm in
-[ADR-0015](docs/adr/0015-layout-pure-functions-after-pvigier-by-chunk.md), and the vocabulary in
-[`docs/GLOSSARY.md`](docs/GLOSSARY.md).
+[GRAPH-layout-pure-functions-by-chunk](docs/adr/GRAPH-layout-pure-functions-by-chunk.md), and the
+vocabulary in [`docs/GLOSSARY.md`](docs/GLOSSARY.md).
 
 ### Features
 
@@ -70,7 +70,7 @@ The problem, the goals, and the success criteria live in
   extension, or any DevContainer-compatible IDE
 - Docker / Podman (rootless) available on the host
 - Outside the Dev Container: bash 4.4 or later for the checks, 3.2 for the git hooks
-  ([ADR-0002](docs/adr/0002-decisions-verified-by-tests.md)); macOS ships 3.2
+  ([NUC-checks-are-bash §1](docs/adr/NUC-checks-are-bash.md)); macOS ships 3.2
 
 ## Getting Started
 
@@ -130,7 +130,7 @@ deselects (closing the diff first if one is open).
 names, a results panel lists them for click-to-jump, and `Enter`/`Shift+Enter` cycle through the
 hits. Avatars in the detail panel are loaded from Gravatar only after the toggle in the status bar
 is switched on — a fresh installation makes no network requests
-([ADR-0033](docs/adr/0033-no-egress-hardened-webview.md)).
+([SEC-no-egress-hardened-webview](docs/adr/SEC-no-egress-hardened-webview.md)).
 
 ### In a browser
 
@@ -139,7 +139,7 @@ same web interface to a browser, as VS Code's remote development does. It listen
 machine's loopback addresses only, on the port `--port` names or a free one, and prints once a
 URL that carries a secret token; opening it logs the browser in with a session cookie, and a
 request without it, or from another web page, is refused
-([ADR-0037](docs/adr/0037-remote-server-localhost-tls-session-cookie.md)).
+([SEC-localhost-tls-session-cookie](docs/adr/SEC-localhost-tls-session-cookie.md)).
 From another machine, forward the port through SSH (`ssh -L 8000:localhost:8000 host`, the server
 started with `--port 8000`) and open the URL there. Or name an address with `--listen
 <address>[:<port>]`: the server then listens there alone and only over TLS, with the certificate
@@ -152,12 +152,12 @@ keeps does not name the address or the host name any more, or where only half of
 other accounts may read, is kept, and says what to remove. The browser opens
 the repository the server root is, or one chosen with Open Repo from the folders below the root,
 and nothing outside the root
-([ADR-0038](docs/adr/0038-server-root-confinement.md));
+([SEC-server-root-confinement](docs/adr/SEC-server-root-confinement.md));
 every restart prints a new URL. The server only reads unless it is started with
 `--allow-writes`: then the browser writes, fetches, pulls, and pushes as the desktop application
 does, as the user the server runs as, with the identity and credentials git's configuration
 names for that user, and whoever holds a session can write
-([ADR-0036](docs/adr/0036-remote-server-websocket-per-tab.md)).
+([API-websocket-per-tab](docs/adr/API-websocket-per-tab.md)).
 
 ### In the terminal
 
@@ -187,7 +187,7 @@ It offers what the desktop window offers, laid out the same way:
 The theme, the minimised sidebar and the diff layout are remembered across sessions, as on the
 desktop, in `cli-state.json` under `$XDG_STATE_HOME/ocelli` (default `~/.local/state/ocelli`),
 `~/Library/Application Support/ocelli` on macOS, or `%LOCALAPPDATA%\ocelli` on Windows
-([ADR-0031](docs/adr/0031-cli-state-file.md)). Deleting the file restores the defaults.
+([VIEW-cli-state-file](docs/adr/VIEW-cli-state-file.md)). Deleting the file restores the defaults.
 
 | Key                     | Action                                                   |
 | ----------------------- | -------------------------------------------------------- |
@@ -209,9 +209,9 @@ desktop, in `cli-state.json` under `$XDG_STATE_HOME/ocelli` (default `~/.local/s
 
 ## Template
 
-- **Template release:** v0.8.1 — the release of [NUC](https://github.com/hivevm/nuc) this
+- **Template release:** v0.9.1 — the release of [NUC](https://github.com/hivevm/nuc) this
   repository carries; a project moves the line when it takes up a later one
-  ([ADR-0005](docs/adr/0005-template-releases.md)).
+  ([NUC-releases-are-semver-tags §5](docs/adr/NUC-releases-are-semver-tags.md)).
 
 ## Contributing
 

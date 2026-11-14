@@ -1,5 +1,5 @@
 // Avatars are loaded from Gravatar only once the developer turns them on, in the desktop
-// application and in a browser alike (ADR-0033, ADR-0036): until then nothing is asked of anyone
+// application and in a browser alike (SEC-no-egress-hardened-webview, API-websocket-per-tab): until then nothing is asked of anyone
 // but the host.
 
 /** Whether avatars are on, from what the browser stored: off unless the developer turned them on. */

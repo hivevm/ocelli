@@ -2,7 +2,7 @@
 #
 # Measures Q-2 (feature spec #27): how long a developer waits on a generated repository of a
 # million commits, thirty branch lines side by side and some dates running backwards (the wide
-# shape of scripts/generate-history.sh). Verifies: Q-2, ADR-0018
+# shape of scripts/generate-history.sh). Verifies: Q-2, GRAPH-history-loads-in-chunks
 #
 # ocelli-measure loads the whole history as the front ends do, chunk by chunk through the
 # repository port into the core's History, and reports the time from opening the repository until

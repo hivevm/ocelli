@@ -1,4 +1,4 @@
-//! Verifies: ADR-0018
+//! Verifies: GRAPH-history-loads-in-chunks
 //!
 //! The history loads in chunks: repositories of several chunks, made with git, load chunk by chunk
 //! in commit-date order, a child dated before its parent after it, together the whole history, and
@@ -93,7 +93,7 @@ fn shas(commits: &[CommitData]) -> Vec<&str> {
 }
 
 #[test]
-// Verifies: ADR-0018
+// Verifies: GRAPH-history-loads-in-chunks
 fn a_history_of_several_chunks_loads_whole_in_commit_date_order() {
     let scratch = Scratch::new("whole");
     let dir = scratch.0.join("repo");
@@ -139,7 +139,7 @@ fn a_history_of_several_chunks_loads_whole_in_commit_date_order() {
 }
 
 #[test]
-// Verifies: ADR-0019
+// Verifies: GRAPH-synthetic-nodes-first-chunk
 fn the_first_chunk_moves_walked_commits_on_to_make_room_for_the_working_directory() {
     let scratch = Scratch::new("dirty");
     let dir = scratch.0.join("repo");
@@ -181,7 +181,7 @@ fn a_load_stops_when_told_to() {
 }
 
 #[test]
-// Verifies: ADR-0015
+// Verifies: GRAPH-layout-pure-functions-by-chunk
 fn the_chunks_lay_out_into_one_commit_graph_whose_first_chunk_is_todays() {
     let scratch = Scratch::new("layout");
     let dir = scratch.0.join("repo");
@@ -207,7 +207,7 @@ fn the_chunks_lay_out_into_one_commit_graph_whose_first_chunk_is_todays() {
 }
 
 #[test]
-// Verifies: ADR-0018
+// Verifies: GRAPH-history-loads-in-chunks
 fn a_child_dated_before_its_parent_arrives_after_it_and_every_commit_once() {
     let scratch = Scratch::new("skew");
     let dir = scratch.0.join("repo");

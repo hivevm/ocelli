@@ -6,14 +6,15 @@ name: Checks
 # workflow, and the required checks named in CONTRIBUTING.md together. Each job runs a check after
 # its own self-test, and each script's header says what it checks and which ADR it holds.
 #
-# The sensors report for the reviewer and fail on nothing they count, except the action
-# references once a project runs that sensor with --require; their self-tests fail like any
-# check's. The sensors job checks out the full history because five sensors read it. The review
-# binding sensor runs in review-binding.yml, the repository settings sensor on a human's
-# instruction (ADR-0002); this workflow runs the self-test of each.
+# The sensors report for the reviewer and fail on nothing they count, except the plain rules,
+# which this workflow runs with --require, and the action references once a project runs that
+# sensor with --require; their self-tests fail like any check's. The sensors job checks out the
+# full history because five sensors read it. The review binding sensor runs in
+# review-binding.yml, the repository settings sensor on a human's instruction
+# (NUC-checks-are-bash §7); this workflow runs the self-test of each.
 #
-# The build, test, and lint job runs scripts/check-devcontainer-toolchain.sh (ADR-0010), the Dev
-# Container's share of the toolchain, then scripts/check-build.sh (ADR-0008), on Linux, macOS, and
+# The build, test, and lint job runs scripts/check-devcontainer-toolchain.sh (DEV-container-from-dockerfile), the Dev
+# Container's share of the toolchain, then scripts/check-build.sh (ARCH-rust-core-typescript-web), on Linux, macOS, and
 # Windows, so that code gated to one platform is compiled where it runs; then the self-tests of
 # scripts/measure-crossings.sh and scripts/measure-memory.sh, which the Measure workflow runs; the
 # memory self-test skips itself off Linux, in CI as in check-all.sh on such a host. It is the one
@@ -21,7 +22,7 @@ name: Checks
 # toolchain, and Bun.
 #
 # Every action is pinned to a full commit SHA with its version as a comment, and Dependabot keeps
-# the pins current (ADR-0011).
+# the pins current (SEC-actions-pinned-to-sha).
 #
 # Every job is bounded by a timeout — a hung step would otherwise occupy a runner until the
 # platform's own six-hour limit — and every checkout runs with 'persist-credentials: false': the
@@ -30,12 +31,10 @@ name: Checks
 
 on:
   pull_request:
-    # ready_for_review runs check 16 of check-docs.sh again on a draft pull request marked ready.
-    types: [opened, synchronize, reopened, ready_for_review]
   push:
     branches: [main]
   # Started by hand on a pushed branch that has no pull request yet, such as a feat/ branch
-  # under rework (AGENTS.md, section 6): gh workflow run checks.yml --ref <branch>. GitHub offers
+  # under rework (NUC-main-only-via-pr §5): gh workflow run checks.yml --ref <branch>. GitHub offers
   # it only once this trigger is on the default branch.
   workflow_dispatch:
   # Once a week against main without a change: catches what moves without a commit, the runner
@@ -65,29 +64,24 @@ jobs:
       # Submodules are checked out because the link check resolves relative targets against the
       # working tree: a documentation link into a submodule would otherwise break in CI while
       # working locally. Their *contents* are never read — check-docs.sh enumerates via
-      # `git ls-files`, which lists a submodule as one gitlink entry, not as its files.
+      # `git ls-files`, which lists a submodule as one gitlink entry, not as its files. The whole
+      # history is fetched: check 2 reads the identifiers of deleted ADRs off it.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
           submodules: recursive
+          fetch-depth: 0
       # The check's own tests run first: a check that is wrong passes nothing worth trusting.
       - name: Self-test the documentation checks
         run: bash scripts/test-check-docs.sh
-      # Check 16 reads the branch the change lands on from GitHub's own variables: a draft ADR
-      # fails on a pull request into main once it is ready for review, and on a push to main
-      # (ADR-0002). A draft pull request tests a feat/ branch still under rework, and passes.
       - name: Check documentation consistency
         run: bash scripts/check-docs.sh
-        env:
-          PULL_REQUEST_DRAFT: ${{ github.event.pull_request.draft }}
       # That self-test runs the others in parallel, three of which call cargo: rustup installs the
       # toolchain rust-toolchain.toml pins once here, or they race to install it.
       - name: Set up the pinned Rust toolchain
         run: rustup show active-toolchain
       - name: Self-test the map script of the normalize skill
         run: bash scripts/test-normalize-remap.sh
-      - name: Self-test the numbering script of the drafts
-        run: bash scripts/test-number-adrs.sh
       - name: Self-test the readiness script of the pull request into main
         run: bash scripts/test-ready-for-main.sh
       - name: Self-test the drop script of a merged branch
@@ -143,8 +137,8 @@ jobs:
           BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
       - name: Self-test the plain rules sensor
         run: bash scripts/test-sensor-plain-rules.sh
-      - name: Report long sentences and soft modal verbs the change adds to the rules
-        run: bash scripts/sensor-plain-rules.sh "$BASE"
+      - name: Check the rules the change adds to a project ADR, and report the rest
+        run: bash scripts/sensor-plain-rules.sh --require "$BASE"
         env:
           BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
       - name: Self-test the revision-due sensor
@@ -161,20 +155,22 @@ jobs:
         run: bash scripts/sensor-backlog.sh
       - name: Self-test the action references sensor
         run: bash scripts/test-sensor-action-refs.sh
-      # Verifies: ADR-0011 — the sensor fails on any action not pinned to a full commit SHA.
+      # Verifies: SEC-actions-pinned-to-sha — the sensor fails on any action not pinned to a full commit SHA.
       - name: Require every action to be pinned to a full commit SHA
         run: bash scripts/sensor-action-refs.sh --require sha
       - name: Self-test the review binding sensor
         run: bash scripts/test-sensor-review-binding.sh
       - name: Self-test the accepted ADR text check
         run: bash scripts/test-check-adr-text.sh
-      # Verifies: ADR-0001 — an accepted ADR's text changes only in a normalization. A force push
-      # leaves the previous tip unknown to the clone: the check then reads from main's merge base.
+      # Verifies: NUC-decisions-are-proposed-then-accepted — an accepted ADR's text changes only in a
+      # normalization (§6). A force push leaves the previous tip unknown to the clone: the check
+      # then reads from main's merge base.
       - name: Refuse a change to the text of an accepted ADR outside a normalization
         run: bash scripts/check-adr-text.sh "$BASE"
         env:
           BASE: ${{ github.event.forced != true && (github.event.pull_request.base.sha || github.event.before) || '' }}
-      # The repository settings sensor itself runs on a human's instruction (ADR-0002).
+      # The repository settings sensor itself runs on a human's instruction
+      # (NUC-checks-are-bash §7).
       - name: Self-test the repository settings sensor
         run: bash scripts/test-sensor-repo-settings.sh
 
@@ -211,7 +207,7 @@ jobs:
         with:
           persist-credentials: false
       # The desktop host links against WebKitGTK on Linux; the workspace does not compile
-      # without these libraries (ADR-0027).
+      # without these libraries (ARCH-tauri-desktop-host).
       - name: Install the desktop host's Linux libraries
         if: runner.os == 'Linux'
         run: |
@@ -225,14 +221,14 @@ jobs:
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
       - name: Install the web interface's dependencies from the lockfile
         run: bun install --frozen-lockfile
-      # The Dev Container carries the same toolchain this job sets up (ADR-0010).
+      # The Dev Container carries the same toolchain this job sets up (DEV-container-from-dockerfile).
       - name: Self-test the Dev Container toolchain check
         run: bash scripts/test-check-devcontainer-toolchain.sh
       - name: Check the Dev Container's toolchain
         run: bash scripts/check-devcontainer-toolchain.sh
       - name: Build, test, and lint
         run: bash scripts/check-build.sh
-      # Verifies: ADR-0014 — no macOS binary loads a library outside the system, such as the
+      # Verifies: OPS-openssl-vendored-on-macos — no macOS binary loads a library outside the system, such as the
       # build machine's Homebrew OpenSSL, which a Mac without Homebrew does not have.
       - name: Check that the macOS binaries load only the system's libraries
         if: runner.os == 'macOS'

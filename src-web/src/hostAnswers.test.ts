@@ -1,4 +1,4 @@
-// Verifies: ADR-0020
+// Verifies: GRAPH-core-serves-row-windows
 import { describe, expect, test } from 'bun:test';
 import { Newest } from './hostAnswers.ts';
 

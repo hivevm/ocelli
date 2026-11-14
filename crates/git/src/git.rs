@@ -8,7 +8,7 @@ use std::collections::HashMap;
 use std::path::Path;
 
 /// Loads the first chunk of a repository's history: the newest commits of the walk with the
-/// stash and working-directory nodes, at most [`CHUNK_COMMITS`] together (ADR-0018).
+/// stash and working-directory nodes, at most [`CHUNK_COMMITS`] together (GRAPH-history-loads-in-chunks).
 /// Reports progress through `progress`, one message per step.
 pub fn load_first_chunk(
     repo_path: &Path,
@@ -24,7 +24,7 @@ pub fn load_first_chunk(
 
 /// Loads a repository's whole history in chunks of [`CHUNK_COMMITS`] in the commit-date order of
 /// the walk over every ref, handing each to `on_chunk` as it is read; `on_chunk`
-/// returns whether to go on (ADR-0018). The first chunk carries the stash and working-directory
+/// returns whether to go on (GRAPH-history-loads-in-chunks). The first chunk carries the stash and working-directory
 /// nodes and makes room for them by moving its oldest walked commits on to the second chunk.
 /// Reports progress through `progress`, one message per step.
 pub fn load_chunks(
@@ -37,7 +37,7 @@ pub fn load_chunks(
     // setting holds for the whole process: the per-commit reads after it read a commit at a time
     // and gain little from the cache.
     git2::opts::enable_caching(false);
-    // 1. Open the repository: searched for upwards, or, confined, at `repo_path` alone (ADR-0038)
+    // 1. Open the repository: searched for upwards, or, confined, at `repo_path` alone (SEC-server-root-confinement)
     let repo = crate::confine::open(repo_path)?;
 
     // 2. Collect all refs and map peeled SHA -> Vec<String> ref names
@@ -71,7 +71,7 @@ pub fn load_chunks(
         starts.push((target.time().seconds(), target_oid));
     }
 
-    // 3. Set up the walk in commit-date order (ADR-0018). Any sorting libgit2 offers reads the
+    // 3. Set up the walk in commit-date order (GRAPH-history-loads-in-chunks). Any sorting libgit2 offers reads the
     //    whole history before the first commit; unsorted, it keeps the commits it has reached
     //    ordered by date and yields each after one of its children. It takes the starts in the
     //    reverse of the order they are pushed, so the oldest is pushed first and the newest is
@@ -141,7 +141,7 @@ pub fn load_chunks(
     Ok(())
 }
 
-/// Completes the first chunk with the stash and working-directory nodes (ADR-0019) and returns
+/// Completes the first chunk with the stash and working-directory nodes (GRAPH-synthetic-nodes-first-chunk) and returns
 /// the walked commits it moves on to the second chunk to stay within [`CHUNK_COMMITS`]. It opens
 /// the repository a second time: the walk holds the first handle, and reading the stash needs one
 /// of its own.
@@ -221,7 +221,7 @@ fn working_dir_node(repo: &Repository) -> Option<CommitData> {
 
     // Author the node with the repo's configured identity, when available. Confined to a server
     // root, it is not read: the configuration libgit2 reads, the developer's global one and the
-    // files a repository's own one includes, lies outside what ADR-0038 confines, and the
+    // files a repository's own one includes, lies outside what SEC-server-root-confinement confines, and the
     // identity is the one value of it the node would show.
     let signature = if crate::confine::confined() {
         Err(git2::Error::from_str("not read under confinement"))
@@ -416,7 +416,7 @@ pub(crate) fn index_entry(
 
 /// The blob id `git` gives `path` in the working directory `root`, as `git` reads it: a link as
 /// its target's text, never the file it names, and nothing for a path that passes through a
-/// linked folder, which `git` sees as the link it is and Ocelli never reads through (ADR-0038);
+/// linked folder, which `git` sees as the link it is and Ocelli never reads through (SEC-server-root-confinement);
 /// nothing for a path that is not there.
 fn working_blob(root: &Path, path: &str) -> Option<git2::Oid> {
     let relative = Path::new(path);
@@ -612,7 +612,7 @@ mod tests {
 
     /// Under the limit nothing is touched.
     #[test]
-    // Verifies: ADR-0018
+    // Verifies: GRAPH-history-loads-in-chunks
     fn the_first_chunk_leaves_a_small_graph_alone() {
         let mut commits: Vec<CommitData> = (0..10)
             .map(|i| entry(&format!("c{i}"), CommitKind::Commit))
@@ -626,7 +626,7 @@ mod tests {
     /// room is made by moving the oldest walked commits on to the next chunk instead.
     /// This is the regression guard for synthetic nodes being appended past the chunk.
     #[test]
-    // Verifies: ADR-0018, ADR-0019
+    // Verifies: GRAPH-history-loads-in-chunks, GRAPH-synthetic-nodes-first-chunk
     fn the_first_chunk_bounds_the_whole_graph_and_keeps_synthetic_nodes() {
         let mut commits: Vec<CommitData> = (0..CHUNK_COMMITS)
             .map(|i| entry(&format!("c{i}"), CommitKind::Commit))
@@ -666,7 +666,7 @@ mod tests {
 
     /// Degenerate case: more synthetic nodes than a chunk holds.
     #[test]
-    // Verifies: ADR-0018
+    // Verifies: GRAPH-history-loads-in-chunks
     fn the_first_chunk_holds_even_with_absurdly_many_synthetic_nodes() {
         let mut commits: Vec<CommitData> = vec![entry("c0", CommitKind::Commit)];
         let walked = commits.len();

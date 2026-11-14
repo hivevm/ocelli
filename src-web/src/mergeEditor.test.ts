@@ -1,4 +1,4 @@
-// Verifies: ADR-0024, ADR-0025, G-15, Q-7
+// Verifies: VIEW-own-merge-editor, GIT-discard-only-after-confirmation, G-15, Q-7
 import { describe, expect, test } from 'bun:test';
 import { lineKinds, markerLines, saveRequest, sideText, unsaved, unsavedLoss } from './mergeEditor.ts';
 import type { Conflict, MergeFile } from './types.ts';

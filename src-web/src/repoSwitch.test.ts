@@ -1,4 +1,4 @@
-// Verifies: ADR-0038, ADR-0035
+// Verifies: SEC-server-root-confinement, VIEW-repository-sidebar
 import { describe, expect, test } from 'bun:test';
 import { OUTSIDE_ROOT, parentBlocked, submoduleBlocked, worktreeBlocked } from './repoSwitch.ts';
 

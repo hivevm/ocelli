@@ -1,4 +1,4 @@
-//! Verifies: ADR-0022, G-16
+//! Verifies: GIT-writes-what-git-writes, G-16
 //!
 //! The writes of the repository port on repositories made with git: each does what it says, and
 //! one whose expected state the repository does not hold is refused with nothing changed. Writing
@@ -25,7 +25,7 @@ use support::{
 mod programs;
 
 #[test]
-// Verifies: ADR-0022
+// Verifies: GIT-writes-what-git-writes
 fn the_snapshot_sees_every_part_a_write_can_change() {
     let scratch = with_file("snapshot");
     let d = &scratch.0;
@@ -365,7 +365,7 @@ fn a_tag_on_a_commit_no_longer_there_or_with_a_bad_name_is_refused() {
 }
 
 #[test]
-// Verifies: ADR-0022, ADR-0026, Q-4
+// Verifies: GIT-writes-what-git-writes, GIT-remotes-through-libgit2-transports, Q-4
 fn writing_a_repository_runs_none_of_its_programs() {
     use ocelli_core::model::Operation;
     use ocelli_core::port::{ResetMode, Take};
@@ -388,7 +388,7 @@ fn writing_a_repository_runs_none_of_its_programs() {
     // Outside the repository, so that stashing the untracked files leaves them be.
     let tools = Scratch::new("programs-ran");
     let markers = programs::set_everywhere(d, &tools.0);
-    // Ocelli refuses what these would have git sign (ADR-0022); the writes here go through.
+    // Ocelli refuses what these would have git sign (GIT-writes-what-git-writes); the writes here go through.
     let mut config = git2::Repository::open(d).unwrap().config().unwrap();
     for (key, _) in programs::SWITCHES {
         config.remove(key).unwrap();
@@ -687,7 +687,7 @@ fn apply(index: usize, commit: &str, drop: bool) -> Write {
 }
 
 #[test]
-// Verifies: ADR-0022, G-16
+// Verifies: GIT-writes-what-git-writes, G-16
 fn stashing_puts_the_changes_aside_and_the_untracked_files_only_when_asked() {
     let scratch = with_file("stash");
     std::fs::write(scratch.0.join("f"), "changed\n").unwrap();
@@ -717,7 +717,7 @@ fn a_clean_working_directory_has_nothing_to_stash() {
 }
 
 #[test]
-// Verifies: ADR-0022, G-16
+// Verifies: GIT-writes-what-git-writes, G-16
 fn a_stash_applies_and_stays_or_is_dropped_after() {
     let scratch = with_file("apply");
     std::fs::write(scratch.0.join("f"), "changed\n").unwrap();
@@ -754,7 +754,7 @@ fn a_stash_applies_and_stays_or_is_dropped_after() {
 }
 
 #[test]
-// Verifies: ADR-0022, G-16
+// Verifies: GIT-writes-what-git-writes, G-16
 fn a_stash_that_would_conflict_is_refused_with_the_working_directory_unchanged() {
     let scratch = with_file("conflict");
     std::fs::write(scratch.0.join("f"), "stashed\n").unwrap();
@@ -786,7 +786,7 @@ fn a_stash_over_changes_of_the_working_directory_is_refused() {
 }
 
 #[test]
-// Verifies: ADR-0022
+// Verifies: GIT-writes-what-git-writes
 fn a_stash_no_longer_at_its_place_is_neither_applied_nor_dropped() {
     let scratch = with_file("moved-stash");
     std::fs::write(scratch.0.join("f"), "first\n").unwrap();
@@ -838,7 +838,7 @@ fn a_stash_refused_over(name: &str, set_up: impl Fn(&Path), then: impl Fn(&Path)
 }
 
 #[test]
-// Verifies: ADR-0022, G-16
+// Verifies: GIT-writes-what-git-writes, G-16
 fn a_stash_with_anything_in_its_way_is_refused_with_nothing_changed() {
     // The stash's new file n/x, and a file n where it needs a directory.
     a_stash_refused_over(
@@ -944,7 +944,7 @@ fn tag_message(dir: &Path, name: &str) -> String {
 }
 
 #[test]
-// Verifies: ADR-0022, G-16
+// Verifies: GIT-writes-what-git-writes, G-16
 fn the_writer_takes_the_tag_names_git_takes() {
     let scratch = Scratch::new("names");
     let (one, _) = repository(&scratch.0);
@@ -996,7 +996,7 @@ fn the_writer_takes_the_tag_names_git_takes() {
 }
 
 #[test]
-// Verifies: ADR-0022, G-16
+// Verifies: GIT-writes-what-git-writes, G-16
 fn the_writer_cleans_a_tag_message_as_git_does() {
     let scratch = Scratch::new("messages");
     let (one, _) = repository(&scratch.0);
@@ -1054,7 +1054,7 @@ fn the_writer_cleans_a_tag_message_as_git_does() {
 }
 
 #[test]
-// Verifies: ADR-0019, ADR-0022
+// Verifies: GRAPH-synthetic-nodes-first-chunk, GIT-writes-what-git-writes
 fn each_stash_node_carries_its_place_in_the_stash() {
     use ocelli_core::model::CommitKind;
     let scratch = with_file("places");
@@ -1105,7 +1105,7 @@ const NO_FILE: &[&str] = &[
 ];
 
 #[test]
-// Verifies: ADR-0022, ADR-0038
+// Verifies: GIT-writes-what-git-writes, SEC-server-root-confinement
 fn a_path_that_names_no_file_of_the_working_directory_is_refused_by_every_write_and_read() {
     use ocelli_core::model::Conflict;
     use ocelli_core::port::Take;
@@ -1171,7 +1171,7 @@ fn a_path_that_names_no_file_of_the_working_directory_is_refused_by_every_write_
 }
 
 #[test]
-// Verifies: ADR-0022, G-12
+// Verifies: GIT-writes-what-git-writes, G-12
 fn whole_files_are_staged_and_unstaged_as_git_add_and_restore_do() {
     let scratch = with_file("stage");
     write_file(&scratch.0, "f", "changed\n");
@@ -1207,7 +1207,7 @@ fn a_file_without_a_change_to_stage_or_unstage_is_refused() {
 }
 
 #[test]
-// Verifies: ADR-0022, G-12
+// Verifies: GIT-writes-what-git-writes, G-12
 fn the_index_is_committed_by_the_configured_identity_on_the_head_shown() {
     let scratch = with_file("commit");
     let head = git(&scratch.0, &["rev-parse", "HEAD"]);
@@ -1251,7 +1251,7 @@ fn the_index_is_committed_by_the_configured_identity_on_the_head_shown() {
 }
 
 #[test]
-// Verifies: ADR-0022, G-12
+// Verifies: GIT-writes-what-git-writes, G-12
 fn a_commit_is_refused_with_nothing_changed() {
     let scratch = with_file("commit-refused");
     let head = git(&scratch.0, &["rev-parse", "HEAD"]);
@@ -1277,7 +1277,7 @@ fn a_commit_is_refused_with_nothing_changed() {
 }
 
 #[test]
-// Verifies: ADR-0022
+// Verifies: GIT-writes-what-git-writes
 fn an_annotated_tag_is_refused_where_tags_are_signed_and_a_lightweight_one_is_not() {
     let scratch = Scratch::new("tag-signed");
     let (one, _) = repository(&scratch.0);
@@ -1289,7 +1289,7 @@ fn an_annotated_tag_is_refused_where_tags_are_signed_and_a_lightweight_one_is_no
 }
 
 #[test]
-// Verifies: ADR-0022, G-12
+// Verifies: GIT-writes-what-git-writes, G-12
 fn a_file_changed_since_it_was_shown_is_neither_staged_nor_unstaged() {
     let scratch = with_file("stage-moved");
     write_file(&scratch.0, "f", "shown\n");
@@ -1307,7 +1307,7 @@ fn a_file_changed_since_it_was_shown_is_neither_staged_nor_unstaged() {
 }
 
 #[test]
-// Verifies: ADR-0022, G-12
+// Verifies: GIT-writes-what-git-writes, G-12
 fn a_commit_is_refused_while_a_merge_is_in_progress() {
     let scratch = with_file("merging");
     git(&scratch.0, &["switch", "--quiet", "-c", "side"]);
@@ -1344,7 +1344,7 @@ fn a_commit_cleans_its_message_as_commit_cleanup_says() {
 }
 
 #[test]
-// Verifies: ADR-0022
+// Verifies: GIT-writes-what-git-writes
 fn an_annotated_tag_is_refused_where_annotated_tags_are_always_signed() {
     let scratch = Scratch::new("force-sign");
     let (one, _) = repository(&scratch.0);
@@ -1372,7 +1372,7 @@ fn with_side(name: &str) -> (Scratch, String, String) {
 }
 
 #[test]
-// Verifies: ADR-0022, G-12
+// Verifies: GIT-writes-what-git-writes, G-12
 fn a_branch_is_created_at_the_commit_and_switched_to_where_asked() {
     let (scratch, main, side) = with_side("create-branch");
     let create = |name: &str, commit: &str, switch| Write::CreateBranch {
@@ -1409,7 +1409,7 @@ fn a_branch_is_created_at_the_commit_and_switched_to_where_asked() {
 }
 
 #[test]
-// Verifies: ADR-0022, G-12
+// Verifies: GIT-writes-what-git-writes, G-12
 fn a_switch_takes_the_changes_along_or_is_refused_naming_what_is_in_the_way() {
     let (scratch, main, side) = with_side("switch");
     let switch = |name: &str, tip: &str| Write::SwitchBranch {
@@ -1468,7 +1468,7 @@ fn cloned_with_side(name: &str) -> (Scratch, Scratch, String) {
 }
 
 #[test]
-// Verifies: ADR-0022, G-12
+// Verifies: GIT-writes-what-git-writes, G-12
 fn a_remote_branch_is_switched_to_through_a_local_branch_that_tracks_it() {
     let (_origin, clone, side) = cloned_with_side("remote");
     let track = Write::TrackRemote {
@@ -1486,7 +1486,7 @@ fn a_remote_branch_is_switched_to_through_a_local_branch_that_tracks_it() {
 }
 
 #[test]
-// Verifies: ADR-0022, G-12
+// Verifies: GIT-writes-what-git-writes, G-12
 fn a_remote_branch_whose_switch_is_refused_leaves_neither_a_branch_nor_its_upstream() {
     let (_origin, clone, side) = cloned_with_side("track-refused");
     write_file(&clone.0, "f", "mine\n");
@@ -1500,7 +1500,7 @@ fn a_remote_branch_whose_switch_is_refused_leaves_neither_a_branch_nor_its_upstr
 }
 
 #[test]
-// Verifies: ADR-0022, ADR-0025, G-12
+// Verifies: GIT-writes-what-git-writes, GIT-discard-only-after-confirmation, G-12
 fn a_branch_is_deleted_only_as_shown_and_never_while_checked_out() {
     let (scratch, main, side) = with_side("delete-branch");
     git(&scratch.0, &["branch", "merged", &main]);
@@ -1535,7 +1535,7 @@ fn a_branch_is_deleted_only_as_shown_and_never_while_checked_out() {
 }
 
 #[test]
-// Verifies: ADR-0022, G-12
+// Verifies: GIT-writes-what-git-writes, G-12
 fn a_switch_carries_what_the_target_leaves_alone_and_refuses_staged_changes_it_touches() {
     let (scratch, _, side) = with_side("switch-carry");
     let switch = Write::SwitchBranch {
@@ -1565,7 +1565,7 @@ fn a_switch_carries_what_the_target_leaves_alone_and_refuses_staged_changes_it_t
 }
 
 #[test]
-// Verifies: ADR-0022, G-12
+// Verifies: GIT-writes-what-git-writes, G-12
 fn a_branch_checked_out_in_another_working_tree_is_neither_switched_to_nor_deleted() {
     let (scratch, _, side) = with_side("worktree");
     let elsewhere = Scratch::new("worktree-other");
@@ -1596,7 +1596,7 @@ fn a_branch_checked_out_in_another_working_tree_is_neither_switched_to_nor_delet
 }
 
 #[test]
-// Verifies: ADR-0022, G-12
+// Verifies: GIT-writes-what-git-writes, G-12
 fn a_branch_whose_name_clashes_with_another_is_refused_with_nothing_changed() {
     let (scratch, main, side) = with_side("clash");
     git(&scratch.0, &["branch", "feature/x", &main]);
@@ -1655,7 +1655,7 @@ fn with_remote(name: &str) -> (Scratch, Scratch, String) {
 }
 
 #[test]
-// Verifies: ADR-0026, G-12
+// Verifies: GIT-remotes-through-libgit2-transports, G-12
 fn a_fetch_moves_the_remote_branches_as_git_fetch_does() {
     let (_remote, clone, later) = with_remote("fetch");
     let before = snapshot(&clone.0);
@@ -1697,7 +1697,7 @@ fn a_fetch_moves_the_remote_branches_as_git_fetch_does() {
 }
 
 #[test]
-// Verifies: ADR-0026
+// Verifies: GIT-remotes-through-libgit2-transports
 fn a_fetch_cancelled_or_of_no_remote_changes_nothing() {
     let (_remote, clone, _) = with_remote("fetch-cancel");
     let fetch = |name: &str| Write::Fetch {
@@ -1715,7 +1715,7 @@ fn pull_of(dir: &Path, branch: &str) -> Write {
 }
 
 #[test]
-// Verifies: ADR-0026, G-12
+// Verifies: GIT-remotes-through-libgit2-transports, G-12
 fn a_pull_fast_forwards_the_checked_out_branch_as_git_pull_ff_only_does() {
     let (_remote, clone, later) = with_remote("pull");
     write_file(&clone.0, "mine", "untracked\n");
@@ -1743,7 +1743,7 @@ fn a_pull_fast_forwards_the_checked_out_branch_as_git_pull_ff_only_does() {
 }
 
 #[test]
-// Verifies: ADR-0026, G-12
+// Verifies: GIT-remotes-through-libgit2-transports, G-12
 fn a_pull_is_refused_where_the_branch_diverged_has_no_upstream_or_is_not_checked_out() {
     let (_remote, clone, _) = with_remote("pull-refused");
     write_file(&clone.0, "f", "mine\n");
@@ -1767,7 +1767,7 @@ fn push_of(dir: &Path, branch: &str) -> Write {
 }
 
 #[test]
-// Verifies: ADR-0026, G-12
+// Verifies: GIT-remotes-through-libgit2-transports, G-12
 fn a_push_sends_the_branch_to_its_upstream_or_sets_one_as_git_push_does() {
     let (remote, clone, _) = with_remote("push");
     GitWriter
@@ -1794,7 +1794,7 @@ fn a_push_sends_the_branch_to_its_upstream_or_sets_one_as_git_push_does() {
 }
 
 #[test]
-// Verifies: ADR-0026, G-12
+// Verifies: GIT-remotes-through-libgit2-transports, G-12
 fn a_push_that_is_not_a_fast_forward_is_refused_with_nothing_changed() {
     let (remote, clone, later) = with_remote("push-refused");
     write_file(&clone.0, "f", "mine\n");
@@ -1808,7 +1808,7 @@ fn a_push_that_is_not_a_fast_forward_is_refused_with_nothing_changed() {
 }
 
 #[test]
-// Verifies: ADR-0026, G-12
+// Verifies: GIT-remotes-through-libgit2-transports, G-12
 fn a_commit_made_while_a_pull_fetches_is_neither_lost_nor_checked_out_over() {
     let (_remote, clone, _) = with_remote("pull-race");
     let pull = pull_of(&clone.0, "main");
@@ -1830,7 +1830,7 @@ fn a_commit_made_while_a_pull_fetches_is_neither_lost_nor_checked_out_over() {
 }
 
 #[test]
-// Verifies: ADR-0026
+// Verifies: GIT-remotes-through-libgit2-transports
 fn a_pull_whose_branch_another_program_holds_locked_changes_nothing() {
     let (_remote, clone, _) = with_remote("pull-locked");
     // Fetched before, as for a pull refused where the branches diverged.
@@ -1843,7 +1843,7 @@ fn a_pull_whose_branch_another_program_holds_locked_changes_nothing() {
 }
 
 #[test]
-// Verifies: ADR-0026, G-12
+// Verifies: GIT-remotes-through-libgit2-transports, G-12
 fn a_push_follows_push_default_as_git_push_does() {
     let (remote, clone, _) = with_remote("push-default");
     GitWriter
@@ -1895,7 +1895,7 @@ fn a_push_follows_push_default_as_git_push_does() {
 }
 
 #[test]
-// Verifies: ADR-0022, G-12
+// Verifies: GIT-writes-what-git-writes, G-12
 
 fn a_path_is_unstaged_and_diffed_as_written_never_as_a_pattern() {
     let scratch = with_file("stage-pattern");
@@ -1922,7 +1922,7 @@ fn a_path_is_unstaged_and_diffed_as_written_never_as_a_pattern() {
 }
 
 #[test]
-// Verifies: ADR-0022, Q-7
+// Verifies: GIT-writes-what-git-writes, Q-7
 fn a_switch_that_puts_a_file_where_a_directory_holds_untracked_files_is_refused() {
     for (name, kept) in [("untracked", "d/u"), ("ignored", "d/u.log")] {
         let scratch = with_file(&format!("dir-to-file-{name}"));
@@ -1953,7 +1953,7 @@ fn a_switch_that_puts_a_file_where_a_directory_holds_untracked_files_is_refused(
 }
 
 #[test]
-// Verifies: ADR-0022, Q-7
+// Verifies: GIT-writes-what-git-writes, Q-7
 fn a_stash_during_a_stopped_operation_is_refused_with_the_operation_kept() {
     let scratch = with_file("stash-stopped");
     let d = &scratch.0;
@@ -1976,7 +1976,7 @@ fn a_stash_during_a_stopped_operation_is_refused_with_the_operation_kept() {
 }
 
 #[test]
-// Verifies: ADR-0022, Q-7
+// Verifies: GIT-writes-what-git-writes, Q-7
 fn a_stash_libgit2_would_make_by_writing_past_it_is_refused() {
     let stash = |untracked| Write::CreateStash {
         message: None,
@@ -2073,7 +2073,7 @@ fn link_where_side_adds_a_directory(name: &str) -> (Scratch, Scratch, String, St
 }
 
 #[test]
-// Verifies: ADR-0022, ADR-0038, Q-7
+// Verifies: GIT-writes-what-git-writes, SEC-server-root-confinement, Q-7
 fn a_switch_goes_through_no_link_the_index_does_not_hold() {
     let (scratch, outside, _, side) = link_where_side_adds_a_directory("link-switch");
     let switch = Write::SwitchBranch {
@@ -2085,7 +2085,7 @@ fn a_switch_goes_through_no_link_the_index_does_not_hold() {
 }
 
 #[test]
-// Verifies: ADR-0022, ADR-0038, Q-7
+// Verifies: GIT-writes-what-git-writes, SEC-server-root-confinement, Q-7
 fn a_merge_goes_through_no_link_the_index_does_not_hold() {
     let (scratch, outside, main, side) = link_where_side_adds_a_directory("link-merge");
     let merge = Write::Merge {
@@ -2099,7 +2099,7 @@ fn a_merge_goes_through_no_link_the_index_does_not_hold() {
 }
 
 #[test]
-// Verifies: ADR-0022, ADR-0038, Q-7
+// Verifies: GIT-writes-what-git-writes, SEC-server-root-confinement, Q-7
 fn a_cherry_pick_goes_through_no_link_the_index_does_not_hold() {
     let (scratch, outside, main, side) = link_where_side_adds_a_directory("link-pick");
     let pick = Write::CherryPick {
@@ -2112,7 +2112,7 @@ fn a_cherry_pick_goes_through_no_link_the_index_does_not_hold() {
 }
 
 #[test]
-// Verifies: ADR-0022, ADR-0038, Q-7
+// Verifies: GIT-writes-what-git-writes, SEC-server-root-confinement, Q-7
 fn a_revert_goes_through_no_link_the_index_does_not_hold() {
     let (scratch, outside) = beside_outside("link-revert");
     let d = &scratch.0;
@@ -2131,7 +2131,7 @@ fn a_revert_goes_through_no_link_the_index_does_not_hold() {
 }
 
 #[test]
-// Verifies: ADR-0022, ADR-0038, Q-7
+// Verifies: GIT-writes-what-git-writes, SEC-server-root-confinement, Q-7
 fn a_rebase_goes_through_no_link_the_index_does_not_hold_as_it_starts_or_steps() {
     // Its start checks out what it rebases onto.
     let (scratch, outside, main, side) = link_where_side_adds_a_directory("link-rebase-start");
@@ -2188,7 +2188,7 @@ fn a_rebase_goes_through_no_link_the_index_does_not_hold_as_it_starts_or_steps()
 }
 
 #[test]
-// Verifies: ADR-0022, ADR-0038, Q-7
+// Verifies: GIT-writes-what-git-writes, SEC-server-root-confinement, Q-7
 fn a_rebase_s_abort_goes_through_no_link_the_index_does_not_hold() {
     let (scratch, outside) = beside_outside("link-rebase-abort");
     let d = &scratch.0;
@@ -2221,7 +2221,7 @@ fn a_rebase_s_abort_goes_through_no_link_the_index_does_not_hold() {
 }
 
 #[test]
-// Verifies: ADR-0022, ADR-0038, Q-7
+// Verifies: GIT-writes-what-git-writes, SEC-server-root-confinement, Q-7
 fn a_hard_reset_goes_through_no_link_the_index_does_not_hold() {
     let reset_hard = |d: &Path| {
         let head = git(d, &["rev-parse", "HEAD"]);
@@ -2258,7 +2258,7 @@ fn a_hard_reset_goes_through_no_link_the_index_does_not_hold() {
 }
 
 #[test]
-// Verifies: ADR-0022, ADR-0038, Q-7
+// Verifies: GIT-writes-what-git-writes, SEC-server-root-confinement, Q-7
 fn a_stash_goes_through_no_link_the_index_does_not_hold() {
     // Only the checked-out commit still has the directory the link stands in.
     let (scratch, outside) = beside_outside("link-stash");
@@ -2308,7 +2308,7 @@ fn conflict_on_a_link(name: &str) -> (Scratch, Scratch) {
 }
 
 #[test]
-// Verifies: ADR-0022, ADR-0038, Q-7
+// Verifies: GIT-writes-what-git-writes, SEC-server-root-confinement, Q-7
 fn an_abort_and_a_resolve_go_through_no_link_the_index_does_not_hold() {
     let (scratch, outside) = conflict_on_a_link("link-abort");
     let d = &scratch.0;
@@ -2357,7 +2357,7 @@ fn file_and_directory_conflict(name: &str) -> (Scratch, Scratch, String, String)
 const FILE_AND_DIRECTORY: &str = "a file and a directory named x conflict";
 
 #[test]
-// Verifies: ADR-0022, ADR-0038, Q-7
+// Verifies: GIT-writes-what-git-writes, SEC-server-root-confinement, Q-7
 fn a_conflict_between_a_file_and_a_directory_is_refused_by_every_write_that_merges() {
     let (scratch, outside, main, side) = file_and_directory_conflict("df-merge");
     let merge = Write::Merge {
@@ -2421,7 +2421,7 @@ fn a_conflict_between_a_file_and_a_directory_is_refused_by_every_write_that_merg
 }
 
 #[test]
-// Verifies: ADR-0022, ADR-0038, Q-7
+// Verifies: GIT-writes-what-git-writes, SEC-server-root-confinement, Q-7
 fn a_conflict_libgit2_writes_through_a_link_or_beside_its_path_is_refused() {
     // Two files renamed to one name, whose sides libgit2 writes as c~HEAD and c~<commit>.
     let (scratch, outside) = beside_outside("rename-collision");
@@ -2489,7 +2489,7 @@ fn git_fed(dir: &Path, args: &[&str], input: &[u8]) -> String {
 }
 
 #[test]
-// Verifies: ADR-0022, Q-7
+// Verifies: GIT-writes-what-git-writes, Q-7
 fn a_tree_naming_one_path_both_a_file_and_a_directory_is_never_written() {
     let scratch = with_file("tree-twice");
     let d = &scratch.0;
@@ -2597,7 +2597,7 @@ fn writes_of(main: &str, side: &str) -> Vec<(&'static str, Write)> {
 }
 
 #[test]
-// Verifies: ADR-0022, Q-7
+// Verifies: GIT-writes-what-git-writes, Q-7
 fn a_tree_naming_a_plain_file_twice_is_refused_by_every_write_that_reads_it() {
     // No link and no conflict with the checked-out commit: only reading the target's own tree
     // finds the duplicate, so every write that reads a tree must read this one.
@@ -2668,7 +2668,7 @@ fn named_twice(
 }
 
 #[test]
-// Verifies: ADR-0022, ADR-0038, Q-7
+// Verifies: GIT-writes-what-git-writes, SEC-server-root-confinement, Q-7
 fn a_tree_naming_a_link_twice_is_never_written_through() {
     for (also, link_first, to_secret) in [
         ("directory", true, false),
@@ -2690,7 +2690,7 @@ fn a_tree_naming_a_link_twice_is_never_written_through() {
 }
 
 #[test]
-// Verifies: ADR-0022, ADR-0038, Q-7
+// Verifies: GIT-writes-what-git-writes, SEC-server-root-confinement, Q-7
 fn a_tree_naming_a_link_and_a_file_one_name_is_never_written_by_a_pull() {
     let (scratch, outside) = beside_outside("twice-pull");
     let d = &scratch.0;
@@ -2735,7 +2735,7 @@ fn a_tree_naming_a_link_and_a_file_one_name_is_never_written_by_a_pull() {
 }
 
 #[test]
-// Verifies: ADR-0022, ADR-0038, Q-7
+// Verifies: GIT-writes-what-git-writes, SEC-server-root-confinement, Q-7
 fn a_link_only_staged_is_never_written_through() {
     // A switch to a commit that adds a/x, the link staged where a stands.
     let (scratch, outside) = beside_outside("staged-switch");
@@ -2779,7 +2779,7 @@ fn a_link_only_staged_is_never_written_through() {
 }
 
 #[test]
-// Verifies: ADR-0022, ADR-0038
+// Verifies: GIT-writes-what-git-writes, SEC-server-root-confinement
 fn a_committed_link_a_write_turns_into_a_directory_is_replaced_not_written_through() {
     for what in ["switch", "reset", "cherry-pick"] {
         let (scratch, outside) = beside_outside(&format!("typechange-{what}"));
@@ -2804,7 +2804,7 @@ fn a_committed_link_a_write_turns_into_a_directory_is_replaced_not_written_throu
 }
 
 #[test]
-// Verifies: ADR-0022, ADR-0038
+// Verifies: GIT-writes-what-git-writes, SEC-server-root-confinement
 fn names_one_where_case_is_not_told_apart_are_refused_where_the_repository_says_so() {
     let scratch = with_file("ignorecase");
     let d = &scratch.0;
@@ -2849,12 +2849,12 @@ fn names_one_where_case_is_not_told_apart_are_refused_where_the_repository_says_
 }
 
 #[test]
-// Verifies: ADR-0022, ADR-0023, ADR-0038, Q-7
+// Verifies: GIT-writes-what-git-writes, GIT-conflict-labels-path-safe, SEC-server-root-confinement, Q-7
 fn a_conflict_side_is_written_under_the_commit_id_not_its_subject() {
     // libgit2 names the side of a rename collision `<path>~<label>`, and left to itself takes
     // the label from the commit subject, which can hold `/` and `..`: a crafted subject would
     // write a new file anywhere writable. The label is the abbreviated commit id instead, as
-    // `git` writes it without the subject (ADR-0023).
+    // `git` writes it without the subject (GIT-conflict-labels-path-safe).
     let (scratch, outside) = beside_outside("label-traversal");
     let d = &scratch.0;
     write_file(d, "a", &"alpha line\n".repeat(20));
@@ -2898,7 +2898,7 @@ fn a_conflict_side_is_written_under_the_commit_id_not_its_subject() {
 }
 
 #[test]
-// Verifies: ADR-0022, ADR-0038
+// Verifies: GIT-writes-what-git-writes, SEC-server-root-confinement
 fn a_rebase_replaying_a_root_commit_applies_it_without_a_false_refusal() {
     // A root commit has no parent: libgit2's step merges the empty tree, HEAD and the commit,
     // which the guard reads the same way, rather than a plain diff that would miss a conflict.
@@ -2939,7 +2939,7 @@ fn a_rebase_replaying_a_root_commit_applies_it_without_a_false_refusal() {
 }
 
 #[test]
-// Verifies: ADR-0022, ADR-0023, Q-7
+// Verifies: GIT-writes-what-git-writes, GIT-conflict-labels-path-safe, Q-7
 fn a_merge_writing_a_conflict_through_a_lock_link_is_refused() {
     // libgit2 creates `<path>.lock` exclusively to write a conflicted file's merged content: a
     // link there is not followed, but stops the merge half done, so it is refused first.
@@ -2969,7 +2969,7 @@ fn a_merge_writing_a_conflict_through_a_lock_link_is_refused() {
 }
 
 #[test]
-// Verifies: ADR-0022, ADR-0023
+// Verifies: GIT-writes-what-git-writes, GIT-conflict-labels-path-safe
 fn a_rebase_labels_a_stopped_step_head_and_its_own_commit() {
     // libgit2 reads a rebase's labels again at each step, after the call that opened it
     // returned: the options must outlive the rebase, or the markers hold freed memory. Each step
@@ -3018,7 +3018,7 @@ fn rename_collision(name: &str) -> (Scratch, Scratch, String, String) {
 }
 
 #[test]
-// Verifies: ADR-0022, ADR-0023, ADR-0038, Q-7
+// Verifies: GIT-writes-what-git-writes, GIT-conflict-labels-path-safe, SEC-server-root-confinement, Q-7
 fn a_link_beside_a_conflict_is_found_as_the_file_system_folds_its_name() {
     // Where case is not told apart, `C~HEAD` is the `c~HEAD` libgit2 writes a side of `c` to.
     let (scratch, outside, main, side) = rename_collision("folded-sibling");
@@ -3040,7 +3040,7 @@ fn a_link_beside_a_conflict_is_found_as_the_file_system_folds_its_name() {
 }
 
 #[test]
-// Verifies: ADR-0022, ADR-0023, Q-7
+// Verifies: GIT-writes-what-git-writes, GIT-conflict-labels-path-safe, Q-7
 fn anything_at_a_conflicted_files_lock_refuses_the_write_before_it_stops_half_done() {
     // libgit2 creates `<path>.lock` exclusively to write the merged side: a file already there
     // fails it with the merge half done, so a plain file there refuses the write too.
@@ -3069,7 +3069,7 @@ fn anything_at_a_conflicted_files_lock_refuses_the_write_before_it_stops_half_do
 }
 
 #[test]
-// Verifies: ADR-0022, ADR-0023, G-13
+// Verifies: GIT-writes-what-git-writes, GIT-conflict-labels-path-safe, G-13
 fn a_criss_cross_merge_with_two_merge_bases_merges_as_git_merges_it() {
     // Two branches each merged into the other leave two merge bases; the writer reads every one,
     // and merges the tips as `git` does.

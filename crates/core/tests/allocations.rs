@@ -1,7 +1,7 @@
 //! What a load holds in memory, counted by a global allocator of this test binary alone.
 //!
-//! ADR-0015 keeps the layout's arena and its SHA index for the whole load at a few allocations
-//! per chunk, not several per commit; ADR-0020 and Q-3 keep the history the front ends read
+//! GRAPH-layout-pure-functions-by-chunk keeps the layout's arena and its SHA index for the whole load at a few allocations
+//! per chunk, not several per commit; GRAPH-core-serves-row-windows and Q-3 keep the history the front ends read
 //! compact. A history of 30 000 commits in chunks of 3 000 is laid out and taken in, and what
 //! each holds afterwards is held to a budget.
 
@@ -95,7 +95,7 @@ fn history() -> Vec<CommitData> {
 }
 
 #[test]
-// Verifies: ADR-0015, ADR-0020, Q-3
+// Verifies: GRAPH-layout-pure-functions-by-chunk, GRAPH-core-serves-row-windows, Q-3
 fn a_load_holds_a_few_blocks_per_chunk_and_a_bounded_number_of_bytes_per_commit() {
     let chunks: Vec<Vec<CommitData>> = history().chunks(CHUNK_COMMITS).map(<[_]>::to_vec).collect();
     let n = chunks.len() as isize;
