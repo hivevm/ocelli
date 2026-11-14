@@ -11,9 +11,9 @@
 # accepted on the branch and then edited, an edit made while resolving a merge, a merge whose
 # resolution deletes an accepted ADR, an octopus merge that deletes one, a path with a space, and
 # a commit that names a normalization only in its text fail. The Status line flipped to
-# superseded, the Date line, a decider added, a proposed ADR, a merge from main, a commit carrying
-# the normalization's trailer, a branch's normalization merged into main, the template
-# repository, and a base of zeros, with main and without, pass.
+# superseded, the Date line, a decider added, a proposed ADR, a NUC- ADR of the base, a merge from
+# main, a commit carrying the normalization's trailer, a branch's normalization merged into main,
+# the template repository, and a base of zeros, with main and without, pass.
 #
 # Verifies: NUC-decisions-are-proposed-then-accepted
 # Inputs: scripts/check-adr-text.sh scripts/lib/
@@ -36,8 +36,8 @@ g() {
   git -C "${dir:?}" -c user.name=fixture -c user.email=fixture@example.invalid "$@"
 }
 
-# adr_id <n> — the identifier TST-decision-000n of the nth fixture ADR, assembled so that this file
-# carries no literal one: a normalization's map rewrites every literal one in the tree.
+# adr_id <n> — the identifier TST-decision-000n of the nth fixture ADR. TST is a category no index
+# defines, so the documentation checks read no citation in this file.
 adr_id() { printf "TST-decision-%04d" "$1"; }
 
 # adr <dir> <number> <status> — an ADR in the form of docs/adr/template.md.
@@ -275,6 +275,18 @@ d="$(repo zeros-main)"
 edit "$d" "$A" 's/0001 takes/0001 takes now/' "Reword"
 expect 1 "a base of zeros with main to compare with" "$d" "changes 2 lines of $(adr_id 1)" \
   0000000000000000000000000000000000000000
+
+# The base ADR's file, assembled so that the documentation checks read no citation of it here.
+nuc="NUC"
+B="docs/adr/$nuc-base-rule.md"
+d="$(repo base)"
+mkdir -p "$d/docs/adr"
+printf '# %s-base-rule: A rule\n\n- **Status:** 🟢 accepted\n\n## Decision\n\nOne.\n' "$nuc" > "$d/$B"
+g "$d" add -A
+g "$d" commit -q -m "Take up the base"
+g "$d" tag base-taken
+edit "$d" "$B" 's/One./Two./' "Take up a later release"
+expect 0 "the NUC- base, which a take-up replaces" "$d" "no accepted ADR's text changed" base-taken
 
 d="$(repo template)"
 echo "setup" > "$d/TEMPLATE-SETUP.md"

@@ -66,8 +66,9 @@ decision found outside a record with where it was found.
    hand what it lists as left, and the citations noted in the step before.
 4. Name every accepted ADR whose basis the change moves, and why. The human judges that list.
 5. Run [`scripts/check-all.sh`](../../../scripts/check-all.sh), commit on the normalization's
-   branch, `chore/normalize`, and hand the commit to the human with the map. The supersessions
-   and the record follow on the same branch once the human has confirmed it.
+   branch, `chore/normalize`, with the map in the commit body and, where the commit changes an
+   accepted ADR, the trailer the mechanics name, and hand the commit to the human with the map. The
+   supersessions and the record follow on the same branch once the human has confirmed it.
 
 ## 3. The supersessions
 
@@ -108,8 +109,9 @@ has agreed the cut.
 Hand the change to the [`review`](../review/SKILL.md) skill with the old record at the base
 commit, the map, and the clause table: the reviewer walks the table, reads each clause against the
 new ADR that carries it, and reports any decision that moved and any clause the table misses.
-Commit with the map in the commit body, and hand the branch to the human with both maps, the
-cut, the clause table, and the review in its hand-off. One pull request lands the branch
+Commit with the map in the commit body and the trailer the mechanics name, and hand the branch to
+the human with both maps, the cut, the clause table, and the review in its hand-off. One pull
+request lands the branch
 ([NUC-main-only-via-pr §4](../../../docs/adr/NUC-main-only-via-pr.md)).
 
 In the template, a release that merges, splits, or removes a `NUC-` ADR is a major, and its notes
