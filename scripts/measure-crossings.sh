@@ -27,7 +27,8 @@ here="$PWD"
 source "$(dirname "${BASH_SOURCE[0]}")/lib/root.sh"
 usage="scripts/measure-crossings.sh [--root <dir>] [<corpus>]"
 enter_root "${BASH_SOURCE[0]}" "$usage" "$@"
-set -- "${ARGS[@]}"
+# An empty list expanded so that bash 3.2, which the macOS build job runs, reads it under set -u.
+set -- ${ARGS[@]+"${ARGS[@]}"}
 rest_args "${BASH_SOURCE[0]}" "$usage" 1 "$@"
 [[ $# -eq 0 || "$1" == /* ]] || set -- "$here/$1"
 

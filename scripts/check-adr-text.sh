@@ -46,7 +46,8 @@ source "$(dirname "${BASH_SOURCE[0]}")/lib/root.sh"
 
 usage="scripts/check-adr-text.sh [--root <dir>] [<base> [<head>]]"
 enter_root "${BASH_SOURCE[0]}" "$usage" "$@"
-set -- "${ARGS[@]}"
+# An empty list expanded so that bash 3.2 reads it under set -u, as in the scripts macOS runs.
+set -- ${ARGS[@]+"${ARGS[@]}"}
 rest_args "${BASH_SOURCE[0]}" "$usage" 2 "$@"
 
 base="${1:-}"

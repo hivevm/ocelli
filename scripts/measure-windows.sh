@@ -28,7 +28,8 @@ set -uo pipefail
 source "$(dirname "${BASH_SOURCE[0]}")/lib/root.sh"
 usage="scripts/measure-windows.sh [--root <dir>] [--verdict <first-ms> <slowest-ms>]"
 enter_root "${BASH_SOURCE[0]}" "$usage" "$@"
-set -- "${ARGS[@]}"
+# An empty list expanded so that bash 3.2, which the macOS build job runs, reads it under set -u.
+set -- ${ARGS[@]+"${ARGS[@]}"}
 if [[ "${1:-}" == --verdict ]]; then
   rest_args "${BASH_SOURCE[0]}" "$usage" 2 "${@:2}"
   (($# == 3)) || { echo "measure-windows.sh: --verdict needs 2 values — usage: $usage" >&2; exit 2; }

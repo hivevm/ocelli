@@ -32,7 +32,8 @@ set -uo pipefail
 source "$(dirname "${BASH_SOURCE[0]}")/lib/root.sh"
 usage="scripts/measure-memory.sh [--root <dir>] [--verdict <empty-kb> <empty-kb> <loaded-kb> <loaded-kb>]"
 enter_root "${BASH_SOURCE[0]}" "$usage" "$@"
-set -- "${ARGS[@]}"
+# An empty list expanded so that bash 3.2, which the macOS build job runs, reads it under set -u.
+set -- ${ARGS[@]+"${ARGS[@]}"}
 if [[ "${1:-}" == --verdict ]]; then
   rest_args "${BASH_SOURCE[0]}" "$usage" 4 "${@:2}"
   (($# == 5)) || { echo "measure-memory.sh: --verdict needs 4 values — usage: $usage" >&2; exit 2; }

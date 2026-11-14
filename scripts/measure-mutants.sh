@@ -21,7 +21,8 @@ set -uo pipefail
 source "$(dirname "${BASH_SOURCE[0]}")/lib/root.sh"
 usage="scripts/measure-mutants.sh [--root <dir>]"
 enter_root "${BASH_SOURCE[0]}" "$usage" "$@"
-rest_args "${BASH_SOURCE[0]}" "$usage" 0 "${ARGS[@]}"
+# An empty list expanded so that bash 3.2 reads it under set -u, as in the scripts macOS runs.
+rest_args "${BASH_SOURCE[0]}" "$usage" 0 ${ARGS[@]+"${ARGS[@]}"}
 
 # A measurement takes minutes, and scripts/check-all.sh runs every script a workflow runs, so it
 # skips itself unless OCELLI_MEASURE_ALL=1, which .github/workflows/measure.yml sets.
