@@ -56,7 +56,6 @@ exclude=(
   --exclude-re 'refs\.rs:.* (replace|in) (load_[a-z_]+|default_remote|short|remote_names|split_remote_branch|merged|head_of|main_repo|dir_name|same_dir|submodule_state|find_parent|operation_of|stopped|conflicts_of)\b'
 )
 
-cd "$ROOT" || exit 1
 cargo mutants --package ocelli-git --file crates/git/src/guard.rs --file crates/git/src/remote.rs \
   --file crates/git/src/confine.rs --file crates/git/src/refs.rs \
   --test-package ocelli-git --test-package ocelli-server \
