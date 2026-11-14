@@ -169,7 +169,7 @@ measure() {
   return 1
 }
 
-bash "$ROOT/scripts/generate-history.sh" "$work/repo.git" "$commits" || { echo "memory: cannot generate the repository" >&2; exit 1; }
+bash "$ROOT/scripts/measure/generate-history.sh" "$work/repo.git" "$commits" || { echo "memory: cannot generate the repository" >&2; exit 1; }
 read -r _ empty1 < <(measure) && [[ -n "${empty1:-}" ]] || exit 1
 read -r _ empty2 < <(measure) && [[ -n "${empty2:-}" ]] || exit 1
 read -r loaded loaded1 < <(measure "$work/repo.git") && [[ -n "${loaded1:-}" ]] || exit 1

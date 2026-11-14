@@ -221,8 +221,7 @@ run "Window measurement self-test" scripts/test-measure-windows.sh
 # Not a gate: .github/workflows/release.yml
 # The measurements run weekly in .github/workflows/measure.yml: they clone real repositories,
 # build in release, and mutate the git adapter, so each skips itself here unless
-# OCELLI_MEASURE_ALL=1. generate-history.sh writes the histories they measure.
-# On instruction: scripts/generate-history.sh
+# OCELLI_MEASURE_ALL=1. scripts/measure/generate-history.sh writes the histories they measure.
 run "Edge crossings (Q-1)" scripts/measure-crossings.sh
 run "Waits on a large history (Q-2)" scripts/measure-windows.sh
 run "Desktop memory (Q-3)" scripts/measure-memory.sh

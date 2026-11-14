@@ -10,26 +10,17 @@
 #         every ninety-seventh commit is dated before the one before it, as a wrong clock does.
 #
 # Usage:
-#     scripts/generate-history.sh [--root <dir>] DIR COMMITS [SHAPE]
-# A relative DIR is read from the directory the script is started in.
-# Exit code 0 when the repository is written, 1 otherwise.
+#     scripts/measure/generate-history.sh DIR COMMITS [SHAPE]
+# A helper of the measurement scripts, which call it; it reads nothing of the repository, so it
+# lives below scripts/ and takes no --root.
+# Exit code 0 when the repository is written, 1 otherwise, 2 on wrong arguments.
 
 set -uo pipefail
 
-# The directory the repository is written to is read from where the script was started, before
-# enter_root moves to the repository root.
-here="$PWD"
-# shellcheck source-path=SCRIPTDIR source=lib/root.sh
-source "$(dirname "${BASH_SOURCE[0]}")/lib/root.sh"
-usage="scripts/generate-history.sh [--root <dir>] <dir> <commits> [line|wide]"
-enter_root "${BASH_SOURCE[0]}" "$usage" "$@"
-set -- "${ARGS[@]}"
-rest_args "${BASH_SOURCE[0]}" "$usage" 3 "$@"
-if (($# < 2)); then
-  echo "generate-history.sh: a directory and a number of commits are needed — usage: $usage" >&2
+if (($# < 2 || $# > 3)); then
+  echo "generate-history.sh: usage: scripts/measure/generate-history.sh <dir> <commits> [line|wide]" >&2
   exit 2
 fi
-[[ "$1" == /* ]] || set -- "$here/$1" "${@:2}"
 shape="${3:-line}"
 
 git init --quiet --bare "$1" || exit 1

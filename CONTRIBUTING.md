@@ -83,6 +83,7 @@ scripts/lib/          # what the scripts share: the bash floor (bash.sh), the AD
                       # takes it, as check-shell.sh checks; the plain rules (rules.sh), the
                       # self-tests (selftest.sh), the ticket path (ticket.sh)
 scripts/fixtures/     # the cases of a check as a table, which its self-test reads
+scripts/measure/      # what the measurement scripts call: generate-history.sh writes their histories
 scripts/*.sh          # run by hand, steps 7 and 8 of the integration branches: ready-for-main.sh,
                       # drop-merged-branch.sh
 .githooks/            # git hooks: nothing lands on main locally; checks before a commit, a merge,

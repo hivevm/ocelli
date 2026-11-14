@@ -159,9 +159,9 @@ golden path and the test pattern an agent copies from are named here.
   Q-2, `scripts/measure-windows.sh` runs its `windows` measurement on a generated history of a
   million commits with thirty branch lines side by side and some dates running backwards: the wait
   for the first window of rows, for the slowest chunk taken in while the rest loads, and for the
-  slowest window across the loaded history; `scripts/generate-history.sh` writes the generated
-  histories of Q-2 and Q-3. `scripts/measure-mutants.sh` changes the git adapter's guards in
-  `guard.rs`, `remote.rs`, and `confine.rs`, and the turns' `common_dir` and `refs_digest` in
+  slowest window across the loaded history; `scripts/measure/generate-history.sh` writes the
+  generated histories of Q-2 and Q-3. `scripts/measure-mutants.sh` changes the git adapter's guards
+  in `guard.rs`, `remote.rs`, and `confine.rs`, and the turns' `common_dir` and `refs_digest` in
   `refs.rs`, one mutant at a time and lists each one the suites of the git adapter and the remote
   server let through. All four run weekly and on demand in `.github/workflows/measure.yml`, not in
   the checks ([ARCH-rust-core-typescript-web](adr/ARCH-rust-core-typescript-web.md)); the checks run

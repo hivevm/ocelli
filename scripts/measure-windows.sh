@@ -2,7 +2,7 @@
 #
 # Measures Q-2 (feature spec #27): how long a developer waits on a generated repository of a
 # million commits, thirty branch lines side by side and some dates running backwards (the wide
-# shape of scripts/generate-history.sh). Verifies: Q-2, GRAPH-history-loads-in-chunks
+# shape of scripts/measure/generate-history.sh). Verifies: Q-2, GRAPH-history-loads-in-chunks
 #
 # ocelli-measure loads the whole history as the front ends do, chunk by chunk through the
 # repository port into the core's History, and reports the time from opening the repository until
@@ -79,7 +79,7 @@ fi
 work="$(mktemp -d)"
 trap 'rm -rf "$work"' EXIT
 
-bash "$ROOT/scripts/generate-history.sh" "$work/repo.git" "$commits" wide \
+bash "$ROOT/scripts/measure/generate-history.sh" "$work/repo.git" "$commits" wide \
   || { echo "windows: cannot generate the repository" >&2; exit 1; }
 out="$("$measure" windows "$work/repo.git" 2>&1)" \
   || { echo "windows: cannot measure the repository:" >&2; indent <<< "$out" >&2; exit 1; }
