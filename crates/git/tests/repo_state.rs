@@ -2,8 +2,8 @@
     clippy::disallowed_methods,
     reason = "a test sets a repository up by hand, the way a developer would"
 )]
-// Verifies: ADR-0035
-//! Fixture tests for the repository-state read behind the sidebar (ADR-0035):
+// Verifies: VIEW-repository-sidebar
+//! Fixture tests for the repository-state read behind the sidebar (VIEW-repository-sidebar):
 //! submodules, working trees, and the way back to the parent.
 //!
 //! These cannot be unit tests — a submodule and a linked worktree only exist as
@@ -59,7 +59,7 @@ fn commit_all(repo: &Repository, message: &str) {
 
 /// A superproject with `vendor/child` as a checked-out submodule, cloned from a
 /// second repository in the same scratch directory. Local paths only — the
-/// clone is a filesystem copy, never egress (ADR-0033).
+/// clone is a filesystem copy, never egress (SEC-no-egress-hardened-webview).
 fn superproject_with_submodule(scratch: &Scratch) -> (PathBuf, PathBuf) {
     let child_path = scratch.0.join("child");
     repo_with_a_commit(&child_path, "child.txt");
@@ -126,7 +126,7 @@ fn a_superproject_lists_its_submodule_with_a_path_to_open() {
 
 /// A fresh clone has the submodule configured but never checked out. That row
 /// has nothing to open and must say so rather than pointing at a path that does
-/// not exist — the viewer will not clone it (ADR-0033).
+/// not exist — the viewer will not clone it (SEC-no-egress-hardened-webview).
 #[test]
 fn a_never_initialized_submodule_offers_no_path() {
     let scratch = Scratch::new("uninit");

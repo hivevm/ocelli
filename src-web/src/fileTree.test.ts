@@ -1,4 +1,4 @@
-// Verifies: ADR-0034
+// Verifies: VIEW-diff-overlay-and-file-list
 import { describe, expect, test } from 'bun:test';
 import { buildFileTree, type TreeDirNode, type TreeNode } from './fileTree.ts';
 import type { FileChange } from './types.ts';
@@ -28,7 +28,7 @@ describe('buildFileTree', () => {
   });
 
   test('single-child folder chains are collapsed into one row', () => {
-    // ADR-0034: "src/web" instead of "src" > "web".
+    // VIEW-diff-overlay-and-file-list: "src/web" instead of "src" > "web".
     const tree = buildFileTree([change('src/web/main.ts')]);
     expect(dirs(tree).map((d) => d.name)).toEqual(['src/web']);
     expect(shape(tree)).toEqual(['dir:src/web(1)', '  file:main.ts']);

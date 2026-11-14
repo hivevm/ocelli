@@ -1,4 +1,4 @@
-// Verifies: ADR-0020, G-7
+// Verifies: GRAPH-core-serves-row-windows, G-7
 import { describe, expect, test } from 'bun:test';
 import { windowToAsk } from './rowWindow.ts';
 

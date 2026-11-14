@@ -2,7 +2,7 @@
 #
 # Measures Q-2 (feature spec #27): how long a developer waits on a generated repository of a
 # million commits, thirty branch lines side by side and some dates running backwards (the wide
-# shape of scripts/generate-history.sh). Verifies: Q-2, ADR-0018
+# shape of scripts/measure/generate-history.sh). Verifies: Q-2, GRAPH-history-loads-in-chunks
 #
 # ocelli-measure loads the whole history as the front ends do, chunk by chunk through the
 # repository port into the core's History, and reports the time from opening the repository until
@@ -15,8 +15,8 @@
 # a table, and appends it to the job summary when GITHUB_STEP_SUMMARY is set.
 #
 # Usage:
-#     scripts/measure-windows.sh
-#     scripts/measure-windows.sh --verdict FIRST_MS SLOWEST_MS   (the verdict only)
+#     scripts/measure-windows.sh [--root <dir>]
+#     scripts/measure-windows.sh [--root <dir>] --verdict FIRST_MS SLOWEST_MS   (the verdict only)
 # Environment, all optional: OCELLI_MEASURE, the binary (built here in release when unset);
 # OCELLI_WINDOWS_COMMITS, the size of the repository (1000000); OCELLI_FIRST_LIMIT_MS, the limit
 # of the first window (2000); OCELLI_WINDOW_LIMIT_MS, the limit of every window (100).
@@ -24,7 +24,18 @@
 
 set -uo pipefail
 
-ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# shellcheck source-path=SCRIPTDIR source=lib/root.sh
+source "$(dirname "${BASH_SOURCE[0]}")/lib/root.sh"
+usage="scripts/measure-windows.sh [--root <dir>] [--verdict <first-ms> <slowest-ms>]"
+enter_root "${BASH_SOURCE[0]}" "$usage" "$@"
+# An empty list expanded so that bash 3.2, which the macOS build job runs, reads it under set -u.
+set -- ${ARGS[@]+"${ARGS[@]}"}
+if [[ "${1:-}" == --verdict ]]; then
+  rest_args "${BASH_SOURCE[0]}" "$usage" 2 "${@:2}"
+  (($# == 3)) || { echo "measure-windows.sh: --verdict needs 2 values — usage: $usage" >&2; exit 2; }
+else
+  rest_args "${BASH_SOURCE[0]}" "$usage" 0 "$@"
+fi
 
 # A measurement takes minutes, and scripts/check-all.sh runs every script a workflow runs, so it
 # skips itself unless OCELLI_MEASURE_ALL=1, which .github/workflows/measure.yml sets; the verdict
@@ -69,7 +80,7 @@ fi
 work="$(mktemp -d)"
 trap 'rm -rf "$work"' EXIT
 
-bash "$ROOT/scripts/generate-history.sh" "$work/repo.git" "$commits" wide \
+bash "$ROOT/scripts/measure/generate-history.sh" "$work/repo.git" "$commits" wide \
   || { echo "windows: cannot generate the repository" >&2; exit 1; }
 out="$("$measure" windows "$work/repo.git" 2>&1)" \
   || { echo "windows: cannot measure the repository:" >&2; indent <<< "$out" >&2; exit 1; }

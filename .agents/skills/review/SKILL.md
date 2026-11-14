@@ -7,7 +7,7 @@ description: Review a change in a fresh context before its hand-off. Use when a 
 
 The rule is [`AGENTS.md` §5](../../../AGENTS.md#5-quality-bar--definition-of-done). This skill is
 what the reviewer is given and the order in which it reports; it states no rule of its own
-([ADR-0003](../../../docs/adr/0003-procedures-as-skills.md)).
+([NUC-procedures-are-skills §3](../../../docs/adr/NUC-procedures-are-skills.md)).
 
 ## 1. Inputs — and nothing else
 
@@ -17,17 +17,17 @@ The reviewer runs in a context that did not write the change and is handed only:
 - the task: the ticket or the request, with its acceptance criteria;
 - [`AGENTS.md` §1](../../../AGENTS.md#1-principles) and
   [§5](../../../AGENTS.md#5-quality-bar--definition-of-done);
-- the *Doubts* section of the hand-off draft under `.scratch/`, the pull request description or
-  merge message that fills the sections of the pull request template
-  ([`AGENTS.md` §6](../../../AGENTS.md#6-project-rules)): what the implementer disagreed with
-  and what it could not confirm;
+- the *Doubts* section of the hand-off draft under `.scratch/`, the pull request description that
+  fills the sections of the pull request template
+  ([NUC-main-only-via-pr §5](../../../docs/adr/NUC-main-only-via-pr.md)): what the implementer
+  disagreed with, what it was unsure of, what it could not confirm, and what a derived project
+  acts on;
 - [`docs/CONVENTIONS.md`](../../../docs/CONVENTIONS.md);
 - the golden path named in [`docs/ARCHITECTURE.md`](../../../docs/ARCHITECTURE.md);
 - the ADRs in force whose *Applies to* the diff touches: those that name a path of the diff, as
   [`scripts/sensor-binding-adrs.sh`](../../../scripts/sensor-binding-adrs.sh) `--sections`
   lists them with the parts a session reads, and those whose *Applies to* is prose, which it
-  prints from the **Binding** table of
-  [`docs/adr/README.md`](../../../docs/adr/README.md#binding);
+  prints from the ADR files, the `NUC-` ones included;
 - for each of those ADRs that chose a concept of the catalogue in
   [`propose-adr`](../propose-adr/concepts/README.md), that entry's *Does not fit* and *The rule a
   test decides*: what the tests decide is checked there, and the rest is checked here;
@@ -35,7 +35,7 @@ The reviewer runs in a context that did not write the change and is handed only:
   [`scripts/check-all.sh`](../../../scripts/check-all.sh) `--verbose`, whose tests-kept sensor
   lists the test files deleted and the skip markers added since the base;
 - for a normalization, its map and its clause table, and the record at the base commit
-  ([`AGENTS.md` §3](../../../AGENTS.md#3-adr-rules), rule 5).
+  ([NUC-decisions-are-proposed-then-accepted §8](../../../docs/adr/NUC-decisions-are-proposed-then-accepted.md)).
 
 A light review ([`AGENTS.md` §5](../../../AGENTS.md#5-quality-bar--definition-of-done)) is
 handed the diff, the task, the doubts, and that output, and nothing else. It judges whether every
@@ -72,8 +72,11 @@ of the tests, also whether they take their expected values from the criterion ra
 the code under test. Then the conventions, the ADRs, and the sensor output; a sensor finding the
 implementer suppressed is a finding here. Of each statement the change adds to the rules, whether
 it is one sentence ([`AGENTS.md` §4](../../../AGENTS.md#4-working-style)). Last, the
-*Doubts*: each disagreement checked against its evidence, each unconfirmed point confirmed or left
-open by name. A "none" is checked like any other claim.
+*Doubts*, in their four fields: each point under *Disagreed* checked against its evidence, each
+under *Unsure* settled or left to the human by name, each under *Could not confirm* confirmed or
+left open by name, and *A derived project acts on* checked against the diff: a changed interface
+of a script, a check that newly reaches a project's own files, a moved key, or a removed file that
+it does not name is a finding. A "none" is checked like any other claim.
 
 ## 3. Tests that changed
 
@@ -86,14 +89,15 @@ the suite and is the first finding.
 Findings, concrete and ranked, with file and line, and what the reviewer itself could not verify:
 each finding that must be fixed before the hand-off with its scenario, a lesser one a line, and no
 account of what is in order. No fixes applied. The implementer fixes the first kind before the
-hand-off, and a lesser one it fixes or names in the hand-off's *Doubts*. On a branch that integrates
-on a `feat/` branch, a fix that corrects one commit is a fixup of it (`git commit --fixup=<commit>`,
-its body saying what the finding was), so the rework folds it in by `git rebase -i --autosquash`
-([Integration branches](../../../CONTRIBUTING.md#integration-branches), step 4) instead of by hand.
-A fix that spans commits, and every fix on a branch whose own pull request goes into `main`, which
-keeps what it merges, is a commit of its own. It records in its *Review* section who reviewed, the
-findings on both axes, what was fixed, and the commit the reviewer was handed, on its `Reviewed at:`
-line. The fixes come after that commit;
+hand-off, and a lesser one it fixes or names in the hand-off's *Doubts*. On a `feat/` branch and
+on a branch that integrates on one, a fix that corrects one commit is a fixup of it
+(`git commit --fixup=<commit>`, its body saying what the finding was). The rework folds it in by
+`git rebase -i --autosquash`, at the latest when the `feat/` branch is rebuilt by topic
+([Integration branches](../../../CONTRIBUTING.md#integration-branches), steps 4 and 7), instead
+of by hand. A fix that spans commits is a commit of its own, and so is every fix on any other
+branch, since `main` keeps what it merges. The hand-off records in its *Review* section who
+reviewed, the findings on both axes, what was fixed, and the commit the reviewer was handed, on its
+`Reviewed at:` line. The fixes come after that commit;
 [`scripts/sensor-review-binding.sh`](../../../scripts/sensor-review-binding.sh) lists them for the
 human who decides the merge, unless a second review sees them first and the line moves. After a
 rework, the pull request's description carries that line.

@@ -1,4 +1,4 @@
-// Verifies: ADR-0034
+// Verifies: VIEW-diff-overlay-and-file-list
 import { describe, expect, test } from 'bun:test';
 import { toSplitRows } from './diffSplit.ts';
 import type { DiffLine, DiffLineKind } from './types.ts';

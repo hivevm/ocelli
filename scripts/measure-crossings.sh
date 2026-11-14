@@ -2,7 +2,7 @@
 #
 # Measures Q-1 on the corpus of feature spec #11: for each repository, the edge crossings in
 # Ocelli's layout, by ocelli-measure, against the count recorded for its fixed commit.
-# Verifies: Q-1, ADR-0016
+# Verifies: Q-1, GRAPH-main-line-leftmost-lane
 #
 # Each repository is fetched at a fixed commit as a single ref, history only and no file contents,
 # so the measurement sees the same commits every week; the ref is checked out, as in a clone, so
@@ -13,7 +13,7 @@
 # any repository, or a repository cannot be fetched or measured.
 #
 # Usage:
-#     scripts/measure-crossings.sh [CORPUS]
+#     scripts/measure-crossings.sh [--root <dir>] [CORPUS]
 # CORPUS is a file of lines '<name> <url> <commit> <recorded crossings>' and defaults to the corpus
 # below; a recorded count changes only with a decision about the layout. The binary
 # is OCELLI_MEASURE, or built here with cargo when that is unset.
@@ -21,7 +21,16 @@
 
 set -uo pipefail
 
-ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# A corpus file named relative is read from where the script was started.
+here="$PWD"
+# shellcheck source-path=SCRIPTDIR source=lib/root.sh
+source "$(dirname "${BASH_SOURCE[0]}")/lib/root.sh"
+usage="scripts/measure-crossings.sh [--root <dir>] [<corpus>]"
+enter_root "${BASH_SOURCE[0]}" "$usage" "$@"
+# An empty list expanded so that bash 3.2, which the macOS build job runs, reads it under set -u.
+set -- ${ARGS[@]+"${ARGS[@]}"}
+rest_args "${BASH_SOURCE[0]}" "$usage" 1 "$@"
+[[ $# -eq 0 || "$1" == /* ]] || set -- "$here/$1"
 
 # A measurement takes minutes, and scripts/check-all.sh runs every script a workflow runs, so it
 # skips itself unless OCELLI_MEASURE_ALL=1, which .github/workflows/measure.yml sets.
@@ -88,7 +97,7 @@ while read -r name url commit recorded; do
     failed+=("$name")
     continue
   fi
-  # A layout without the main line is one no front end shows (ADR-0016): no measurement at all.
+  # A layout without the main line is one no front end shows (GRAPH-main-line-leftmost-lane): no measurement at all.
   if [[ -z "$main_line" || "$main_line" == none ]]; then
     echo "measure: $name has no main line to lay out, so its layout is not the one the front ends show" >&2
     failed+=("$name")

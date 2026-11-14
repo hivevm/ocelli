@@ -1,21 +1,27 @@
 #!/usr/bin/env bash
 #
-# Checks that the Dev Container carries the toolchain ADR-0010 decides:
+# Checks that the Dev Container carries the toolchain DEV-container-from-dockerfile decides:
 #   1. devcontainer.json builds from .devcontainer/Dockerfile instead of naming an image;
 #   2. the Dockerfile starts from mcr.microsoft.com/devcontainers/base:debian and installs the
 #      desktop host's Linux build library WebKitGTK (libwebkit2gtk-4.1-dev);
-#   3. devcontainer.json adds the Rust and the Bun Features (ADR-0008); that they are pinned and
-#      locked is scripts/check-devcontainer.sh's to check (ADR-0004);
+#   3. devcontainer.json adds the Rust and the Bun Features (ARCH-rust-core-typescript-web); that they are pinned and
+#      locked is scripts/check-devcontainer.sh's to check (NUC-container-hides-host-daemon §3);
 #   4. rust-toolchain.toml pins a channel.
 # Comment lines ('//' in the JSON, '#' in the Dockerfile) are ignored.
 #
 # Usage:
-#     scripts/check-devcontainer-toolchain.sh [ROOT]   (ROOT defaults to the repository)
+#     scripts/check-devcontainer-toolchain.sh [--root <dir>]   (the root defaults to the repository)
 # Exit code 0 when the toolchain is there, 1 otherwise.
 
 set -uo pipefail
 
-ROOT="$(cd "${1:-$(dirname "${BASH_SOURCE[0]}")/..}" && pwd)"
+# shellcheck source-path=SCRIPTDIR source=lib/root.sh
+source "$(dirname "${BASH_SOURCE[0]}")/lib/root.sh"
+usage="scripts/check-devcontainer-toolchain.sh [--root <dir>]"
+enter_root "${BASH_SOURCE[0]}" "$usage" "$@"
+# The build job runs this script on macOS with the bash the system ships, 3.2, where an empty array
+# expanded whole is unbound under set -u; the form below expands to nothing there.
+rest_args "${BASH_SOURCE[0]}" "$usage" 0 ${ARGS[@]+"${ARGS[@]}"}
 CONFIG="$ROOT/.devcontainer/devcontainer.json"
 DOCKERFILE="$ROOT/.devcontainer/Dockerfile"
 TOOLCHAIN="$ROOT/rust-toolchain.toml"

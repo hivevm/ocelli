@@ -1,4 +1,4 @@
-// Verifies: ADR-0033, ADR-0036, G-18
+// Verifies: SEC-no-egress-hardened-webview, API-websocket-per-tab, G-18
 import { describe, expect, test } from 'bun:test';
 import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';

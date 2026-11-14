@@ -1,7 +1,7 @@
 //! The operations of G-13 a commit offers on the checked-out branch, decided once for both front
-//! ends (ADR-0022): which of merging it in, rebasing onto it, cherry-picking it, reverting it,
+//! ends (GIT-writes-what-git-writes): which of merging it in, rebasing onto it, cherry-picking it, reverting it,
 //! and resetting to it make sense, each with the write it hands the writer. The desktop host sends
-//! the answer to the web interface as `Offered`, which it restates none of (ADR-0028).
+//! the answer to the web interface as `Offered`, which it restates none of (API-host-answers-core-decisions).
 
 use crate::model::RepoRefs;
 use crate::port::{ResetMode, Write};
@@ -115,7 +115,7 @@ mod tests {
     }
 
     #[test]
-    // Verifies: ADR-0022, G-13
+    // Verifies: GIT-writes-what-git-writes, G-13
     fn a_commit_offers_what_changes_the_checked_out_branch_and_a_merge_is_named_after_its_branch() {
         let refs = RepoRefs {
             locals: vec![local("main", "h", true), local("topic", "t", false)],
@@ -141,7 +141,7 @@ mod tests {
     }
 
     #[test]
-    // Verifies: ADR-0028, ADR-0022
+    // Verifies: API-host-answers-core-decisions, GIT-writes-what-git-writes
     fn the_operations_offered_serialize_as_their_writes_or_a_reason() {
         let refs = RepoRefs {
             locals: vec![local("main", "h", true)],

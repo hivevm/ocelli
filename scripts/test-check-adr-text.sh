@@ -11,11 +11,11 @@
 # accepted on the branch and then edited, an edit made while resolving a merge, a merge whose
 # resolution deletes an accepted ADR, an octopus merge that deletes one, a path with a space, and
 # a commit that names a normalization only in its text fail. The Status line flipped to
-# superseded, the Date line, a decider added, a proposed ADR, a merge from main, a commit carrying
-# the normalization's trailer, a branch's normalization merged into main, the template
-# repository, and a base of zeros, with main and without, pass.
+# superseded, the Date line, a decider added, a proposed ADR, a NUC- ADR of the base, a merge from
+# main, a commit carrying the normalization's trailer, a branch's normalization merged into main,
+# the template repository, and a base of zeros, with main and without, pass.
 #
-# Verifies: ADR-0001
+# Verifies: NUC-decisions-are-proposed-then-accepted
 # Inputs: scripts/check-adr-text.sh scripts/lib/
 #
 # Usage:
@@ -36,15 +36,15 @@ g() {
   git -C "${dir:?}" -c user.name=fixture -c user.email=fixture@example.invalid "$@"
 }
 
-# adr_id <n> — the identifier ADR-000n, assembled so that this file carries no literal one: a
-# normalization rewrites every literal one in the tree.
-adr_id() { printf "ADR-%04d" "$1"; }
+# adr_id <n> — the identifier TST-decision-000n of the nth fixture ADR. TST is a category no index
+# defines, so the documentation checks read no citation in this file.
+adr_id() { printf "TST-decision-%04d" "$1"; }
 
 # adr <dir> <number> <status> — an ADR in the form of docs/adr/template.md.
 adr() {
   mkdir -p "$1/docs/adr"
-  cat > "$1/docs/adr/$2-decision-$2.md" <<ADR
-# ADR-$2: Decision $2
+  cat > "$1/docs/adr/TST-decision-$2.md" <<ADR
+# TST-decision-$2: Decision $2
 
 - **Status:** $3
 - **Date:** 2026-11-01
@@ -68,7 +68,7 @@ repo() {
   mkdir -p "$dir"
   git -C "${dir:?}" init -q -b main
   adr "$dir" 0001 "🟢 accepted"
-  adr "$dir" 0002 "⚪ superseded by [$(adr_id 1)](0001-decision-0001.md)"
+  adr "$dir" 0002 "⚪ superseded by [$(adr_id 1)](TST-decision-0001.md)"
   adr "$dir" 0003 "🟡 proposed"
   g "$dir" add -A
   g "$dir" commit -q -m "initial"
@@ -105,7 +105,7 @@ expect() {
   while IFS= read -r l; do printf '    %s\n' "$l"; done <<< "$out" >&2
 }
 
-A=docs/adr/0001-decision-0001.md
+A=docs/adr/TST-decision-0001.md
 
 d="$(repo sentence)"
 edit "$d" "$A" 's/The decision 0001 takes./The decision 0001 takes, and more./' "Reword"
@@ -122,7 +122,7 @@ edit "$d" "$A" 's/^- \*\*Applies to:\*\* everything/- **Applies to:** something/
 expect 1 "another header line of an accepted ADR" "$d" "the first at line 6: -- **Applies to:** everything"
 
 d="$(repo superseded)"
-edit "$d" docs/adr/0002-decision-0002.md 's/The decision 0002 takes./Taken back./' "Reword"
+edit "$d" docs/adr/TST-decision-0002.md 's/The decision 0002 takes./Taken back./' "Reword"
 expect 1 "a superseded ADR, accepted before" "$d" "changes 2 lines of $(adr_id 2)"
 
 d="$(repo deleted)"
@@ -131,12 +131,12 @@ g "$d" commit -q -m "Drop"
 expect 1 "an accepted ADR deleted" "$d" "deletes $(adr_id 1) ($A), which is accepted"
 
 d="$(repo renamed)"
-g "$d" mv "$A" docs/adr/0004-decision-0001.md
-g "$d" commit -q -m "Renumber"
-expect 1 "an accepted ADR renumbered outside a normalization" "$d" "deletes $(adr_id 1)"
+g "$d" mv "$A" docs/adr/TST-decision-0004.md
+g "$d" commit -q -m "Rename"
+expect 1 "an accepted ADR renamed outside a normalization" "$d" "deletes $(adr_id 1)"
 
 d="$(repo later)"
-edit "$d" docs/adr/0003-decision-0003.md 's/0003 takes/0003 takes now/' "Fine"
+edit "$d" docs/adr/TST-decision-0003.md 's/0003 takes/0003 takes now/' "Fine"
 edit "$d" "$A" 's/0001 takes/0001 takes now/' "Second"
 echo "notes" > "$d/NOTES.md"
 g "$d" add -A
@@ -144,8 +144,8 @@ g "$d" commit -q -m "Third"
 expect 1 "the commit that changes it named among others" "$d" "$(g "$d" rev-parse --short HEAD~1) changes"
 
 d="$(repo status)"
-edit "$d" docs/adr/0003-decision-0003.md 's/🟡 proposed/🟢 accepted/; s/2026-11-01/2026-11-04/' "Accept"
-edit "$d" "$A" "s/🟢 accepted/⚪ superseded by [$(adr_id 3)](0003-decision-0003.md)/; s/2026-11-01/2026-11-04/" \
+edit "$d" docs/adr/TST-decision-0003.md 's/🟡 proposed/🟢 accepted/; s/2026-11-01/2026-11-04/' "Accept"
+edit "$d" "$A" "s/🟢 accepted/⚪ superseded by [$(adr_id 3)](TST-decision-0003.md)/; s/2026-11-01/2026-11-04/" \
   "Supersede"
 expect 0 "the Status and Date lines flipped" "$d" "no accepted ADR's text changed"
 
@@ -154,12 +154,12 @@ edit "$d" "$A" 's/^- \*\*Deciders:\*\* Markus Brigl/- **Deciders:** Markus Brigl
 expect 0 "a decider added" "$d" "no accepted ADR's text changed"
 
 d="$(repo proposed)"
-edit "$d" docs/adr/0003-decision-0003.md 's/The decision 0003 takes./Another decision./' "Revise"
+edit "$d" docs/adr/TST-decision-0003.md 's/The decision 0003 takes./Another decision./' "Revise"
 expect 0 "the text of a proposed ADR" "$d" "no accepted ADR's text changed"
 
 d="$(repo normalization)"
-g "$d" mv "$A" docs/adr/0004-decision-0001.md
-edit "$d" docs/adr/0004-decision-0001.md "s/$(adr_id 1)/$(adr_id 4)/" "docs: normalize the record" \
+g "$d" mv "$A" docs/adr/TST-decision-0004.md
+edit "$d" docs/adr/TST-decision-0004.md "s/$(adr_id 1)/$(adr_id 4)/" "docs: normalize the record" \
   "Map: $(adr_id 1) -> $(adr_id 4)" "Normalization: 2026-11-04"
 expect 0 "a normalization's commit with its trailer" "$d" "no accepted ADR's text changed"
 
@@ -169,8 +169,8 @@ edit "$d" "$A" 's/0001 takes/0001 takes now/' "docs: Normalization: 2026-11-04 i
 expect 1 "a normalization named in the text, no trailer" "$d" "changes 2 lines of $(adr_id 1)"
 
 d="$(repo flipped-then-edited)"
-edit "$d" docs/adr/0003-decision-0003.md 's/🟡 proposed/🟢 accepted/' "Accept"
-edit "$d" docs/adr/0003-decision-0003.md 's/0003 takes/0003 takes now/' "Then reword"
+edit "$d" docs/adr/TST-decision-0003.md 's/🟡 proposed/🟢 accepted/' "Accept"
+edit "$d" docs/adr/TST-decision-0003.md 's/0003 takes/0003 takes now/' "Then reword"
 expect 1 "an ADR accepted on the branch, then edited" "$d" "changes 2 lines of $(adr_id 3)"
 
 d="$(repo status-reworded)"
@@ -193,17 +193,17 @@ expect 1 "a line that begins like a diff's own header" "$d" "$(g "$d" rev-parse 
 
 d="$(repo spaced)"
 adr "$d" 0004 "🟢 accepted"
-mv "$d/docs/adr/0004-decision-0004.md" "$d/docs/adr/0004-a decision.md"
+mv "$d/docs/adr/TST-decision-0004.md" "$d/docs/adr/TST-a decision.md"
 g "$d" add -A
 g "$d" commit -q -m "Accept 0004"
-edit "$d" "docs/adr/0004-a decision.md" 's/0004 takes/0004 takes now/' "Reword"
-expect 1 "an accepted ADR whose file name holds a space" "$d" "$(adr_id 4) (docs/adr/0004-a decision.md)"
+edit "$d" "docs/adr/TST-a decision.md" 's/0004 takes/0004 takes now/' "Reword"
+expect 1 "an accepted ADR whose file name holds a space" "$d" "TST-a decision (docs/adr/TST-a decision.md)"
 
 d="$(repo merged)"
 g "$d" switch -q main
-edit "$d" docs/adr/0003-decision-0003.md 's/🟡 proposed/🟢 accepted/' "Accept 0003 on main"
+edit "$d" docs/adr/TST-decision-0003.md 's/🟡 proposed/🟢 accepted/' "Accept 0003 on main"
 g "$d" switch -q work
-edit "$d" docs/adr/0003-decision-0003.md 's/^The context of decision 0003./The context, revised./' "Revise"
+edit "$d" docs/adr/TST-decision-0003.md 's/^The context of decision 0003./The context, revised./' "Revise"
 g "$d" merge -q --no-edit main > /dev/null
 expect 0 "a merge from main that accepts an ADR the branch revised before" "$d" \
   "no accepted ADR's text changed"
@@ -223,7 +223,7 @@ d="$(repo merged-normalization)"
 g "$d" switch -q main
 edit "$d" "$A" 's/0001 takes/0001 takes, restated/' "docs: normalize the record" "Normalization: 2026-11-04"
 g "$d" switch -q work
-edit "$d" docs/adr/0003-decision-0003.md 's/0003 takes/0003 takes now/' "Revise"
+edit "$d" docs/adr/TST-decision-0003.md 's/0003 takes/0003 takes now/' "Revise"
 g "$d" merge -q --no-edit main > /dev/null
 g "$d" tag base-of-merge HEAD~1
 expect 0 "a merge that brings main's normalization along" "$d" "no accepted ADR's text changed" \
@@ -237,7 +237,7 @@ g "$d" merge -q --no-ff --no-edit work > /dev/null
 expect 0 "a branch's normalization merged into main" "$d" "as a normalization, by their trailer"
 
 d="$(repo resolution-deletes)"
-edit "$d" docs/adr/0003-decision-0003.md 's/0003 takes/0003 takes now/' "Revise"
+edit "$d" docs/adr/TST-decision-0003.md 's/0003 takes/0003 takes now/' "Revise"
 g "$d" switch -q main
 g "$d" merge -q --no-ff --no-commit work > /dev/null 2>&1
 g "$d" rm -q "$A"
@@ -250,7 +250,7 @@ echo "notes" > "$d/notes.txt"
 g "$d" add notes.txt
 g "$d" commit -q -m "Notes"
 g "$d" switch -q -c side main
-edit "$d" docs/adr/0003-decision-0003.md 's/0003 takes/0003 takes on the side/' "Side"
+edit "$d" docs/adr/TST-decision-0003.md 's/0003 takes/0003 takes on the side/' "Side"
 g "$d" switch -q main
 g "$d" merge -q --no-ff --no-commit work side > /dev/null 2>&1
 g "$d" rm -q "$A"
@@ -264,7 +264,7 @@ echo "notes" > "$d/notes.txt"
 g "$d" add notes.txt
 g "$d" commit -q -m "Notes"
 g "$d" switch -q -c side main
-edit "$d" docs/adr/0003-decision-0003.md 's/0003 takes/0003 takes on the side/' "Side"
+edit "$d" docs/adr/TST-decision-0003.md 's/0003 takes/0003 takes on the side/' "Side"
 g "$d" switch -q main
 g "$d" merge -q --no-ff --no-commit work side > /dev/null 2>&1
 edit "$d" "$A" 's/0001 takes/0001 takes now/' "Octopus"
@@ -275,6 +275,18 @@ d="$(repo zeros-main)"
 edit "$d" "$A" 's/0001 takes/0001 takes now/' "Reword"
 expect 1 "a base of zeros with main to compare with" "$d" "changes 2 lines of $(adr_id 1)" \
   0000000000000000000000000000000000000000
+
+# The base ADR's file, assembled so that the documentation checks read no citation of it here.
+nuc="NUC"
+B="docs/adr/$nuc-base-rule.md"
+d="$(repo base)"
+mkdir -p "$d/docs/adr"
+printf '# %s-base-rule: A rule\n\n- **Status:** 🟢 accepted\n\n## Decision\n\nOne.\n' "$nuc" > "$d/$B"
+g "$d" add -A
+g "$d" commit -q -m "Take up the base"
+g "$d" tag base-taken
+edit "$d" "$B" 's/One./Two./' "Take up a later release"
+expect 0 "the NUC- base, which a take-up replaces" "$d" "no accepted ADR's text changed" base-taken
 
 d="$(repo template)"
 echo "setup" > "$d/TEMPLATE-SETUP.md"

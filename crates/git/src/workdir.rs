@@ -1,5 +1,5 @@
 //! Every libgit2 call that writes the working directory, each behind the one guard
-//! (ADR-0022, ADR-0023). libgit2 follows a link it meets where it expects a directory, and where
+//! (GIT-writes-what-git-writes, GIT-conflict-labels-path-safe). libgit2 follows a link it meets where it expects a directory, and where
 //! the index does not hold a link as one it writes a file through it, out of the repository
 //! perhaps; it opens a conflicted path to write a side of the conflict there, and writes a side of
 //! a conflict between a file and a directory, or between two renames, under the path with `~` and
@@ -112,7 +112,7 @@ fn windows_refuses(name: &[u8]) -> bool {
 /// path of its own, on every system: libgit2 appends the label to the conflicted path and creates
 /// every directory the result names, so a label holding a separator or `..`, a control character,
 /// a NUL, or a character Windows does not take in a name, or one longer than a name a file system
-/// takes, could write a side anywhere writable or stop the write half done (ADR-0023).
+/// takes, could write a side anywhere writable or stop the write half done (GIT-conflict-labels-path-safe).
 fn safe_label(label: &str) -> Result<()> {
     let bad = label.is_empty()
         || label.len() > LONGEST_NAME
@@ -128,7 +128,7 @@ fn safe_label(label: &str) -> Result<()> {
 
 /// The labels of a conflict's sides, as `git` writes them: `theirs`, the side applied, and
 /// `ancestor`, the base `git` writes in its `diff3` and `zdiff3` styles; the checked-out side is
-/// always `HEAD` (ADR-0023).
+/// always `HEAD` (GIT-conflict-labels-path-safe).
 struct Labels {
     theirs: String,
     ancestor: String,
@@ -162,7 +162,7 @@ fn rebase_options(labels: &Labels) -> Result<git2::RebaseOptions<'static>> {
 }
 
 /// The labels `git cherry-pick` writes for `picked`, and `git rebase` for a step: the commit, and
-/// `parent of` it as the base, its subject left out (ADR-0023).
+/// `parent of` it as the base, its subject left out (GIT-conflict-labels-path-safe).
 fn picked_labels(repo: &Repository, picked: Oid) -> Labels {
     let short = abbrev(repo, picked);
     Labels {
@@ -172,7 +172,7 @@ fn picked_labels(repo: &Repository, picked: Oid) -> Labels {
 }
 
 /// The labels `git revert` writes for `reverted`: `parent of` the commit, and the commit as the
-/// base, its subject left out (ADR-0023).
+/// base, its subject left out (GIT-conflict-labels-path-safe).
 fn revert_labels(repo: &Repository, reverted: Oid) -> Labels {
     let short = abbrev(repo, reverted);
     Labels {
@@ -208,7 +208,7 @@ fn fold_case(name: &[u8]) -> Vec<u8> {
 
 /// The abbreviated id of `oid`: libgit2's, `core.abbrev` characters where it is a number, seven
 /// otherwise, longer only where that prefix is not unique; `git` lengthens it with the number of
-/// objects instead, the departure ADR-0023 lists. A hex prefix, always path-safe.
+/// objects instead, the departure GIT-conflict-labels-path-safe lists. A hex prefix, always path-safe.
 fn abbrev(repo: &Repository, oid: Oid) -> String {
     repo.find_object(oid, None)
         .ok()
@@ -220,7 +220,7 @@ fn abbrev(repo: &Repository, oid: Oid) -> String {
 /// The labels of a merge of `theirs`: the branch the developer named, where it is a local or a
 /// remote branch at `theirs`, with `/` flattened to `_` as `git` flattens it for the path it
 /// writes a side to, and where that is path-safe; the abbreviated commit otherwise. `git` keeps
-/// the `/` in the marker itself, the departure ADR-0023 lists: libgit2 takes one label for both.
+/// the `/` in the marker itself, the departure GIT-conflict-labels-path-safe lists: libgit2 takes one label for both.
 /// The base is the merge base's abbreviated commit, `merged common ancestors` where there are
 /// several, and `empty tree` where there is none, as `git` writes it.
 fn merge_labels(repo: &Repository, theirs: Oid, name: Option<&str>, bases: &[Oid]) -> Labels {
@@ -810,7 +810,7 @@ impl<'r> Rebase<'r> {
     /// one writes; `None` where none is left. libgit2 takes a step's labels from the options the
     /// rebase was opened with, one set for every step, so the rebase is opened again with this
     /// step's own labels, `HEAD`, its abbreviated commit, and `parent of` it as the base, as
-    /// `git` writes them (ADR-0023).
+    /// `git` writes them (GIT-conflict-labels-path-safe).
     pub(crate) fn next(&mut self) -> Result<Option<Result<(), git2::Error>>> {
         let next = self.rebase.operation_current().map_or(0, |c| c + 1);
         let step = self.rebase.nth(next).map(|step| step.id());

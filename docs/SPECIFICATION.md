@@ -3,7 +3,8 @@
 > The **specification** of this project: the problem it solves, where it is going, and what has to
 > be true for it to have succeeded, written in the vocabulary of [`GLOSSARY.md`](GLOSSARY.md). It
 > is the **constitution**: every Architecture Decision Record in [`adr/`](adr/) derives from it and
-> must not contradict it ([ADR-0001](adr/0001-agent-governance-model.md)).
+> must not contradict it
+> ([NUC-decisions-are-proposed-then-accepted §7](adr/NUC-decisions-are-proposed-then-accepted.md)).
 
 ## Problem
 
@@ -50,8 +51,9 @@ it in the others: a feature is done when all three front ends offer it (G-18).
 Acceptance criteria a test can decide, where it helps in the form *When <trigger>, the system
 shall <response>*. Each starts with a bold `G-n`, which a test cites with `Verifies: G-n`. Until
 that test exists the criterion is pending work, and the traceability check lists it
-([ADR-0002](adr/0002-decisions-verified-by-tests.md)). Identifiers are never reused.
-Only a normalization renumbers them ([`AGENTS.md` §3](../AGENTS.md#3-adr-rules), rule 5).
+([NUC-decisions-cite-tests §5](adr/NUC-decisions-cite-tests.md)). Identifiers are never reused.
+Only a normalization renumbers them
+([NUC-decisions-cite-tests §1](adr/NUC-decisions-cite-tests.md)).
 
 1. **G-1** — When a repository is opened, the system shall show its commit graph with every branch
    and tag.

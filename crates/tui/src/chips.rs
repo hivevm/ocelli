@@ -2,7 +2,7 @@
 //!
 //! `ocelli-git` decorates names for display — `🏷 ` before a tag, `📦 ` before a
 //! stash. Those emoji are double-width in most terminals, so the prefix is read
-//! as the ref kind and stripped from the label (ADR-0030, Consequences).
+//! as the ref kind and stripped from the label (ARCH-ratatui-terminal-application, Consequences).
 
 use std::collections::HashSet;
 

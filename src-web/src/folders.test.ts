@@ -1,4 +1,4 @@
-// Verifies: ADR-0038
+// Verifies: SEC-server-root-confinement
 import { describe, expect, test } from 'bun:test';
 import { parentFolder } from './folders.ts';
 

@@ -7,17 +7,22 @@
 # refs_digest in crates/git/src/refs.rs), which the remote server's tests decide too, so the web
 # interface must be built first: each mutant changes one guard, and the suites of the git adapter
 # and the server must fail on it. A mutant the suite lets through is a guard no test decides
-# (ADR-0008). The surviving mutants are
+# (ARCH-rust-core-typescript-web). The surviving mutants are
 # listed, and appended to the job summary when GITHUB_STEP_SUMMARY is set.
 #
 # Usage:
-#     scripts/measure-mutants.sh
+#     scripts/measure-mutants.sh [--root <dir>]
 # Environment, optional: OCELLI_MUTANTS_JOBS, the mutants built and tested at once (2).
 # Exit code 0 when every mutant is caught, 1 when one survives or the run cannot be made.
 
 set -uo pipefail
 
-ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# shellcheck source-path=SCRIPTDIR source=lib/root.sh
+source "$(dirname "${BASH_SOURCE[0]}")/lib/root.sh"
+usage="scripts/measure-mutants.sh [--root <dir>]"
+enter_root "${BASH_SOURCE[0]}" "$usage" "$@"
+# An empty list expanded so that bash 3.2 reads it under set -u, as in the scripts macOS runs.
+rest_args "${BASH_SOURCE[0]}" "$usage" 0 ${ARGS[@]+"${ARGS[@]}"}
 
 # A measurement takes minutes, and scripts/check-all.sh runs every script a workflow runs, so it
 # skips itself unless OCELLI_MEASURE_ALL=1, which .github/workflows/measure.yml sets.
@@ -52,7 +57,6 @@ exclude=(
   --exclude-re 'refs\.rs:.* (replace|in) (load_[a-z_]+|default_remote|short|remote_names|split_remote_branch|merged|head_of|main_repo|dir_name|same_dir|submodule_state|find_parent|operation_of|stopped|conflicts_of)\b'
 )
 
-cd "$ROOT" || exit 1
 cargo mutants --package ocelli-git --file crates/git/src/guard.rs --file crates/git/src/remote.rs \
   --file crates/git/src/confine.rs --file crates/git/src/refs.rs \
   --test-package ocelli-git --test-package ocelli-server \

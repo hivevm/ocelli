@@ -1,8 +1,8 @@
 //! Background git access. git2 never runs on the thread that draws: the
 //! repository load and every per-commit read happen on worker threads, and
-//! their results come back to the event loop as [`Msg`] values (ADR-0030, the
-//! terminal counterpart of ADR-0021). A write runs on a thread of its own too
-//! (ADR-0022).
+//! their results come back to the event loop as [`Msg`] values (ARCH-ratatui-terminal-application, the
+//! terminal counterpart of GIT-git2-reads-repositories). A write runs on a thread of its own too
+//! (GIT-writes-what-git-writes).
 
 use ocelli_core::load::{self, Event};
 use ocelli_core::merge::MergeFile;
@@ -17,7 +17,7 @@ use std::thread;
 
 /// A result arriving at the event loop.
 pub enum Msg {
-    /// How the load of the history goes (ADR-0018).
+    /// How the load of the history goes (GRAPH-history-loads-in-chunks).
     Load(Event),
     Files {
         sha: String,
@@ -29,7 +29,7 @@ pub enum Msg {
         lines: Result<Vec<DiffLine>, String>,
     },
     /// A conflicted file read for the merge editor, or why the editor does not open it
-    /// (ADR-0024).
+    /// (VIEW-own-merge-editor).
     MergeFile {
         path: String,
         file: Result<MergeFile, String>,
@@ -48,7 +48,7 @@ pub enum Request {
     MergeFile { path: String },
 }
 
-/// Loads the history on a thread of its own (ADR-0018), laid out there, so the
+/// Loads the history on a thread of its own (GRAPH-history-loads-in-chunks), laid out there, so the
 /// event loop only takes in rows laid out. The load stops once the event loop
 /// has dropped the receiver, as when another repository is opened.
 pub fn spawn_load(path: PathBuf, tx: Sender<Msg>) {
@@ -57,8 +57,8 @@ pub fn spawn_load(path: PathBuf, tx: Sender<Msg>) {
 
 /// Performs a write on a thread of its own: unlike reads, a write is never
 /// collapsed into a newer one. The core refuses one that discards work
-/// without the developer's confirmation (ADR-0025). A write that reports its
-/// progress sends it along, and stops once `cancel` is set (ADR-0026).
+/// without the developer's confirmation (GIT-discard-only-after-confirmation). A write that reports its
+/// progress sends it along, and stops once `cancel` is set (GIT-remotes-through-libgit2-transports).
 pub fn spawn_write(
     path: PathBuf,
     write: Write,

@@ -1,4 +1,4 @@
-//! Verifies: ADR-0038, ADR-0036
+//! Verifies: SEC-server-root-confinement, API-websocket-per-tab
 //!
 //! Confined to a folder, as the remote server confines it, the adapter fetches from and pushes to
 //! a repository on this machine only where it lies below the folder: libgit2's local transport

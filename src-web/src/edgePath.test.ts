@@ -1,4 +1,4 @@
-// Verifies: ADR-0017
+// Verifies: GRAPH-edges-take-own-tracks
 import { describe, expect, test } from 'bun:test';
 import { roundedPath } from './edgePath.ts';
 
