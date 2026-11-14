@@ -1,4 +1,4 @@
-# ADR-0027: An operation that discards work runs only after the developer confirms it, the core naming which do
+# ADR-0025: An operation that discards work runs only after the developer confirms it, the core naming which do
 
 - **Status:** 🟢 accepted
 - **Date:** 2026-10-07
@@ -12,7 +12,7 @@ a stash, applying a stash and dropping it, deleting a tag, deleting a branch tha
 aborting an operation in progress, and taking one side of a conflicted file run only after the
 developer confirms them. The three front ends, the desktop application, the web interface, and the
 terminal application, call the same writes through the core's writer port
-([ADR-0024](0024-writes-what-git-writes.md)); were each to decide for itself which writes need a
+([ADR-0022](0022-writes-what-git-writes.md)); were each to decide for itself which writes need a
 confirmation, they would drift, and the remote server, which serves the web interface to a
 browser, would have to learn the list again.
 

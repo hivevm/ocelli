@@ -7,7 +7,7 @@
 
 ## Context
 
-[ADR-0028](0028-remotes-through-libgit2-transports.md) reaches remotes through libgit2's own
+[ADR-0026](0026-remotes-through-libgit2-transports.md) reaches remotes through libgit2's own
 HTTPS and SSH transports, `git2` with its `https` and `ssh` features. On macOS libgit2 speaks
 HTTPS through the system's SecureTransport and hashes through CommonCrypto, but SSH goes through
 libssh2, and `libssh2-sys` uses OpenSSL as its cryptography on every platform but Windows.
@@ -35,7 +35,7 @@ of `openssl-sys` declared for `target_os = "macos"` only, so that nothing Ocelli
 links a library outside the system.
 
 **Out of scope:** OpenSSL on Linux and Windows, which stays as it is; replacing libssh2 or OpenSSL
-altogether, which would mean transports of Ocelli's own and is ADR-0028's to decide; how Ocelli
+altogether, which would mean transports of Ocelli's own and is ADR-0026's to decide; how Ocelli
 learns of a vulnerability in the OpenSSL it ships (see Follow-ups).
 
 ## Alternatives considered
@@ -51,14 +51,14 @@ learns of a vulnerability in the OpenSSL it ships (see Follow-ups).
   stop receiving the distribution's OpenSSL fixes, and nothing on Linux is broken.
 - **rustls in place of OpenSSL** — rustls is TLS, while libssh2 needs a cryptography library;
   neither `libssh2-sys` nor `libgit2-sys` offers it. Using it would mean HTTPS and SSH transports
-  of Ocelli's own under `git2::transport::register`, which ADR-0028 rejects.
+  of Ocelli's own under `git2::transport::register`, which ADR-0026 rejects.
 - **gitoxide (`gix`)** — speaks HTTPS through rustls, but SSH by starting the `ssh` program, which
   Q-4 forbids.
 - **AWS-LC through `openssl-sys`'s `aws-lc` feature** — also built from source, but libssh2 is
   written against OpenSSL's interface, and whether it builds and passes against AWS-LC was not
   established.
 - **Dropping SSH on macOS** — removes OpenSSL, but breaks the developer's SSH remotes the
-  constraints and ADR-0028 require.
+  constraints and ADR-0026 require.
 
 ## Sources / Prior art
 
@@ -76,7 +76,7 @@ learns of a vulnerability in the OpenSSL it ships (see Follow-ups).
 
 - Positive: the macOS application, `ocelli-cli`, and `ocelli-server` start on any supported Mac,
   and the `x86_64-apple-darwin` leg builds on `macos-latest` as ADR-0013 has it. SSH remotes keep
-  working as ADR-0028 decides (Q-4, Q-6 unchanged).
+  working as ADR-0026 decides (Q-4, Q-6 unchanged).
 - Negative / trade-offs: Ocelli ships its own OpenSSL on macOS, and a fix to OpenSSL reaches
   macOS users only with an Ocelli release that updates `openssl-src`. A macOS build compiles
   OpenSSL, which takes longer and needs `perl` and `make` on the build machine. OpenSSL 3 is under

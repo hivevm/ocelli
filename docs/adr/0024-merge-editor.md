@@ -1,4 +1,4 @@
-# ADR-0026: A conflicted file's text is resolved in a merge editor of Ocelli's own, one column of blocks the core finds, whose saved result the writer takes as the developer's edit
+# ADR-0024: A conflicted file's text is resolved in a merge editor of Ocelli's own, one column of blocks the core finds, whose saved result the writer takes as the developer's edit
 
 - **Status:** 🟢 accepted
 - **Date:** 2026-10-31
@@ -11,18 +11,18 @@ G-15 asks for a merge editor: the developer opens a conflicted file, sees both s
 result, edits the result, and Ocelli takes it as the file's resolution. G-18 asks for it in each
 front end, the terminal application on an 80-column terminal included. Saving a result is a write,
 and every write does what `git` does and runs no program
-([ADR-0024](0024-writes-what-git-writes.md)): `git mergetool` and the merge tool the configuration
+([ADR-0022](0022-writes-what-git-writes.md)): `git mergetool` and the merge tool the configuration
 names are programs the repository can choose (Q-4).
 
 A conflicted file is written by libgit2 with `git`'s markers, in the style `merge.conflictStyle`
 names, so it holds the base between `|||||||` and `=======` only under `diff3` or `zdiff3`, under
-the labels [ADR-0025](0025-conflict-labels-path-safe.md) decides; the developer may have edited it
+the labels [ADR-0023](0023-conflict-labels-path-safe.md) decides; the developer may have edited it
 in an editor of their own before opening it in Ocelli. Not every conflict is text on both sides:
 a side may be deleted, a link, or a submodule, and a file may be binary.
 
 A text editor is a component neither front end has: the web interface runs in a WebView whose
-style sources allow inline styles ([ADR-0035](0035-no-egress-hardened-webview.md)), the terminal
-application draws with ratatui 0.30 ([ADR-0032](0032-terminal-application-ratatui.md)), and every
+style sources allow inline styles ([ADR-0033](0033-no-egress-hardened-webview.md)), the terminal
+application draws with ratatui 0.30 ([ADR-0030](0030-terminal-application-ratatui.md)), and every
 component counts against the memory Q-3 allows. Once the developer edits, the text can lose a
 marker line, gain one, or hold a run of marker lines typed or pasted, and both front ends must
 agree on what is still a block. Discarding a result not saved loses work (Q-7).
@@ -36,7 +36,7 @@ takes as the developer's edit of the file.
 - **Where it opens.** On a conflicted file whose sides ours and theirs both hold text: neither
   side deleted, a link, or a submodule, and neither holding a NUL byte or anything but UTF-8.
   Any other conflict is resolved by ours, theirs, or as edited alone
-  ([ADR-0024](0024-writes-what-git-writes.md)).
+  ([ADR-0022](0022-writes-what-git-writes.md)).
 - **What it starts from.** The working directory's file as it is, edits made in another editor
   included, and its blob id. The core finds its blocks, once for every front end: each run from
   a `<<<<<<<` line to its `>>>>>>>` line, ours before `=======` and theirs after it. A block's
@@ -75,7 +75,7 @@ takes as the developer's edit of the file.
 
 **Out of scope:** a merge editor for a conflict that is not text on both sides; highlighting a
 language in the merge editor; which writes discard work and how they are confirmed
-([ADR-0027](0027-discarding-work-only-after-confirmation.md)).
+([ADR-0025](0025-discarding-work-only-after-confirmation.md)).
 
 ## Alternatives considered
 

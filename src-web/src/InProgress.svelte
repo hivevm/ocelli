@@ -1,6 +1,6 @@
 <script lang="ts">
   // The operation stopped in the repository, whoever started it, and its conflicted files
-  // (ADR-0024): each resolved by ours, theirs, or as the developer edited it, then the operation
+  // (ADR-0022): each resolved by ours, theirs, or as the developer edited it, then the operation
   // continued, or aborted after a confirmation. A file whose sides both hold text opens in the
   // merge editor too.
   import { operationName, type Take, type Write } from './writes.ts';

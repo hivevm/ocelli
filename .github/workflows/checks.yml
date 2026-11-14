@@ -211,7 +211,7 @@ jobs:
         with:
           persist-credentials: false
       # The desktop host links against WebKitGTK on Linux; the workspace does not compile
-      # without these libraries (ADR-0029).
+      # without these libraries (ADR-0027).
       - name: Install the desktop host's Linux libraries
         if: runner.os == 'Linux'
         run: |

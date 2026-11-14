@@ -1,4 +1,4 @@
-# ADR-0036: A diff covers only the commit graph, and the changed files show as a tree or a flat list
+# ADR-0034: A diff covers only the commit graph, and the changed files show as a tree or a flat list
 
 - **Status:** 🟢 accepted
 - **Date:** 2026-10-04
@@ -44,7 +44,7 @@ graph only and offering the list as a tree or a flat list, switchable at any tim
 
 **Out of scope:** the diff's own layout, unified or side by side; editing a file, which the
 specification's Non-Goals exclude except a conflicted one, resolved in the merge editor of
-[ADR-0026](0026-merge-editor.md).
+[ADR-0024](0024-merge-editor.md).
 
 ## Alternatives considered
 

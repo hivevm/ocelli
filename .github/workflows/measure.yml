@@ -64,7 +64,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      # The desktop host links against WebKitGTK (ADR-0029); Xvfb is the virtual display.
+      # The desktop host links against WebKitGTK (ADR-0027); Xvfb is the virtual display.
       - name: Install the desktop host's Linux libraries and a virtual display
         run: |
           sudo apt-get update

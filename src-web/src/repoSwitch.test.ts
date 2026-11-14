@@ -1,4 +1,4 @@
-// Verifies: ADR-0041, ADR-0038
+// Verifies: ADR-0038, ADR-0035
 import { describe, expect, test } from 'bun:test';
 import { OUTSIDE_ROOT, parentBlocked, submoduleBlocked, worktreeBlocked } from './repoSwitch.ts';
 

@@ -13,7 +13,7 @@ to the project which base image and Features the container uses, and whether an 
 inside it.
 
 Ocelli's toolchain ([ADR-0008](0008-toolchain-rust-and-typescript.md)) needs Rust and Bun, and
-the desktop host ([ADR-0029](0029-tauri-desktop-host.md)) builds on Linux against system
+the desktop host ([ADR-0027](0027-tauri-desktop-host.md)) builds on Linux against system
 libraries no Feature provides: WebKitGTK and GTK, among others. Ocelli's tests need Git
 repositories, which they create in temporary directories, and a remote server, which runs as a
 process; no test needs a database, a service, or a container.
@@ -32,7 +32,7 @@ libraries. Rust and Bun come as Features, pinned as
 - **No engine inside.** The container runs no container engine and holds no socket of one.
 
 **Out of scope:** which libraries the desktop host needs, which follows
-[ADR-0029](0029-tauri-desktop-host.md). Which extensions the project picks, and whether it pins
+[ADR-0027](0027-tauri-desktop-host.md). Which extensions the project picks, and whether it pins
 them. Running the desktop application's window from inside the container, which needs display
 forwarding from the host. macOS and Windows, which the build job covers.
 
@@ -54,7 +54,7 @@ forwarding from the host. macOS and Windows, which the build job covers.
 - Positive: the whole toolchain builds in the container, the desktop application included.
 - Negative / trade-offs: a Dockerfile's packages are not locked like Features, so a rebuild may
   pick up newer Debian packages.
-- Follow-ups: the exact library list, with [ADR-0029](0029-tauri-desktop-host.md).
+- Follow-ups: the exact library list, with [ADR-0027](0027-tauri-desktop-host.md).
 
 ## Enforcement
 

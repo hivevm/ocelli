@@ -1,4 +1,4 @@
-//! Verifies: ADR-0008, ADR-0023, ADR-0020, ADR-0037, G-6, G-9
+//! Verifies: ADR-0008, ADR-0021, ADR-0019, ADR-0035, G-6, G-9
 //!
 //! Loading matches the reference: a repository built the same way each time, with a merge,
 //! branches, a remote branch, an annotated and a lightweight tag, and a stash, loads, lays out,

@@ -1,5 +1,5 @@
 <script lang="ts">
-  // The merge editor (ADR-0026, G-15): a conflicted file as the working directory holds it, its
+  // The merge editor (ADR-0024, G-15): a conflicted file as the working directory holds it, its
   // blocks set apart, ours above theirs, each with actions taking ours, theirs, or both, and its
   // base folded until opened; the text is editable everywhere with undo. Saving takes the result
   // as the file's resolution; leaving with a result not saved asks first (Q-7).

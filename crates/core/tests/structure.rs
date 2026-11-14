@@ -2,7 +2,7 @@
 //!
 //! ADR-0009 keeps every technology and every adapter out of `ocelli-core`: its manifest may name
 //! only the pure libraries listed here, and the git adapter reaches no front end. ADR-0015 keeps the layout a functional core: the layout
-//! module reaches no file, network, process, thread, clock, environment, or randomness. ADR-0023
+//! module reaches no file, network, process, thread, clock, environment, or randomness. ADR-0021
 //! and G-17 keep the thread that draws free of repository reads and of laying a history out: the
 //! terminal application's event loop does neither, and every command of the desktop host that
 //! reads the history or the repository runs off its main thread.
@@ -176,7 +176,7 @@ fn every_crate_takes_the_workspace_lints_that_deny_unsafe_code() {
 }
 
 /// What reads a repository or lays a history out, which the terminal application's drawing and
-/// key handling must not do (ADR-0023, G-17).
+/// key handling must not do (ADR-0021, G-17).
 const BLOCKING: &[&str] = &[
     "GitReader",
     "graph::Layout",
@@ -199,7 +199,7 @@ fn blocking_in(source: &str) -> Vec<&'static str> {
 }
 
 #[test]
-// Verifies: ADR-0023, G-17
+// Verifies: ADR-0021, G-17
 fn the_terminal_application_draws_and_handles_keys_without_reading_or_laying_out() {
     for file in ["app.rs", "ui.rs", "raster.rs"] {
         let source = read(&format!("../tui/src/{file}"));
@@ -212,7 +212,7 @@ fn the_terminal_application_draws_and_handles_keys_without_reading_or_laying_out
 }
 
 #[test]
-// Verifies: ADR-0023, G-17
+// Verifies: ADR-0021, G-17
 fn the_blocking_scan_sees_a_read() {
     let source = "fn f() { GitReader.load_refs(path); }\n#[cfg(test)]\nmod tests {}";
     assert_eq!(blocking_in(source), ["GitReader", "load_refs"]);
@@ -235,7 +235,7 @@ fn commands_on_the_main_thread(source: &str) -> Vec<String> {
                 .to_string();
             let off_main =
                 attribute.contains("async") || rest.split('{').next()?.contains("async fn");
-            // The shared `Host` holds the session and calls the git adapter (ADR-0039).
+            // The shared `Host` holds the session and calls the git adapter (ADR-0036).
             let reads = ["session", "GitReader", "GitWriter", ".host."]
                 .iter()
                 .any(|uses| rest.contains(uses));
@@ -245,14 +245,14 @@ fn commands_on_the_main_thread(source: &str) -> Vec<String> {
 }
 
 #[test]
-// Verifies: ADR-0023, ADR-0024, G-17
+// Verifies: ADR-0021, ADR-0022, G-17
 fn every_command_that_reads_or_writes_the_repository_runs_off_the_main_thread() {
     let source = read("../../src-tauri/src/commands.rs");
     assert_eq!(commands_on_the_main_thread(&source), Vec::<String>::new());
 }
 
 #[test]
-// Verifies: ADR-0023, G-17
+// Verifies: ADR-0021, G-17
 fn the_command_scan_sees_a_command_on_the_main_thread() {
     let source = "#[tauri::command]\npub fn read(state: State) -> W { state.session.window(0, 1) }\n\
                   #[tauri::command(async)]\npub fn fine(state: State) { state.session.x() }\n\
@@ -303,14 +303,14 @@ fn writes_past_the_confirmation(source: &str) -> Vec<&'static str> {
 }
 
 #[test]
-// Verifies: ADR-0027, Q-7
+// Verifies: ADR-0025, Q-7
 fn every_front_end_writes_through_the_cores_confirmation_rule() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
     let mut front_ends = Vec::new();
     for member in members(&read("../../Cargo.toml")) {
         let manifest = fs::read_to_string(root.join(&member).join("Cargo.toml")).unwrap();
         // A host reaches the git adapter itself or through the commands both hosts share
-        // (ADR-0039).
+        // (ADR-0036).
         let deps = dependencies(&manifest);
         if member == "crates/git"
             || !["ocelli-git", "ocelli-commands"]
@@ -340,7 +340,7 @@ fn every_front_end_writes_through_the_cores_confirmation_rule() {
 }
 
 #[test]
-// Verifies: ADR-0027
+// Verifies: ADR-0025
 fn the_write_scan_sees_a_write_past_the_confirmation() {
     let through = "use ocelli_git::{GitReader, GitWriter};\n\
                    fn a() { port::perform(&GitWriter, p, w, c) }\n";
@@ -357,7 +357,7 @@ fn the_write_scan_sees_a_write_past_the_confirmation() {
 }
 
 #[test]
-// Verifies: ADR-0028
+// Verifies: ADR-0026
 fn git2_reaches_remotes_through_its_own_https_and_ssh_transports_only() {
     let manifest = read("../git/Cargo.toml");
     let git2 = manifest
@@ -375,7 +375,7 @@ fn git2_reaches_remotes_through_its_own_https_and_ssh_transports_only() {
 }
 
 /// What a source of the git adapter names that would give a transfer a proxy: libgit2 uses none
-/// unless its options are handed one (ADR-0028).
+/// unless its options are handed one (ADR-0026).
 fn proxies_named(source: &str) -> Vec<&'static str> {
     ["ProxyOptions", "proxy_options", "auto_proxy", "http.proxy"]
         .into_iter()
@@ -384,7 +384,7 @@ fn proxies_named(source: &str) -> Vec<&'static str> {
 }
 
 #[test]
-// Verifies: ADR-0028
+// Verifies: ADR-0026
 fn no_transfer_of_the_git_adapter_is_given_a_proxy() {
     let src = Path::new(env!("CARGO_MANIFEST_DIR")).join("../git/src");
     let named: Vec<String> = sources(&src)
@@ -399,7 +399,7 @@ fn no_transfer_of_the_git_adapter_is_given_a_proxy() {
 }
 
 #[test]
-// Verifies: ADR-0028
+// Verifies: ADR-0026
 fn the_proxy_scan_sees_proxy_options() {
     let given = "fn f(o: &mut FetchOptions) { let mut p = git2::ProxyOptions::new(); \
                  p.auto(); o.proxy_options(p); }";

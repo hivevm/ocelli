@@ -48,11 +48,11 @@ package manager and task runner.
   | Dependency direction | the structural test of the shape's ADR | every push |
   | Mutation testing | cargo-mutants over the git adapter's guards, `scripts/measure-mutants.sh` | weekly |
 
-**Out of scope:** the desktop host, which is [ADR-0029](0029-tauri-desktop-host.md); the web
-interface's framework, which is [ADR-0031](0031-svelte-web-interface.md); the terminal library,
-which is [ADR-0032](0032-terminal-application-ratatui.md); the Git library, which is
-[ADR-0023](0023-git2-repository-reader.md); the remote server's protocol, which is
-[ADR-0039](0039-remote-server-websocket-per-tab.md); a second package manager, which there is
+**Out of scope:** the desktop host, which is [ADR-0027](0027-tauri-desktop-host.md); the web
+interface's framework, which is [ADR-0029](0029-svelte-web-interface.md); the terminal library,
+which is [ADR-0030](0030-terminal-application-ratatui.md); the Git library, which is
+[ADR-0021](0021-git2-repository-reader.md); the remote server's protocol, which is
+[ADR-0036](0036-remote-server-websocket-per-tab.md); a second package manager, which there is
 none of.
 
 ## Alternatives considered
