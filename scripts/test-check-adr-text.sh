@@ -7,13 +7,13 @@
 # writes, commits on a branch at it what an agent or a human would, and runs the check against the
 # base, asserting the exit code and the line a reader would meet. A sentence changed, added, or
 # removed in an accepted ADR, a line that begins like a diff's own, a header field rewritten or
-# written into the body, an accepted ADR deleted or renamed, a superseded one changed, one
-# accepted on the branch and then edited, an edit made while resolving a merge, a merge whose
-# resolution deletes an accepted ADR, an octopus merge that deletes one, a path with a space, and
-# a commit that names a normalization only in its text fail. The Status line flipped to
-# superseded, the Date line, a decider added, a proposed ADR, a NUC- ADR of the base, a merge from
-# main, a commit carrying the normalization's trailer, a branch's normalization merged into main,
-# the template repository, and a base of zeros, with main and without, pass.
+# written into the body, a decider added, an accepted ADR deleted or renamed, a superseded one
+# changed, one accepted on the branch and then edited, an edit made while resolving a merge, a
+# merge whose resolution deletes an accepted ADR, an octopus merge that deletes one, a path with a
+# space, and a commit that names a normalization only in its text fail. The Status line flipped
+# to superseded, the Date line, a proposed ADR, a NUC- ADR of the base, a merge from main, a commit
+# carrying the normalization's trailer, a branch's normalization merged into main, the template
+# repository, and a base of zeros, with main and without, pass.
 #
 # Verifies: NUC-decisions-are-proposed-then-accepted
 # Inputs: scripts/check-adr-text.sh scripts/lib/
@@ -151,7 +151,8 @@ expect 0 "the Status and Date lines flipped" "$d" "no accepted ADR's text change
 
 d="$(repo deciders)"
 edit "$d" "$A" 's/^- \*\*Deciders:\*\* Markus Brigl/- **Deciders:** Markus Brigl, the project/' "Adopt"
-expect 0 "a decider added" "$d" "no accepted ADR's text changed"
+expect 1 "a decider added, which no rule permits since the inherited ADRs went" "$d" \
+  "the first at line 5: -- **Deciders:** Markus Brigl"
 
 d="$(repo proposed)"
 edit "$d" docs/adr/TST-decision-0003.md 's/The decision 0003 takes./Another decision./' "Revise"
@@ -179,7 +180,7 @@ expect 1 "the Status line reworded, not flipped" "$d" "the first at line 3: +- *
 
 d="$(repo deciders-rewritten)"
 edit "$d" "$A" 's/^- \*\*Deciders:\*\* Markus Brigl/- **Deciders:** someone else/' "Replace"
-expect 1 "the Deciders line rewritten, not added to" "$d" "the first at line 5: +- **Deciders:** someone else"
+expect 1 "the Deciders line rewritten" "$d" "changes 2 lines of $(adr_id 1)"
 
 d="$(repo field-in-body)"
 echo "- **Status:** a list item in the body" >> "$d/$A"

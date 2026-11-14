@@ -4,8 +4,9 @@
 # (NUC-decisions-are-proposed-then-accepted §6).
 #
 # Outside a normalization, an accepted ADR is changed only by superseding it, and a human makes
-# the two edits the rule permits: the flip of its Status line, to superseded, and the project's
-# name added to its Deciders line. Its Date line moves with the flip. Every commit between a base
+# the one edit the rule permits: the flip of its Status line, to superseded. Its Date line moves
+# with the flip. Its Deciders line is its text like any other: the edit that once let a project
+# accept an inherited ADR by adding its name went with the inherited ADRs in NUC v0.9. Every commit between a base
 # and a head is read, a merge by what its resolution changed beyond the merge git would make
 # itself (--remerge-diff), an octopus merge, which git does not remerge, against its first parent
 # as any commit. One that deletes an ADR accepted or superseded before it, or changes a
@@ -90,8 +91,7 @@ remerged() {
 # changed <before> <commit> <path> — the lines of the ADR the commit changes beyond those it may,
 # as '<number of lines>\t<line number>: <the first of them>', or nothing. A line is the old
 # version's where removed and the new one's where added; a line of the header may be its Date
-# line, its Status line flipped to superseded, or its Deciders line with the old one's names kept
-# at its start.
+# line or its Status line flipped to superseded.
 changed() {
   local before="$1" c="$2" path="$3" diff
   if remerged "$c"; then
@@ -114,15 +114,12 @@ changed() {
     /^-/ {
       line = substr($0, 2)
       if (old < old_end && line ~ /^- \*\*(Date|Status):\*\*/) { old++; next }
-      if (old < old_end && line ~ /^- \*\*Deciders:\*\*/) { deciders = line; old++; next }
       report(old, $0); old++; next
     }
     /^\+/ {
       line = substr($0, 2)
       if (new < new_end && line ~ /^- \*\*Date:\*\*/) { new++; next }
       if (new < new_end && line ~ /^- \*\*Status:\*\* .*superseded/) { new++; next }
-      if (new < new_end && line ~ /^- \*\*Deciders:\*\*/ && deciders != "" &&
-          substr(line, 1, length(deciders)) == deciders) { new++; next }
       report(new, $0); new++; next
     }
     function report(at, text) { if (!count++) first = at ": " text }
