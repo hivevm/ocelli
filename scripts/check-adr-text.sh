@@ -5,12 +5,11 @@
 #
 # Outside a normalization, an accepted ADR is changed only by superseding it, and a human makes
 # the one edit the rule permits: the flip of its Status line, to superseded. Its Date line moves
-# with the flip. Its Deciders line is its text like any other: the edit that once let a project
-# accept an inherited ADR by adding its name went with the inherited ADRs in NUC v0.9. Every commit between a base
-# and a head is read, a merge by what its resolution changed beyond the merge git would make
-# itself (--remerge-diff), an octopus merge, which git does not remerge, against its first parent
-# as any commit. One that deletes an ADR accepted or superseded before it, or changes a
-# line of one other than those three lines of its header, fails the check, naming the commit,
+# with the flip. Its Deciders line is its text like any other. Every commit between a base and a
+# head is read, a merge by what its resolution changed beyond the merge git would make itself
+# (--remerge-diff), an octopus merge, which git does not remerge, against its first parent as any
+# commit. One that deletes an ADR accepted or superseded before it, or changes a line of one other
+# than those two lines of its header, fails the check, naming the commit,
 # the ADR, and the line. Whether an ADR is held to this is read before each commit: a proposed one
 # is still developed with the human and changes freely, until a commit accepts it. Since every
 # commit is read, an edit a later commit undoes still fails until the history is rewritten.

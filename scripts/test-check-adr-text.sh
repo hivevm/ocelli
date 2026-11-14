@@ -151,8 +151,7 @@ expect 0 "the Status and Date lines flipped" "$d" "no accepted ADR's text change
 
 d="$(repo deciders)"
 edit "$d" "$A" 's/^- \*\*Deciders:\*\* Markus Brigl/- **Deciders:** Markus Brigl, the project/' "Adopt"
-expect 1 "a decider added, which no rule permits since the inherited ADRs went" "$d" \
-  "the first at line 5: -- **Deciders:** Markus Brigl"
+expect 1 "a decider added" "$d" "the first at line 5: -- **Deciders:** Markus Brigl"
 
 d="$(repo proposed)"
 edit "$d" docs/adr/TST-decision-0003.md 's/The decision 0003 takes./Another decision./' "Revise"
