@@ -17,13 +17,17 @@
 
 set -uo pipefail
 
-if (($# < 2 || $# > 3)); then
-  echo "generate-history.sh: usage: scripts/measure/generate-history.sh <dir> <commits> [line|wide]" >&2
+usage="scripts/measure/generate-history.sh <dir> <commits> [line|wide]"
+shape="${3:-line}"
+# Every argument is checked before anything is written: an option, a count, or a shape it does not
+# read, and a count of commits that is no number.
+if (($# < 2 || $# > 3)) || [[ "$1" == -* || ! "$2" =~ ^[0-9]+$ ]] \
+  || [[ "$shape" != line && "$shape" != wide ]]; then
+  echo "generate-history.sh: usage: $usage" >&2
   exit 2
 fi
-shape="${3:-line}"
 
-git init --quiet --bare "$1" || exit 1
+git init --quiet --bare -- "$1" || exit 1
 case "$shape" in
   line)
     awk -v n="$2" 'BEGIN {
@@ -69,10 +73,6 @@ case "$shape" in
         }
       }
     }' | git -C "$1" fast-import --quiet || exit 1
-    ;;
-  *)
-    echo "generate-history: no shape '$shape' (line or wide)" >&2
-    exit 1
     ;;
 esac
 git -C "$1" symbolic-ref HEAD refs/heads/main
