@@ -9,7 +9,7 @@
 # This script exists so that the local gate and CI run one list instead of two. The build job of
 # .github/workflows/checks.yml sets up the toolchain and then calls this script, and
 # scripts/check-all.sh calls it too — commands written inline in the workflow would run in CI and
-# never before a push, which is what check 9 of scripts/check-docs.sh refuses.
+# never before a push, which is what the rule docs/check-lists of scripts/check-docs.sh refuses.
 #
 # The full desktop bundle ('bun run tauri build') is deliberately not here: it is a release step,
 # needs the bundler toolchain of every target platform, and says nothing a per-change gate needs.
@@ -23,13 +23,16 @@
 # one fails, so one run reports everything that is wrong.
 #
 # Usage:
-#     scripts/check-build.sh        (or: bash scripts/check-build.sh)
+#     scripts/check-build.sh [--root <dir>]        (or: bash scripts/check-build.sh)
 # Exit code 0 when every command passes, 1 when any of them fails.
 
 set -uo pipefail
 
-ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-cd "$ROOT" || exit 1
+# shellcheck source-path=SCRIPTDIR source=lib/root.sh
+source "$(dirname "${BASH_SOURCE[0]}")/lib/root.sh"
+usage="scripts/check-build.sh [--root <dir>]"
+enter_root "${BASH_SOURCE[0]}" "$usage" "$@"
+rest_args "${BASH_SOURCE[0]}" "$usage" 0 "${ARGS[@]}"
 
 failed=()
 

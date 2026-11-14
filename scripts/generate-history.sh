@@ -10,15 +10,26 @@
 #         every ninety-seventh commit is dated before the one before it, as a wrong clock does.
 #
 # Usage:
-#     scripts/generate-history.sh DIR COMMITS [SHAPE]
+#     scripts/generate-history.sh [--root <dir>] DIR COMMITS [SHAPE]
+# A relative DIR is read from the directory the script is started in.
 # Exit code 0 when the repository is written, 1 otherwise.
 
 set -uo pipefail
 
-if (($# < 2 || $# > 3)); then
-  echo "Usage: scripts/generate-history.sh DIR COMMITS [line|wide]" >&2
-  exit 1
+# The directory the repository is written to is read from where the script was started, before
+# enter_root moves to the repository root.
+here="$PWD"
+# shellcheck source-path=SCRIPTDIR source=lib/root.sh
+source "$(dirname "${BASH_SOURCE[0]}")/lib/root.sh"
+usage="scripts/generate-history.sh [--root <dir>] <dir> <commits> [line|wide]"
+enter_root "${BASH_SOURCE[0]}" "$usage" "$@"
+set -- "${ARGS[@]}"
+rest_args "${BASH_SOURCE[0]}" "$usage" 3 "$@"
+if (($# < 2)); then
+  echo "generate-history.sh: a directory and a number of commits are needed — usage: $usage" >&2
+  exit 2
 fi
+[[ "$1" == /* ]] || set -- "$here/$1" "${@:2}"
 shape="${3:-line}"
 
 git init --quiet --bare "$1" || exit 1

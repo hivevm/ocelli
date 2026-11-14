@@ -17,8 +17,8 @@
 # the desktop host keeps its own footprint is ARCH-tauri-desktop-host's, which no test decides.
 #
 # Usage:
-#     scripts/measure-memory.sh
-#     scripts/measure-memory.sh --verdict EMPTY_KB EMPTY_KB LOADED_KB LOADED_KB   (the verdict only)
+#     scripts/measure-memory.sh [--root <dir>]
+#     scripts/measure-memory.sh [--root <dir>] --verdict EMPTY_KB EMPTY_KB LOADED_KB LOADED_KB   (the verdict only)
 # Environment, all optional: OCELLI_DESKTOP, the application (built here with the Tauri CLI when
 # unset); OCELLI_MEMORY_COMMITS, the size of the repository (100000); OCELLI_MEMORY_LIMIT_MB, the
 # memory the graph may add (150); OCELLI_MEMORY_WRAPPER, what starts the application on a display
@@ -28,7 +28,17 @@
 
 set -uo pipefail
 
-ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# shellcheck source-path=SCRIPTDIR source=lib/root.sh
+source "$(dirname "${BASH_SOURCE[0]}")/lib/root.sh"
+usage="scripts/measure-memory.sh [--root <dir>] [--verdict <empty-kb> <empty-kb> <loaded-kb> <loaded-kb>]"
+enter_root "${BASH_SOURCE[0]}" "$usage" "$@"
+set -- "${ARGS[@]}"
+if [[ "${1:-}" == --verdict ]]; then
+  rest_args "${BASH_SOURCE[0]}" "$usage" 4 "${@:2}"
+  (($# == 5)) || { echo "measure-memory.sh: --verdict needs 4 values — usage: $usage" >&2; exit 2; }
+else
+  rest_args "${BASH_SOURCE[0]}" "$usage" 0 "$@"
+fi
 
 # A measurement takes minutes, and scripts/check-all.sh runs every script a workflow runs, so it
 # skips itself unless OCELLI_MEASURE_ALL=1, which .github/workflows/measure.yml sets; the verdict

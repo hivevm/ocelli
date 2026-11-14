@@ -13,7 +13,7 @@
 # any repository, or a repository cannot be fetched or measured.
 #
 # Usage:
-#     scripts/measure-crossings.sh [CORPUS]
+#     scripts/measure-crossings.sh [--root <dir>] [CORPUS]
 # CORPUS is a file of lines '<name> <url> <commit> <recorded crossings>' and defaults to the corpus
 # below; a recorded count changes only with a decision about the layout. The binary
 # is OCELLI_MEASURE, or built here with cargo when that is unset.
@@ -21,7 +21,15 @@
 
 set -uo pipefail
 
-ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# A corpus file named relative is read from where the script was started.
+here="$PWD"
+# shellcheck source-path=SCRIPTDIR source=lib/root.sh
+source "$(dirname "${BASH_SOURCE[0]}")/lib/root.sh"
+usage="scripts/measure-crossings.sh [--root <dir>] [<corpus>]"
+enter_root "${BASH_SOURCE[0]}" "$usage" "$@"
+set -- "${ARGS[@]}"
+rest_args "${BASH_SOURCE[0]}" "$usage" 1 "$@"
+[[ $# -eq 0 || "$1" == /* ]] || set -- "$here/$1"
 
 # A measurement takes minutes, and scripts/check-all.sh runs every script a workflow runs, so it
 # skips itself unless OCELLI_MEASURE_ALL=1, which .github/workflows/measure.yml sets.

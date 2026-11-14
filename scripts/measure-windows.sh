@@ -15,8 +15,8 @@
 # a table, and appends it to the job summary when GITHUB_STEP_SUMMARY is set.
 #
 # Usage:
-#     scripts/measure-windows.sh
-#     scripts/measure-windows.sh --verdict FIRST_MS SLOWEST_MS   (the verdict only)
+#     scripts/measure-windows.sh [--root <dir>]
+#     scripts/measure-windows.sh [--root <dir>] --verdict FIRST_MS SLOWEST_MS   (the verdict only)
 # Environment, all optional: OCELLI_MEASURE, the binary (built here in release when unset);
 # OCELLI_WINDOWS_COMMITS, the size of the repository (1000000); OCELLI_FIRST_LIMIT_MS, the limit
 # of the first window (2000); OCELLI_WINDOW_LIMIT_MS, the limit of every window (100).
@@ -24,7 +24,17 @@
 
 set -uo pipefail
 
-ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# shellcheck source-path=SCRIPTDIR source=lib/root.sh
+source "$(dirname "${BASH_SOURCE[0]}")/lib/root.sh"
+usage="scripts/measure-windows.sh [--root <dir>] [--verdict <first-ms> <slowest-ms>]"
+enter_root "${BASH_SOURCE[0]}" "$usage" "$@"
+set -- "${ARGS[@]}"
+if [[ "${1:-}" == --verdict ]]; then
+  rest_args "${BASH_SOURCE[0]}" "$usage" 2 "${@:2}"
+  (($# == 3)) || { echo "measure-windows.sh: --verdict needs 2 values — usage: $usage" >&2; exit 2; }
+else
+  rest_args "${BASH_SOURCE[0]}" "$usage" 0 "$@"
+fi
 
 # A measurement takes minutes, and scripts/check-all.sh runs every script a workflow runs, so it
 # skips itself unless OCELLI_MEASURE_ALL=1, which .github/workflows/measure.yml sets; the verdict

@@ -171,7 +171,7 @@ expect 0 "a marker in a path with a space or beyond ASCII is reported" "$d" "2 f
 # in, as the checks do: the tag 'base' exists only there.
 # Verifies: NUC-checks-are-bash
 d="$(repo own-repository)"
-mkdir -p "$d/scripts/lib" && cp "$SENSOR" "$d/scripts/" && cp "$ROOT/scripts/lib/git.sh" "$d/scripts/lib/"
+mkdir -p "$d/scripts/lib" && cp "$SENSOR" "$d/scripts/" && cp "$ROOT/scripts/lib/git.sh" "$ROOT/scripts/lib/root.sh" "$d/scripts/lib/"
 git -C "${d:?}" rm -q tests/a_test.py
 commit "$d" "drop a test"
 other="$work/other"

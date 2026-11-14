@@ -41,9 +41,13 @@ set -uo pipefail
 source "$(dirname "${BASH_SOURCE[0]}")/lib/git.sh"
 # shellcheck source-path=SCRIPTDIR source=lib/adr.sh
 source "$(dirname "${BASH_SOURCE[0]}")/lib/adr.sh"
+# shellcheck source-path=SCRIPTDIR source=lib/root.sh
+source "$(dirname "${BASH_SOURCE[0]}")/lib/root.sh"
 
-enter_root "Accepted ADR text" "${BASH_SOURCE[0]}" "$@"
-shift "$ROOT_TAKEN"
+usage="scripts/check-adr-text.sh [--root <dir>] [<base> [<head>]]"
+enter_root "${BASH_SOURCE[0]}" "$usage" "$@"
+set -- "${ARGS[@]}"
+rest_args "${BASH_SOURCE[0]}" "$usage" 2 "$@"
 
 base="${1:-}"
 head="${2:-HEAD}"

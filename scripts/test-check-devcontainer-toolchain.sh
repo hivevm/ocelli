@@ -56,7 +56,7 @@ edit() {
 expect() {
   local want="$1" name="$2" dir="$3" needle="${4:-}"
   local out rc
-  out="$(bash "$CHECK" "$dir" 2>&1)"; rc=$?
+  out="$(bash "$CHECK" --root "$dir" 2>&1)"; rc=$?
   if [[ "$want" == "pass" && $rc -eq 0 ]] \
      || [[ "$want" == "fail" && $rc -ne 0 && ( -z "$needle" || "$out" == *"$needle"* ) ]]; then
     passed=$((passed + 1))

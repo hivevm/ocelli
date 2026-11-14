@@ -11,13 +11,17 @@
 # listed, and appended to the job summary when GITHUB_STEP_SUMMARY is set.
 #
 # Usage:
-#     scripts/measure-mutants.sh
+#     scripts/measure-mutants.sh [--root <dir>]
 # Environment, optional: OCELLI_MUTANTS_JOBS, the mutants built and tested at once (2).
 # Exit code 0 when every mutant is caught, 1 when one survives or the run cannot be made.
 
 set -uo pipefail
 
-ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# shellcheck source-path=SCRIPTDIR source=lib/root.sh
+source "$(dirname "${BASH_SOURCE[0]}")/lib/root.sh"
+usage="scripts/measure-mutants.sh [--root <dir>]"
+enter_root "${BASH_SOURCE[0]}" "$usage" "$@"
+rest_args "${BASH_SOURCE[0]}" "$usage" 0 "${ARGS[@]}"
 
 # A measurement takes minutes, and scripts/check-all.sh runs every script a workflow runs, so it
 # skips itself unless OCELLI_MEASURE_ALL=1, which .github/workflows/measure.yml sets.

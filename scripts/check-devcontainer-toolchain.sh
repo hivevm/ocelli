@@ -10,12 +10,16 @@
 # Comment lines ('//' in the JSON, '#' in the Dockerfile) are ignored.
 #
 # Usage:
-#     scripts/check-devcontainer-toolchain.sh [ROOT]   (ROOT defaults to the repository)
+#     scripts/check-devcontainer-toolchain.sh [--root <dir>]   (the root defaults to the repository)
 # Exit code 0 when the toolchain is there, 1 otherwise.
 
 set -uo pipefail
 
-ROOT="$(cd "${1:-$(dirname "${BASH_SOURCE[0]}")/..}" && pwd)"
+# shellcheck source-path=SCRIPTDIR source=lib/root.sh
+source "$(dirname "${BASH_SOURCE[0]}")/lib/root.sh"
+usage="scripts/check-devcontainer-toolchain.sh [--root <dir>]"
+enter_root "${BASH_SOURCE[0]}" "$usage" "$@"
+rest_args "${BASH_SOURCE[0]}" "$usage" 0 "${ARGS[@]}"
 CONFIG="$ROOT/.devcontainer/devcontainer.json"
 DOCKERFILE="$ROOT/.devcontainer/Dockerfile"
 TOOLCHAIN="$ROOT/rust-toolchain.toml"

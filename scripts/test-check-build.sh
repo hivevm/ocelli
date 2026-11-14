@@ -11,7 +11,7 @@
 # and pass; the Windows lint finds no cargo-xwin and is skipped. A case asserts the exit code, a
 # needle in the output, and which commands ran.
 #
-# Inputs: scripts/check-build.sh
+# Inputs: scripts/check-build.sh scripts/lib/root.sh
 #
 # Usage:
 #     scripts/test-check-build.sh
@@ -38,8 +38,9 @@ done
 # fixture <name> — a repository whose dependencies are not installed.
 fixture() {
   local dir="$work/$1"
-  mkdir -p "$dir/scripts" "$dir/src-web" "$dir/crates/git/tests/developer-config/git"
+  mkdir -p "$dir/scripts/lib" "$dir/src-web" "$dir/crates/git/tests/developer-config/git"
   cp "$ROOT/scripts/check-build.sh" "$dir/scripts/"
+  cp "$ROOT/scripts/lib/root.sh" "$dir/scripts/lib/"
   : > "$dir/crates/git/tests/developer-config/git/config"
   cat > "$dir/bun.lock" <<'LOCK'
 {
