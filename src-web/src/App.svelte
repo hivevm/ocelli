@@ -36,7 +36,7 @@
     theme = theme === 'dark' ? 'light' : 'dark';
   }
 
-  // ── Avatars — opt-in, default off (ADR-0035) ─────────────────────────────
+  // ── Avatars — opt-in, default off (ADR-0033) ─────────────────────────────
   const storedAvatars = typeof localStorage !== 'undefined' ? localStorage.getItem('avatars') : null;
   let showAvatars = $state(avatarsOn(storedAvatars));
 
@@ -49,12 +49,12 @@
   }
 
   // ── State ──────────────────────────────────────────────────────────────────
-  // The host keeps the history (ADR-0021); the web interface holds how far it has loaded, the
+  // The host keeps the history (ADR-0020); the web interface holds how far it has loaded, the
   // window of rows on screen, and the selected commit.
   let growth          = $state<Growth | null>(null);
   let view            = $state<RowWindow | null>(null);
   let repoRefs        = $state<RepoRefs | null>(null);
-  // The transfers the core decides from the refs, sent with them (ADR-0030).
+  // The transfers the core decides from the refs, sent with them (ADR-0028).
   let transfers       = $state<Transfers | null>(null);
   let status          = $state(READY_STATUS);
   let repoLabel       = $state('(no repository)');
@@ -79,12 +79,12 @@
   // ── Rows from the host ─────────────────────────────────────────────────────
   /** The rows last asked for, asked again whenever the history or the selection changes. */
   let wanted: RowRange | null = null;
-  // The newest answer of each kind for the current load; older ones are dropped (ADR-0021).
+  // The newest answer of each kind for the current load; older ones are dropped (ADR-0020).
   const reads = new Newest();
   const selects = new Newest();
   const refreshes = new Newest();
   const currentLoad = (): number | undefined => growth?.generation;
-  // The question open before a write that discards work, and how it is answered (ADR-0027).
+  // The question open before a write that discards work, and how it is answered (ADR-0025).
   let question = $state<
     { lost: string; action: string; answer: (confirmed: boolean) => void } | null
   >(null);
@@ -96,7 +96,7 @@
   /** The remote server's folder listing is open, in place of the desktop's folder dialog. */
   let choosingFolder = $state(false);
   // Whether a transfer to or from a remote runs, and whether the toolbar's button can cancel it,
-  // as the core decides (ADR-0028).
+  // as the core decides (ADR-0026).
   let fetching = $state(false);
   let cancellable = $state(false);
   // The fetch, pull, and push the refs make possible, or why there is none, as the host sends them.
@@ -107,7 +107,7 @@
 
   /** Runs a transfer, the toolbar's buttons turning into one that cancels it. A transfer refused
       may have moved remote branches by its fetch, so the repository is read again, the refusal
-      kept in view (ADR-0028). */
+      kept in view (ADR-0026). */
   async function transfer(answer: { write: Write; canStop: boolean } | { reason: string }, doing: string): Promise<void> {
     if (!('write' in answer)) {
       status = answer.reason;
@@ -143,7 +143,7 @@
     selectedNode ? commitChips(selectedNode.refs, repoRefs, selectedNode.sha) : [],
   );
   // The operations of G-13 the selected commit offers on the checked-out branch, as the host's
-  // answer to selecting it says (ADR-0024, ADR-0030).
+  // answer to selecting it says (ADR-0022, ADR-0028).
   let offered = $state<Offered | null>(null);
   // Whether the refs of the load on screen have arrived, after which every commit has its
   // operations: an answer without them was computed before, and is asked for again.
@@ -298,7 +298,7 @@
   onMount(() => {
     const unlisten = Promise.all([
       listen<Growth>('history-grew', (e) => onGrowth(e.payload)),
-      // Refs come from the same repository read as the graph (ADR-0037), so the
+      // Refs come from the same repository read as the graph (ADR-0035), so the
       // sidebar never describes a different state than the commits on screen.
       listen<LoadedRefs>('load-refs', (e) => {
         repoRefs = e.payload.refs;
@@ -311,7 +311,7 @@
       listen<string>('set-status',     (e) => { status = e.payload; }),
       listen<string>('write-progress', (e) => { if (fetching) status = e.payload; }),
       // Another tab of the remote server wrote to this repository: it is loaded again, as after
-      // a write of this tab, and the status bar says why (ADR-0039).
+      // a write of this tab, and the status bar says why (ADR-0036).
       listen<RepoWritten>('repo-written', (e) => {
         void reloadAfterWrite(null).then(() => { notice = e.payload; });
       }),
@@ -350,7 +350,7 @@
   }
 
   /** Loads the current repository again; `select` names a commit for the core to select again
-      once the load lays it out (ADR-0024). */
+      once the load lays it out (ADR-0022). */
   async function refreshRepo(select: string | null = null): Promise<void> {
     if (!currentRepoPath) return;
     notice = null;
@@ -367,7 +367,7 @@
   }
 
   /// Switches to another repository the sidebar points at — a submodule, a
-  /// working tree, or the parent module (ADR-0038). It is the same load the
+  /// working tree, or the parent module (ADR-0035). It is the same load the
   /// folder picker triggers, so the graph, the refs and the label all follow.
   async function openRepoPath(path: string): Promise<void> {
     notice = null;
@@ -501,7 +501,7 @@
   } | null>(null);
   let mergeEditor = $state<{ current: () => string } | undefined>();
 
-  /** Opens the conflicted file `path` in the merge editor (ADR-0026), over the commit graph as
+  /** Opens the conflicted file `path` in the merge editor (ADR-0024), over the commit graph as
       the diff opens; a file open in it already is left first, as Close leaves it. */
   async function openMerge(path: string): Promise<void> {
     const conflict = repoRefs?.inProgress?.conflicts.find(c => c.path === path);

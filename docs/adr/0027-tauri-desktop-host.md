@@ -1,4 +1,4 @@
-# ADR-0029: Tauri hosts the desktop application
+# ADR-0027: Tauri hosts the desktop application
 
 - **Status:** 🟢 accepted
 - **Date:** 2026-10-04
@@ -26,11 +26,11 @@ through the repository port ([ADR-0009](0009-ports-and-adapters.md)) and serves 
 of `src-web` in the system's WebView, the two speaking through Tauri commands and events.
 
 **Out of scope:** the web interface's framework, which is
-[ADR-0031](0031-svelte-web-interface.md); the WebView's permissions, which are
-[ADR-0035](0035-no-egress-hardened-webview.md); packaging and releasing the installers, which is
+[ADR-0029](0029-svelte-web-interface.md); the WebView's permissions, which are
+[ADR-0033](0033-no-egress-hardened-webview.md); packaging and releasing the installers, which is
 [ADR-0013](0013-tag-triggered-release.md); and the remote server, which serves the same web
 interface by a protocol of its own
-([ADR-0039](0039-remote-server-websocket-per-tab.md)).
+([ADR-0036](0036-remote-server-websocket-per-tab.md)).
 
 ## Alternatives considered
 
@@ -66,7 +66,7 @@ interface by a protocol of its own
   through Tauri here and through the remote server elsewhere, so it calls both through one
   interface of its own; whether the system WebView meets Q-3 is measured on Linux only.
 - Follow-ups: none open; the interface through which the web interface reaches either host is
-  the transport of [ADR-0039](0039-remote-server-websocket-per-tab.md).
+  the transport of [ADR-0036](0036-remote-server-websocket-per-tab.md).
 
 ## Enforcement
 

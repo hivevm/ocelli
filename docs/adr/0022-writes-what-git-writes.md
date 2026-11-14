@@ -1,4 +1,4 @@
-# ADR-0024: Ocelli writes through libgit2 what `git` writes for the same command, refusing first where `git` would or an ADR departs, and running no program
+# ADR-0022: Ocelli writes through libgit2 what `git` writes for the same command, refusing first where `git` would or an ADR departs, and running no program
 
 - **Status:** 🟢 accepted
 - **Date:** 2026-10-31
@@ -26,13 +26,13 @@ libgit2 writes otherwise than `git` in corners: it reads none of the configurati
 brings, its rebase keeps its steps in other files than `git`'s, and its stash applies only over
 an index without a staged change. A write acts on what the developer saw, while another tool can
 change the repository underneath, and after a write what the front ends show must follow; the
-history loads in chunks into a load session ([ADR-0019](0019-history-loads-in-chunks.md),
-[ADR-0021](0021-row-window-margin.md)). After a commit, the developer looks for the
+history loads in chunks into a load session ([ADR-0018](0018-history-loads-in-chunks.md),
+[ADR-0020](0020-row-window-and-virtual-rendering.md)). After a commit, the developer looks for the
 commit just made. The working-directory node they committed from may be gone, or still hold what
 was left unstaged.
 
 G-15 asks for a merge editor whose result Ocelli takes as a conflicted file's resolution; the
-editor is a decision of its own ([ADR-0026](0026-merge-editor.md)), and what it saves is a write
+editor is a decision of its own ([ADR-0024](0024-merge-editor.md)), and what it saves is a write
 like any other.
 
 ## Decision
@@ -46,7 +46,7 @@ otherwise, with no write running a program.
 
 - **The port.** Every write goes through `RepositoryWriter`; `GitWriter` implements it in
   `ocelli-git`. Writes run where reads run, off the thread that draws
-  ([ADR-0023](0023-git2-repository-reader.md)).
+  ([ADR-0021](0021-git2-repository-reader.md)).
 - **What `git` does.** Where libgit2 differs from `git`, a name `git` refuses, a message `git`
   cleans up, a file in the way `git` will not overwrite, the writer follows `git`. It weighs what
   `git` weighs for the command: the working directory, the index, an operation in progress, and
@@ -102,7 +102,7 @@ otherwise, with no write running a program.
   refused, with `git`'s state cleared.
 - **Reset** moves the checked-out branch to the selected commit, soft, mixed, or hard; a hard
   reset discards work and runs only after the developer confirms it
-  ([ADR-0027](0027-discarding-work-only-after-confirmation.md)).
+  ([ADR-0025](0025-discarding-work-only-after-confirmation.md)).
 - **On a conflict** the operation stops, leaving the conflicted index, the conflict markers in the
   working directory, and `git`'s state files, `MERGE_HEAD`, `CHERRY_PICK_HEAD`, `REVERT_HEAD`, or
   the rebase's directory, as `git` would; nothing is committed. A merge, a cherry-pick, or a
@@ -116,7 +116,7 @@ otherwise, with no write running a program.
   it replaces what the developer may have edited in that file, so it runs only after they confirm
   it. As edited takes the working directory's file, refused while it still holds a conflict
   marker line (`<<<<<<<`, `=======`, `>>>>>>>`). The merge editor's saved result is taken as an
-  edit of the file ([ADR-0026](0026-merge-editor.md)). A path below a link or a file in the
+  edit of the file ([ADR-0024](0024-merge-editor.md)). A path below a link or a file in the
   working directory is refused.
 - **Continuing** is refused while a file is conflicted. A merge commits with both parents and the
   message `git` prepared, cleaned up as `git merge --continue` cleans it up; a cherry-pick or a
@@ -130,7 +130,7 @@ otherwise, with no write running a program.
 - **Aborting** puts the branch, the index, and the working directory back as they were before the
   operation, as `git <operation> --abort` does, a rebase from the `head-name` and `orig-head` that
   `git` and libgit2 both write; it discards the resolutions made, so it runs only after the
-  developer confirms it ([ADR-0027](0027-discarding-work-only-after-confirmation.md)). A file the
+  developer confirms it ([ADR-0025](0025-discarding-work-only-after-confirmation.md)). A file the
   operation brought in or removed cleanly, which the developer changed or made since, makes the
   abort refuse, as `git merge --abort` refuses, rather than lose it, a file made inside a
   directory in its place, or in a conflicted file's place, included. Below a link or a file
@@ -195,11 +195,11 @@ A difference from `git` that no clause here decides is a mistake: the comparison
 `MISMATCHES`, asserted to still differ, so that a fix removes it.
 
 **Out of scope:** which writes discard work and how they are confirmed
-([ADR-0027](0027-discarding-work-only-after-confirmation.md)); fetching, pulling, and pushing
-([ADR-0028](0028-remotes-through-libgit2-transports.md)), but for the working directory a
+([ADR-0025](0025-discarding-work-only-after-confirmation.md)); fetching, pulling, and pushing
+([ADR-0026](0026-remotes-through-libgit2-transports.md)), but for the working directory a
 pull's fast-forward writes; signing in Ocelli; interactive rebase; choosing a mainline; merge
 strategies and options beyond libgit2's default; rebasing onto other than the selected commit;
-`--autostash`; the merge editor, which [ADR-0026](0026-merge-editor.md) decides; `git rerere`;
+`--autostash`; the merge editor, which [ADR-0024](0024-merge-editor.md) decides; `git rerere`;
 skipping a rebase step; applying a stash by hand where libgit2 refuses; `git stash push` of
 chosen paths; `git stash branch`.
 

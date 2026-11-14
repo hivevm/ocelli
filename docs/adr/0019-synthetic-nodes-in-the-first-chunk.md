@@ -1,4 +1,4 @@
-# ADR-0020: Stashes and uncommitted changes appear as synthetic nodes in the first chunk of the commit graph
+# ADR-0019: Stashes and uncommitted changes appear as synthetic nodes in the first chunk of the commit graph
 
 - **Status:** 🟢 accepted
 - **Date:** 2026-10-06
@@ -22,10 +22,11 @@ meant to answer "where am I", and stashed work does not exist there. The glossar
 determinism of the layout. Ocelli also creates, applies, and drops stashes (G-16), which wants the
 stashes to be somewhere the developer can select them.
 
-The layout is a pure function that reads no clock ([ADR-0015](0015-functional-core-layout.md)), so
-whatever places the working-directory node at the top has to arrive as a value. The history
-loads in chunks of 3 000 commits ([ADR-0019](0019-history-loads-in-chunks.md)), the first of which
-is laid out and shown before the rest is read.
+The layout is a pure function that reads no clock
+([ADR-0015](0015-layout-pure-functions-after-pvigier-by-chunk.md)), so whatever places the
+working-directory node at the top has to arrive as a value. The history loads in chunks of 3 000
+commits ([ADR-0018](0018-history-loads-in-chunks.md)), the first of which is laid out and shown
+before the rest is read.
 
 ## Decision
 
@@ -41,8 +42,8 @@ a lane in the commit graph like a commit and carry a `kind` that tells them apar
   or the index is dirty, ignored files excluded. It has no object id; the reserved sentinel
   `WORKDIR_SHA` (`WORKING_DIRECTORY`) stands in for one, its parent is `HEAD`, and its timestamp is
   the moment of reading, set by `ocelli-git` when it builds the node, so that the temporal sort of
-  [ADR-0016](0016-layout-after-pvigier-by-chunk.md) places it at row 0. The front ends show
-  "Uncommitted changes" in place of a SHA.
+  [ADR-0015](0015-layout-pure-functions-after-pvigier-by-chunk.md) places it at row 0. The front
+  ends show "Uncommitted changes" in place of a SHA.
 - **Selecting one yields a diff like any other node**: for the working-directory node, `HEAD`
   against the working tree with the index included and untracked files listed; for a stash node,
   the ordinary diff against its first parent.
@@ -54,10 +55,9 @@ a lane in the commit graph like a commit and carry a `kind` that tells them apar
   for them open the second chunk, so no walked commit is lost to them.
 
 **Out of scope:** the operations on stashes and on the working directory (G-12, G-16), which
-[ADR-0024](0024-writes-what-git-writes.md) and
-[ADR-0027](0027-discarding-work-only-after-confirmation.md) decide; worktrees and submodules, which
-are repository state rather than history ([ADR-0037](0037-sidebar-worktrees-filter.md),
-[ADR-0038](0038-submodules-and-repository-switching.md)).
+[ADR-0022](0022-writes-what-git-writes.md) and
+[ADR-0025](0025-discarding-work-only-after-confirmation.md) decide; worktrees and submodules, which
+are repository state rather than history ([ADR-0035](0035-repository-sidebar.md)).
 
 ## Alternatives considered
 

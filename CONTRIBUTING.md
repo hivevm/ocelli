@@ -53,16 +53,16 @@ rust-toolchain.toml   # the pinned Rust toolchain and its components (ADR-0008)
 .cargo/               # Cargo's build configuration: linkers and the development profile
 package.json          # the web interface's dependencies and scripts, run by Bun (ADR-0008)
 bun.lock              # the locked JavaScript dependencies
-crates/commands/      # the commands both hosts of the web interface answer (ADR-0039)
+crates/commands/      # the commands both hosts of the web interface answer (ADR-0036)
 crates/core/          # the core: commit graph, layout, and the repository port (ADR-0009)
-crates/git/           # the repository port implemented with git2 (ADR-0023)
-crates/tui/           # the terminal application, ocelli-cli (ADR-0032)
-crates/server/        # the remote server, ocelli-server: the web interface in a browser (ADR-0039)
+crates/git/           # the repository port implemented with git2 (ADR-0021)
+crates/tui/           # the terminal application, ocelli-cli (ADR-0030)
+crates/server/        # the remote server, ocelli-server: the web interface in a browser (ADR-0036)
 crates/measure/       # ocelli-measure: edge crossings on real repositories (Q-1); with
                       # scripts/measure-memory.sh (Q-3) and scripts/measure-mutants.sh (the git
                       # adapter's guards) run weekly by .github/workflows/measure.yml
-src-tauri/            # the desktop host (ADR-0029)
-src-web/              # the web interface the desktop host and the remote server show (ADR-0031)
+src-tauri/            # the desktop host (ADR-0027)
+src-web/              # the web interface the desktop host and the remote server show (ADR-0029)
 flatpak/              # the Flatpak manifest of the release pipeline (ADR-0013)
 scripts/check-all.sh  # runs the checks, sensors, and self-tests, as the hooks and CI do
 scripts/check-*.sh    # checks: each fails on what breaks a rule

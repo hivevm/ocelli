@@ -1,4 +1,4 @@
-# ADR-0032: The terminal application is built on ratatui and draws the core's layout unchanged
+# ADR-0030: The terminal application is built on ratatui and draws the core's layout unchanged
 
 - **Status:** 🟢 accepted
 - **Date:** 2026-10-04
@@ -13,8 +13,8 @@ Container like this repository's own, where no WebView is available. There the d
 back to the `git log --graph` the specification calls unreadable.
 
 The layout is a functional core in `ocelli-core` ([ADR-0009](0009-ports-and-adapters.md),
-[ADR-0015](0015-functional-core-layout.md)): rows from the temporal topological sort and lanes
-from straight branches ([ADR-0016](0016-layout-after-pvigier-by-chunk.md)), with the same edges.
+[ADR-0015](0015-layout-pure-functions-after-pvigier-by-chunk.md)): rows from the temporal
+topological sort and lanes from straight branches, with the same edges.
 A terminal application can draw that layout without changing it, and must: the commit graph a
 developer sees in the terminal has to be the one they see on the desktop (Strategy).
 
@@ -47,7 +47,7 @@ that `ocelli-core` lays out, unchanged.
    `ocelli-git` depends on ratatui or crossterm.
 2. **Edges map onto box-drawing characters on a grid of cells.** Each lane takes two cells (glyph
    and connector), each row one line. The shapes of
-   [ADR-0018](0018-edge-shapes-and-tracks-out-of-the-main-line.md) translate one to one:
+   [ADR-0017](0017-edge-shapes-and-tracks-out-of-the-main-line.md) translate one to one:
    vertical runs `│`, horizontal runs `─`, and the softened corner a rounded box corner
    (`╭ ╮ ╰ ╯` by direction). Where edges meet, the cell shows the matching junction
    (`┴`, `┤`, …); where a horizontal run crosses another lane, the cell shows `┼` in the crossed
@@ -55,22 +55,22 @@ that `ocelli-core` lays out, unchanged.
    for a branch edge and its parent's for a merge edge, as in the web interface. A commit is `●`, a
    stash node `◆`, the working-directory node `◌`; an ASCII set (`|`, `-`, `+`, `*`) is selected
    by `--ascii` for terminals without box drawing.
-3. **Drawing is virtual** ([ADR-0022](0022-virtual-rendering.md)): each frame rasterises only the
-   visible rows, and an edge is drawn when its `min_row..=max_row` span intersects them.
+3. **Drawing is virtual** ([ADR-0020](0020-row-window-and-virtual-rendering.md)): each frame
+   rasterises only the visible rows, and an edge is drawn when its `min_row..=max_row` span
+   intersects them.
 4. **Loading never blocks the event loop.** The load through `RepositoryReader` runs on a
-   `std::thread` ([ADR-0023](0023-git2-repository-reader.md)); the port's progress callback
+   `std::thread` ([ADR-0021](0021-git2-repository-reader.md)); the port's progress callback
    forwards to the event loop, which drains it without blocking and needs no async runtime.
 5. **Panes and keys follow guitar**: commit graph in the centre, the repository sidebar on the left
-   ([ADR-0037](0037-sidebar-worktrees-filter.md),
-   [ADR-0038](0038-submodules-and-repository-switching.md)), inspector and changed files on the
-   right, and the diff over the graph pane ([ADR-0036](0036-diff-overlay-and-file-list.md)), with
+   ([ADR-0035](0035-repository-sidebar.md)), inspector and changed files on the
+   right, and the diff over the graph pane ([ADR-0034](0034-diff-overlay-and-file-list.md)), with
    the keys listed in the Context.
-6. **No request of its own** ([ADR-0035](0035-no-egress-hardened-webview.md)): a terminal shows no
+6. **No request of its own** ([ADR-0033](0033-no-egress-hardened-webview.md)): a terminal shows no
    avatars, so the one opt-in exception does not arise.
 
 **Out of scope:** the editing operations (G-12 to G-16, the merge editor of G-15 among them) and
-their keys, which [ADR-0024](0024-writes-what-git-writes.md),
-[ADR-0026](0026-merge-editor.md), and [ADR-0027](0027-discarding-work-only-after-confirmation.md)
+their keys, which [ADR-0022](0022-writes-what-git-writes.md),
+[ADR-0024](0024-merge-editor.md), and [ADR-0025](0025-discarding-work-only-after-confirmation.md)
 decide and which the terminal offers like every front end (G-18); a non-interactive printer of
 the commit graph; packaging `ocelli-cli`.
 
@@ -78,8 +78,8 @@ the commit graph; packaging `ocelli-cli`.
 
 - **Porting guitar's graph engine, or forking guitar** — the fastest route to a rich terminal
   application, but a second layout next to
-  [ADR-0016](0016-layout-after-pvigier-by-chunk.md) draws a different commit graph for the same
-  repository, and GPL-3.0 code cannot enter an MIT code base.
+  [ADR-0015](0015-layout-pure-functions-after-pvigier-by-chunk.md) draws a different commit graph
+  for the same repository, and GPL-3.0 code cannot enter an MIT code base.
 - **A non-interactive printer like `git log --graph`, with Ocelli's layout** — simple, no event
   loop, but no commit detail, no diff, and no navigation, which G-9 asks for; it remains a cheap
   addition on the same rasteriser.

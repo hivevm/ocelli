@@ -1,4 +1,4 @@
-//! The merge editor's file (ADR-0026, G-15): a conflicted file's text as the working directory
+//! The merge editor's file (ADR-0024, G-15): a conflicted file's text as the working directory
 //! holds it, and its blocks, found here once for every front end. A block runs from a `<<<<<<<`
 //! line to its `>>>>>>>` line, ours before `=======` and theirs after it, its base the `|||||||`
 //! section where the file holds one, as the `merge`, `diff3`, and `zdiff3` styles write them,
@@ -35,7 +35,7 @@ pub struct MergeBlock {
 /// Why the merge editor opens no conflicted file: a side deleted, a link, a submodule, or no
 /// text, or the file no longer conflicted or no longer a file. It names the file by its path below
 /// the repository alone, so every front end shows it as it stands, the browser's included
-/// (ADR-0026, ADR-0041).
+/// (ADR-0024, ADR-0038).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct NotOpened(pub String);
 
@@ -252,7 +252,7 @@ mod tests {
 
     #[test]
     fn a_block_in_the_merge_style_has_ours_and_theirs_and_no_base() {
-        // Verifies: ADR-0026, G-15
+        // Verifies: ADR-0024, G-15
         assert_eq!(
             blocks(MERGE),
             [MergeBlock {
@@ -268,7 +268,7 @@ mod tests {
 
     #[test]
     fn a_block_in_the_diff3_and_zdiff3_styles_has_its_base() {
-        // Verifies: ADR-0026, G-15
+        // Verifies: ADR-0024, G-15
         // zdiff3 writes the markers of diff3 and moves the lines both sides share out of them.
         for text in [
             "<<<<<<< HEAD\nours\n||||||| base\nbase\n=======\ntheirs\n>>>>>>> other\n",
@@ -291,7 +291,7 @@ mod tests {
 
     #[test]
     fn the_blocks_of_a_file_edited_since_are_those_still_marked() {
-        // Verifies: ADR-0026, G-15
+        // Verifies: ADR-0024, G-15
         let text = "kept\n<<<<<<< HEAD\nx\n=======\ny\n>>>>>>> o\n\
                     edited\n<<<<<<< HEAD\nunclosed\n=======\n";
         let found = blocks(text);
@@ -301,7 +301,7 @@ mod tests {
 
     #[test]
     fn a_block_without_a_base_takes_that_of_the_merged_block_with_its_ours_and_theirs() {
-        // Verifies: ADR-0026, G-15
+        // Verifies: ADR-0024, G-15
         let text = "<<<<<<< HEAD\r\nx\r\n=======\r\ny\r\n>>>>>>> o\r\nmid\r\n\
                     <<<<<<< HEAD\r\nedited\r\n=======\r\nq\r\n>>>>>>> o\r\n\
                     <<<<<<< HEAD\r\nx\r\n=======\r\ny\r\n>>>>>>> o\r\n";
@@ -316,7 +316,7 @@ mod tests {
 
     #[test]
     fn a_block_git_moved_the_lines_both_sides_share_out_of_takes_its_base() {
-        // Verifies: ADR-0026, G-15
+        // Verifies: ADR-0024, G-15
         // `git merge-file` of a,orig,z with ours a,same,A,z and theirs a,same,B,z.
         let text = "a\nsame\n<<<<<<< o\nA\n=======\nB\n>>>>>>> t\nz\n";
         let merged = "a\n<<<<<<< o\nsame\nA\n||||||| b\norig\n=======\nsame\nB\n>>>>>>> t\nz\n";
@@ -335,7 +335,7 @@ mod tests {
 
     #[test]
     fn a_block_git_joined_from_conflicts_close_together_takes_their_bases_and_the_lines_between() {
-        // Verifies: ADR-0026, G-15
+        // Verifies: ADR-0024, G-15
         let text = "a\n<<<<<<< o\no1\nmid\no2\n=======\nt1\nmid\nt2\n>>>>>>> t\nz\n\
                     <<<<<<< o\nx\n=======\ny\n>>>>>>> t\n";
         let merged = "a\n<<<<<<< o\no1\n||||||| b\nb1\n=======\nt1\n>>>>>>> t\nmid\n\
@@ -348,7 +348,7 @@ mod tests {
 
     #[test]
     fn a_merged_block_whose_side_holds_marker_lines_is_read_without_a_panic() {
-        // Verifies: ADR-0026, G-15
+        // Verifies: ADR-0024, G-15
         // Ours holds `=======` and `>>>>>>> q`: the merge reads as a block without a base,
         // which no run may hold.
         let merged = "a\n<<<<<<< o\n=======\n>>>>>>> q\n||||||| b\nx\n=======\ny\n>>>>>>> t\nz\n";
@@ -358,7 +358,7 @@ mod tests {
 
     #[test]
     fn a_run_of_three_blocks_in_crlf_takes_their_bases_in_the_file_s_line_endings() {
-        // Verifies: ADR-0026, G-15
+        // Verifies: ADR-0024, G-15
         let text = "<<<<<<< o\r\no1\r\nm\r\no2\r\nn\r\no3\r\n=======\r\n\
                     t1\r\nm\r\nt2\r\nn\r\nt3\r\n>>>>>>> t\r\n";
         let merged = "<<<<<<< o\no1\n||||||| b\nb1\n=======\nt1\n>>>>>>> t\nm\n\
@@ -372,7 +372,7 @@ mod tests {
 
     #[test]
     fn a_run_that_holds_more_than_the_block_or_other_sides_gives_it_no_base() {
-        // Verifies: ADR-0026, G-15
+        // Verifies: ADR-0024, G-15
         let text = "<<<<<<< o\nA\n=======\nB\n>>>>>>> t\n";
         // The shared lines differ, before and after.
         for merged in [
@@ -386,7 +386,7 @@ mod tests {
 
     #[test]
     fn a_base_of_the_file_s_own_is_kept() {
-        // Verifies: ADR-0026, G-15
+        // Verifies: ADR-0024, G-15
         let text = "<<<<<<< HEAD\nx\n||||||| b\nmine\n=======\ny\n>>>>>>> o\n";
         let merged = "<<<<<<< ours\nx\n||||||| base\nother\n=======\ny\n>>>>>>> theirs\n";
         let found = blocks_with_bases(text, merged);
@@ -396,7 +396,7 @@ mod tests {
 
     #[test]
     fn crlf_lines_are_read_and_written_back_as_the_file_had_them() {
-        // Verifies: ADR-0026, G-15
+        // Verifies: ADR-0024, G-15
         let opened = "a\r\n<<<<<<< HEAD\r\nx\r\n=======\r\ny\r\n>>>>>>> o\r\n";
         assert_eq!(blocks(opened)[0].ours, "x\r\n");
         assert_eq!(with_line_endings(opened, "a\nx\n"), "a\r\nx\r\n");
@@ -405,7 +405,7 @@ mod tests {
 
     #[test]
     fn a_marker_line_is_one_git_writes_and_no_line_that_only_begins_like_one() {
-        // Verifies: ADR-0026, G-15
+        // Verifies: ADR-0024, G-15
         for line in [
             "<<<<<<< HEAD",
             "=======",
@@ -425,7 +425,7 @@ mod tests {
 
     #[test]
     fn only_utf8_without_a_nul_byte_is_text() {
-        // Verifies: ADR-0026, G-15
+        // Verifies: ADR-0024, G-15
         assert_eq!(as_text(b"a\n"), Some("a\n"));
         assert_eq!(as_text(b"a\0b"), None);
         assert_eq!(as_text(&[0xff, 0xfe]), None);

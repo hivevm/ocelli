@@ -1,4 +1,4 @@
-# ADR-0018: An edge's shape follows its type, and a merge out of the main line takes a track of its own, so no edge runs through a commit
+# ADR-0017: An edge's shape follows its type, and a merge out of the main line takes a track of its own, so no edge runs through a commit
 
 - **Status:** 🟢 accepted
 - **Date:** 2026-10-06
@@ -21,11 +21,11 @@ parent's row and then up the **child's** lane. Nothing reserves that lane betwee
 when the merge commit's own first-parent line continues in it, the edge runs straight up through
 that line's commits.
 
-The forbidden lanes J(c) of [ADR-0016](0016-layout-after-pvigier-by-chunk.md) keep the
-**parent's** lane clear over the row range of its merge edges. They cannot protect the child's
+The forbidden lanes J(c) of [ADR-0015](0015-layout-pure-functions-after-pvigier-by-chunk.md) keep
+the **parent's** lane clear over the row range of its merge edges. They cannot protect the child's
 lane.
 
-The main line holds the leftmost lane alone ([ADR-0017](0017-main-line-in-the-leftmost-lane.md)).
+The main line holds the leftmost lane alone ([ADR-0016](0016-main-line-in-the-leftmost-lane.md)).
 J(c) cannot keep that lane clear for a merge out of it: when the main branch is merged into a
 feature branch, the merge edge's parent stands in lane 0, and the main line's own commits stand in
 lane 0 between the parent and the merge commit, so the merge edge's vertical run would pass
@@ -97,7 +97,7 @@ edges.
   measurement behind them: over 200 generated histories of 120 commits, side-keyed shapes ran 361
   merge edges to the right through a commit; with type-keyed shapes no edge did over 2 000.
 - The count of merges out of the main line above, taken over 200 generated histories of 150
-  commits with the main line of [ADR-0017](0017-main-line-in-the-leftmost-lane.md).
+  commits with the main line of [ADR-0016](0016-main-line-in-the-leftmost-lane.md).
 
 ## Consequences
 

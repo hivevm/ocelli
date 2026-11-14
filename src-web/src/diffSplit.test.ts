@@ -1,4 +1,4 @@
-// Verifies: ADR-0036
+// Verifies: ADR-0034
 import { describe, expect, test } from 'bun:test';
 import { toSplitRows } from './diffSplit.ts';
 import type { DiffLine, DiffLineKind } from './types.ts';

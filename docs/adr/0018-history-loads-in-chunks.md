@@ -1,4 +1,4 @@
-# ADR-0019: The history loads in chunks of 3 000 commits, the newest first, until all of it is loaded
+# ADR-0018: The history loads in chunks of 3 000 commits, the newest first, until all of it is loaded
 
 - **Status:** 🟢 accepted
 - **Date:** 2026-10-06
@@ -32,16 +32,16 @@ over every ref, without a topological sort: the walk starts from the refs' commi
 keeps the commits it has reached ordered by committer date, and yields each once one of its
 children has been yielded. The first chunk is laid out and shown as soon as it is read, the stash
 and working-directory nodes ride with it
-([ADR-0020](0020-synthetic-nodes-in-the-first-chunk.md)), and every further chunk is read on a
+([ADR-0019](0019-synthetic-nodes-in-the-first-chunk.md)), and every further chunk is read on a
 background thread and appended until the walk ends, with the progress reported (G-17) and a load
 of another repository cancelling the walk of the previous one (a new load session). A commit
 yielded after its parent, a **late child**, is laid out as
-[ADR-0016](0016-layout-after-pvigier-by-chunk.md) decides.
+[ADR-0015](0015-layout-pure-functions-after-pvigier-by-chunk.md) decides.
 
-**Out of scope:** how a chunk is laid out, which [ADR-0016](0016-layout-after-pvigier-by-chunk.md)
-decides; how a front end reads the rows, which [ADR-0021](0021-row-window-margin.md)
-decides; loading only what is scrolled to (the maintainer chose to load the whole history); a
-chunk size the developer sets.
+**Out of scope:** how a chunk is laid out, which
+[ADR-0015](0015-layout-pure-functions-after-pvigier-by-chunk.md) decides; how a front end reads the
+rows, which [ADR-0020](0020-row-window-and-virtual-rendering.md) decides; loading only what is
+scrolled to (the maintainer chose to load the whole history); a chunk size the developer sets.
 
 ## Alternatives considered
 
@@ -84,11 +84,11 @@ chunk size the developer sets.
   chunk share a date, the first chunk holds the same commits a topological walk would, so the
   reference tests hold.
 - Negative / trade-offs: where a clock ran wrong, a late child arrives after its parent and cannot
-  be placed above it ([ADR-0016](0016-layout-after-pvigier-by-chunk.md)); a load runs on until the
-  whole history is read, and memory grows with it; the stash and working-directory nodes are placed
-  against the first chunk only; cancelling a walk is state in every front end; the first chunk of a
-  corpus repository whose dates run backwards may hold other commits than a topological walk would,
-  which the Q-1 records reflect.
+  be placed above it ([ADR-0015](0015-layout-pure-functions-after-pvigier-by-chunk.md)); a load runs
+  on until the whole history is read, and memory grows with it; the stash and working-directory
+  nodes are placed against the first chunk only; cancelling a walk is state in every front end; the
+  first chunk of a corpus repository whose dates run backwards may hold other commits than a
+  topological walk would, which the Q-1 records reflect.
 - Follow-ups: none; the Q-1 records are measured on the corpus over the first chunk
   ([`scripts/measure-crossings.sh`](../../scripts/measure-crossings.sh)).
 
