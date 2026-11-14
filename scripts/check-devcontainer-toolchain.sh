@@ -19,7 +19,9 @@ set -uo pipefail
 source "$(dirname "${BASH_SOURCE[0]}")/lib/root.sh"
 usage="scripts/check-devcontainer-toolchain.sh [--root <dir>]"
 enter_root "${BASH_SOURCE[0]}" "$usage" "$@"
-rest_args "${BASH_SOURCE[0]}" "$usage" 0 "${ARGS[@]}"
+# The build job runs this script on macOS with the bash the system ships, 3.2, where an empty array
+# expanded whole is unbound under set -u; the form below expands to nothing there.
+rest_args "${BASH_SOURCE[0]}" "$usage" 0 ${ARGS[@]+"${ARGS[@]}"}
 CONFIG="$ROOT/.devcontainer/devcontainer.json"
 DOCKERFILE="$ROOT/.devcontainer/Dockerfile"
 TOOLCHAIN="$ROOT/rust-toolchain.toml"
